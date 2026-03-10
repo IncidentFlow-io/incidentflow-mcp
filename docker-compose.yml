@@ -1,0 +1,20 @@
+version: "3.9"
+
+services:
+  mcp:
+    build: .
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - INCIDENTFLOW_PAT=${INCIDENTFLOW_PAT:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
