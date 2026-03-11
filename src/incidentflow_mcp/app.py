@@ -1,21 +1,23 @@
 """
-FastAPI application factory.
+FastAPI application factory — thin composition layer.
 
-Wires together:
-    - BearerAuthMiddleware  (local PAT auth)
-    - /healthz              (liveness probe)
-    - /mcp                  (Streamable HTTP MCP transport — direct ASGI route)
+Wires together auth, middleware, ops routes, exception handlers, and the MCP
+ASGI proxy route.  Implementation details live in the http/ subpackage.
 """
 
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
+from starlette.types import ASGIApp
 
 from incidentflow_mcp.auth.middleware import BearerAuthMiddleware
 from incidentflow_mcp.config import get_settings
+from incidentflow_mcp.http.exception_handlers import register_exception_handlers
+from incidentflow_mcp.http.middleware.request_id import RequestIDMiddleware
+from incidentflow_mcp.http.routers.ops import create_ops_router
+from incidentflow_mcp.http.routes.mcp_proxy import register_mcp_proxy_route
 from incidentflow_mcp.logging_config import configure_logging
 from incidentflow_mcp.mcp.server import create_mcp_server
 
@@ -31,38 +33,49 @@ def create_app() -> FastAPI:
     """
     settings = get_settings()
 
+    if settings.environment == "production" and settings.incidentflow_pat is None:
+        raise RuntimeError(
+            "INCIDENTFLOW_PAT must be set in production. "
+            "Set it via the INCIDENTFLOW_PAT environment variable or .env file."
+        )
+
     # Create the MCP server once so both the lifespan and the route handler
     # share the same session_manager instance.
     mcp_server = create_mcp_server()
-    mcp_http_app = mcp_server.streamable_http_app()
+    mcp_http_app: ASGIApp = mcp_server.streamable_http_app()
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         configure_logging(settings.log_level)
 
-        if settings.incidentflow_pat is None:
-            logger.warning(
-                "INCIDENTFLOW_PAT is not set — MCP endpoint is UNPROTECTED. "
-                "Set INCIDENTFLOW_PAT in your .env file for local dev auth."
+        try:
+            if settings.incidentflow_pat is None:
+                logger.warning(
+                    "INCIDENTFLOW_PAT is not set — MCP endpoint is UNPROTECTED. "
+                    "Set INCIDENTFLOW_PAT in your .env file for local dev auth."
+                )
+            else:
+                logger.info("auth: Bearer PAT protection is active")
+
+            logger.info(
+                "starting %s v%s on %s:%d",
+                settings.mcp_server_name,
+                settings.mcp_server_version,
+                settings.host,
+                settings.port,
             )
-        else:
-            logger.info("auth: Bearer PAT protection is active")
 
-        logger.info(
-            "starting %s v%s on %s:%d",
-            settings.mcp_server_name,
-            settings.mcp_server_version,
-            settings.host,
-            settings.port,
-        )
+            # Drive the StreamableHTTPSessionManager task group.
+            # We enter run() ourselves because FastAPI does not forward lifespan
+            # events to ASGI apps that are called directly (not via Mount).
+            async with mcp_server.session_manager.run():
+                yield
 
-        # Drive the StreamableHTTPSessionManager task group.
-        # We enter run() ourselves because FastAPI does not forward lifespan
-        # events to ASGI apps that are called directly (not via Mount).
-        async with mcp_server.session_manager.run():
-            yield
-
-        logger.info("shutdown complete")
+        except Exception:
+            logger.exception("application lifespan failed")
+            raise
+        finally:
+            logger.info("shutdown complete")
 
     app = FastAPI(
         title="IncidentFlow MCP",
@@ -74,44 +87,17 @@ def create_app() -> FastAPI:
         redoc_url="/redoc" if settings.environment != "production" else None,
     )
 
-    # ------------------------------------------------------------------
-    # Auth middleware — protects all paths except those in _PUBLIC_PATHS
-    # ------------------------------------------------------------------
+    app.state.settings = settings
+    app.state.mcp_server = mcp_server
+    app.state.mcp_http_app = mcp_http_app
+
+    # Middleware stack (outermost → innermost; add_middleware prepends).
     app.add_middleware(BearerAuthMiddleware)
+    app.add_middleware(RequestIDMiddleware)
 
-    # ------------------------------------------------------------------
-    # Health endpoint
-    # ------------------------------------------------------------------
-
-    @app.get("/healthz", tags=["ops"], summary="Liveness probe")
-    async def healthz() -> JSONResponse:
-        """Returns 200 OK. Used by Docker/Kubernetes liveness probes — no auth required."""
-        return JSONResponse(
-            content={
-                "status": "ok",
-                "service": settings.mcp_server_name,
-                "version": settings.mcp_server_version,
-            }
-        )
-
-    # ------------------------------------------------------------------
-    # MCP endpoint — forward directly to the FastMCP ASGI app.
-    #
-    # We do NOT use app.mount() because Starlette's Mount strips the path
-    # prefix before calling the sub-app, leaving scope["path"]="" for a
-    # request to exactly /mcp.  FastMCP's internal route is registered at
-    # "/" which never matches "".
-    #
-    # Instead we register a catch-all APIRoute at /mcp that calls the
-    # FastMCP ASGI app directly with the original scope untouched.
-    # FastMCP (streamable_http_path="/mcp") expects scope["path"]=="/mcp"
-    # and handles it correctly.
-    # ------------------------------------------------------------------
-
-    @app.api_route("/mcp", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
-    async def mcp_endpoint(request: Request) -> None:
-        """Proxy all /mcp requests directly to the FastMCP ASGI app."""
-        await mcp_http_app(request.scope, request.receive, request._send)  # type: ignore[attr-defined]
+    register_exception_handlers(app)
+    app.include_router(create_ops_router(settings))
+    register_mcp_proxy_route(routes=app.router.routes, path="/mcp", app=mcp_http_app)
 
     return app
 
