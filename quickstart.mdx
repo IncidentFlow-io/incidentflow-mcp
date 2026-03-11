@@ -1,0 +1,49 @@
+---
+title: "Quickstart"
+description: "Run IncidentFlow MCP locally and verify the endpoint."
+---
+
+## Requirements
+
+- Python 3.12+
+- Project dependencies installed from `pyproject.toml`
+
+## Start server
+
+```bash
+uvicorn incidentflow_mcp.app:create_app --factory --host 127.0.0.1 --port 8000
+```
+
+Or through CLI script:
+
+```bash
+incidentflow-mcp serve --host 127.0.0.1 --port 8000
+```
+
+## Check health endpoint
+
+```bash
+curl http://127.0.0.1:8000/healthz
+```
+
+Expected response:
+
+```json
+{
+  "status": "ok",
+  "service": "incidentflow-mcp",
+  "version": "0.1.0"
+}
+```
+
+## Generate a token
+
+```bash
+incidentflow-mcp token create --name "local-dev" --scopes mcp:read,mcp:tools:run
+```
+
+Use the printed token:
+
+```bash
+curl -H "Authorization: Bearer <TOKEN>" http://127.0.0.1:8000/mcp
+```

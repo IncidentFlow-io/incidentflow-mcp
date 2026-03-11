@@ -13,6 +13,7 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from incidentflow_mcp.auth.middleware import BearerAuthMiddleware
 from incidentflow_mcp.config import get_settings
@@ -79,13 +80,24 @@ def create_app() -> FastAPI:
     # ------------------------------------------------------------------
     app.add_middleware(BearerAuthMiddleware)
 
+    # Local docs/playground run on a different origin (e.g. localhost:3000).
+    # Add CORS AFTER auth middleware so CORS becomes outermost and
+    # also decorates error responses (401/403) returned by auth.
+    if settings.environment != "production":
+        app.add_middleware(
+            CORSMiddleware,
+            # Mintlify dev can run on different local ports; allow any localhost port.
+            allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
     # ------------------------------------------------------------------
     # Health endpoint
     # ------------------------------------------------------------------
 
-    @app.get("/healthz", tags=["ops"], summary="Liveness probe")
-    async def healthz() -> JSONResponse:
-        """Returns 200 OK. Used by Docker/Kubernetes liveness probes — no auth required."""
+    def _health_response() -> JSONResponse:
         return JSONResponse(
             content={
                 "status": "ok",
@@ -93,6 +105,16 @@ def create_app() -> FastAPI:
                 "version": settings.mcp_server_version,
             }
         )
+
+    @app.get("/health", tags=["ops"], summary="Liveness probe")
+    async def health() -> JSONResponse:
+        """Primary health endpoint for external probes/docs."""
+        return _health_response()
+
+    @app.get("/healthz", tags=["ops"], summary="Liveness probe (legacy)", include_in_schema=False)
+    async def healthz() -> JSONResponse:
+        """Legacy alias retained for backward compatibility."""
+        return _health_response()
 
     # ------------------------------------------------------------------
     # MCP endpoint — forward directly to the FastMCP ASGI app.
@@ -108,10 +130,19 @@ def create_app() -> FastAPI:
     # and handles it correctly.
     # ------------------------------------------------------------------
 
-    @app.api_route("/mcp", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD"])
-    async def mcp_endpoint(request: Request) -> None:
-        """Proxy all /mcp requests directly to the FastMCP ASGI app."""
+    @app.get("/mcp", operation_id="mcp_transport_get", summary="MCP transport (GET)")
+    async def mcp_endpoint_get(request: Request) -> None:
+        """Proxy GET /mcp requests directly to the FastMCP ASGI app."""
+        await mcp_http_app(request.scope, request.receive, request._send)  # type: ignore[attr-defined]
+
+    @app.post("/mcp", operation_id="mcp_transport_post", summary="MCP transport (POST)")
+    async def mcp_endpoint_post(request: Request) -> None:
+        """Proxy POST /mcp requests directly to the FastMCP ASGI app."""
+        await mcp_http_app(request.scope, request.receive, request._send)  # type: ignore[attr-defined]
+
+    @app.api_route("/mcp", methods=["PUT", "DELETE", "OPTIONS"], include_in_schema=False)
+    async def mcp_endpoint_passthrough(request: Request) -> None:
+        """Proxy non-documented /mcp methods directly to the FastMCP ASGI app."""
         await mcp_http_app(request.scope, request.receive, request._send)  # type: ignore[attr-defined]
 
     return app
-

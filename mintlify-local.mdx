@@ -1,0 +1,43 @@
+---
+title: "Mintlify Local"
+description: "Install Mintlify CLI and run docs locally."
+---
+
+## 1) Use Node LTS
+
+`mint dev` does not support Node 25+. Use Node 20 or 22.
+
+If you use `nvm`:
+
+```bash
+nvm install 20
+nvm use 20
+```
+
+## 2) Install Mintlify CLI
+
+```bash
+npm install -g mint
+mint --version
+```
+
+## 3) Generate OpenAPI from app
+
+```bash
+incidentflow-mcp openapi export --output openapi.json
+```
+
+## 4) Run docs locally
+
+```bash
+mint dev --no-open
+```
+
+Open local URL from CLI output (usually `http://localhost:3000`).
+
+## 5) Typical update workflow
+
+1. Change API code.
+2. Re-export OpenAPI.
+3. Update MDX docs in `api-docs/`.
+4. Run `mint dev` and validate pages/playground.

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "IncidentFlow MCP",
+  "theme": "mint",
+  "api": {
+    "playground": {
+      "display": "interactive",
+      "proxy": true
+    },
+    "examples": {
+      "languages": ["curl", "python", "javascript"],
+      "defaults": "required"
+    },
+    "mdx": {
+      "server": "https://mcp.dmytroserbeniuk.com"
+    }
+  },
+  "colors": {
+    "primary": "#0B6E4F",
+    "light": "#EAF8F2",
+    "dark": "#0B6E4F"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Getting Started",
+        "pages": ["index", "quickstart", "authentication", "mintlify-local"]
+      },
+      {
+        "group": "MCP",
+        "pages": ["mcp-tools"]
+      },
+      {
+        "group": "API Guides",
+        "pages": [
+          "api-reference",
+          "api-docs/index",
+          "api-docs/health",
+          "api-docs/mcp-transport",
+          "api-docs/errors",
+          "api-docs/auth"
+        ]
+      },
+      {
+        "group": "Endpoint Reference",
+        "openapi": "openapi.json"
+      }
+    ]
+  }
+}

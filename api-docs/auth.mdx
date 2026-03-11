@@ -1,0 +1,34 @@
+---
+title: "Auth"
+description: "Bearer token model, scopes, and local token management."
+---
+
+## Send token
+
+```http
+Authorization: Bearer <token>
+```
+
+Query-token auth is rejected.
+
+## Token types
+
+1. Structured PAT: `if_pat_local_<token_id>.<secret>`
+2. Legacy static token from `INCIDENTFLOW_PAT`
+
+Structured PAT supports revocation, expiry, and scope checks.
+
+## Scope map
+
+- `/mcp*` -> `mcp:read`
+- `/mcp/tools*` -> `mcp:tools:run`
+- `/mcp/resources*` -> `mcp:read`
+- `/admin*` -> `admin`
+
+## Create/list/revoke tokens
+
+```bash
+incidentflow-mcp token create --name "local-dev" --scopes mcp:read,mcp:tools:run
+incidentflow-mcp token list
+incidentflow-mcp token revoke <token_id>
+```

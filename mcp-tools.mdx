@@ -1,0 +1,57 @@
+---
+title: "MCP Tools"
+description: "Registered MCP tool contracts and examples."
+---
+
+## `incident_summary`
+
+Returns a structured summary for one incident.
+
+Input:
+
+```json
+{
+  "incident_id": "INC-001",
+  "include_timeline": true,
+  "include_affected_services": true
+}
+```
+
+Output fields:
+
+- `incident_id`, `title`, `severity`, `status`, `summary`
+- `affected_services`: list of service names
+- `timeline`: list of timeline events (`timestamp`, `description`, `actor`)
+- `recommendations`: list of next actions
+
+## `correlate_alerts`
+
+Groups alerts into clusters by service/label affinity and time window.
+
+Input (`alerts_json` is a JSON string):
+
+```json
+{
+  "alerts_json": "[{\"alert_id\":\"A-1\",\"name\":\"DB latency\",\"service\":\"payments-service\",\"severity\":\"high\",\"status\":\"firing\",\"fired_at\":\"2026-02-03T12:00:00Z\",\"labels\":{\"region\":\"eu-central-1\"}}]",
+  "window_minutes": 60,
+  "min_cluster_size": 2
+}
+```
+
+Output fields:
+
+- `total_alerts`
+- `clusters` with:
+  - `cluster_id`, `alert_ids`, `services`
+  - `dominant_severity`, `likely_root_cause`, `confidence`
+- `uncorrelated_alert_ids`
+- `analysis_window_minutes`
+- `summary`
+
+## Discover tools from CLI
+
+```bash
+incidentflow-mcp tools list --verbose
+incidentflow-mcp tools show incident_summary
+incidentflow-mcp tools show correlate_alerts
+```

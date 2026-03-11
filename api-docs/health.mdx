@@ -1,0 +1,22 @@
+---
+title: "Health"
+description: "Public liveness endpoint."
+openapi: "/openapi.json GET /health"
+---
+
+`/health` is a public endpoint and does not require authentication.
+
+Typical usage:
+
+- Kubernetes/Docker liveness probe.
+- Basic smoke check after deployment.
+
+Expected response body:
+
+```json
+{
+  "status": "healthy",
+  "service": "mcp-incident-analyst",
+  "version": "1.0.0"
+}
+```

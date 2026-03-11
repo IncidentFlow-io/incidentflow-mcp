@@ -12,11 +12,13 @@ Usage:
     uv run incidentflow-mcp tools list --verbose
     uv run incidentflow-mcp tools list --json-output
     uv run incidentflow-mcp tools show incident_summary
+    uv run incidentflow-mcp openapi export --output openapi.json
     uv run incidentflow-mcp --help
 """
 
 import json
 import logging
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import click
@@ -291,3 +293,116 @@ def tools_show(tool_name: str) -> None:
             click.echo(f"    - {k}: {v}")
     click.echo()
 
+
+# ---------------------------------------------------------------------------
+# openapi — schema export
+# ---------------------------------------------------------------------------
+
+
+@cli.group("openapi")
+def openapi_group() -> None:
+    """Generate and export OpenAPI schema."""
+
+
+@openapi_group.command("export")
+@click.option(
+    "--output",
+    default="openapi.json",
+    show_default=True,
+    help="Destination path for generated OpenAPI schema",
+)
+@click.option(
+    "--server-url",
+    default=None,
+    help="Optional server URL to set in schema (e.g. https://api.example.com)",
+)
+def openapi_export(output: str, server_url: str | None) -> None:
+    """Export OpenAPI JSON from the current FastAPI app configuration."""
+    from incidentflow_mcp.app import create_app
+
+    app = create_app()
+    schema = app.openapi()
+
+    # Auth is enforced by middleware, so annotate it explicitly in OpenAPI.
+    components = schema.setdefault("components", {})
+    security_schemes = components.setdefault("securitySchemes", {})
+    security_schemes["bearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "PAT",
+    }
+
+    mcp_path = schema.get("paths", {}).get("/mcp", {})
+    for method in ("get", "post"):
+        operation = mcp_path.get(method)
+        if isinstance(operation, dict):
+            operation["security"] = [{"bearerAuth": []}]
+
+    # FastAPI cannot infer a body schema for proxy-style Request handlers,
+    # so we enrich MCP POST manually for docs/playground usability.
+    post_op = mcp_path.get("post")
+    if isinstance(post_op, dict):
+        post_op["parameters"] = [
+            {
+                "name": "Accept",
+                "in": "header",
+                "required": True,
+                "description": "MCP streamable HTTP requires both media types.",
+                "schema": {
+                    "type": "string",
+                    "default": "application/json, text/event-stream",
+                },
+            },
+            {
+                "name": "MCP-Protocol-Version",
+                "in": "header",
+                "required": False,
+                "schema": {"type": "string", "default": "2025-03-26"},
+            },
+        ]
+        post_op["requestBody"] = {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"type": "object", "additionalProperties": True},
+                    "examples": {
+                        "initialize": {
+                            "summary": "MCP initialize request",
+                            "value": {
+                                "jsonrpc": "2.0",
+                                "id": 1,
+                                "method": "initialize",
+                                "params": {
+                                    "protocolVersion": "2025-03-26",
+                                    "clientInfo": {"name": "mintlify-playground", "version": "1.0.0"},
+                                    "capabilities": {}
+                                }
+                            }
+                        }
+                    },
+                }
+            },
+        }
+        post_op["responses"] = {
+            "200": {
+                "description": "MCP stream response",
+                "content": {
+                    "text/event-stream": {
+                        "schema": {"type": "string"}
+                    }
+                },
+            },
+            "400": {"description": "Invalid request (e.g. missing/invalid Content-Type)"},
+            "406": {"description": "Missing required Accept header"},
+        }
+
+    if server_url:
+        schema["servers"] = [{"url": server_url, "description": "Configured by CLI export"}]
+
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(schema, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    click.echo(f"OpenAPI exported to: {output_path}")

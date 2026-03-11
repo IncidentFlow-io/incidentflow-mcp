@@ -1,0 +1,22 @@
+---
+title: "IncidentFlow MCP"
+description: "HTTP-based MCP server for incident management workflows."
+---
+
+`incidentflow-mcp` is a FastAPI application that exposes an MCP endpoint over Streamable HTTP.
+
+## What is included
+
+- `GET /healthz` public health check endpoint.
+- `POST /mcp` MCP transport endpoint (protected by Bearer token in normal mode).
+- Built-in MCP tools:
+  - `incident_summary`
+  - `correlate_alerts`
+
+## Runtime notes
+
+- API docs (`/docs`, `/redoc`, `/openapi.json`) are enabled when `ENVIRONMENT != production`.
+- In `production`, Swagger/ReDoc endpoints are disabled.
+- If no PAT/token is configured, server can run in unprotected mode (for local dev only).
+
+Continue with [Quickstart](./quickstart).

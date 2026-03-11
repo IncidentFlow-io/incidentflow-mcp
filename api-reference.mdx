@@ -1,0 +1,57 @@
+---
+title: "API Reference"
+description: "HTTP endpoints and OpenAPI usage in Mintlify."
+---
+
+## How OpenAPI is generated
+
+OpenAPI is generated from the FastAPI app (single source of truth).
+
+Use CLI export:
+
+```bash
+incidentflow-mcp openapi export --output openapi.json
+```
+
+Optional server URL override:
+
+```bash
+incidentflow-mcp openapi export --output openapi.json --server-url https://api.your-domain.com
+```
+
+Runtime schema is also available at:
+
+- `GET /openapi.json` (when `ENVIRONMENT != production`)
+- Swagger UI: `/docs`
+- ReDoc: `/redoc`
+
+## Endpoints
+
+- `GET /health`: public liveness probe.
+- `/mcp`: MCP Streamable HTTP endpoint proxied to FastMCP ASGI app.
+
+## Work with Mintlify API docs
+
+1. Export schema after API changes:
+
+```bash
+incidentflow-mcp openapi export --output openapi.json
+```
+
+2. Configure Mintlify to use this file (in `docs.json`):
+
+```json
+{
+  "openapi": ["openapi.json"]
+}
+```
+
+3. Build endpoint pages in Mintlify from that schema (or use API playground blocks).
+
+4. Re-export schema whenever routes/models change.
+
+## Recommended flow
+
+- Keep `openapi.json` versioned in git for stable docs.
+- Use live `/openapi.json` only for internal preview.
+- In production (`ENVIRONMENT=production`) publish the exported static spec with docs.

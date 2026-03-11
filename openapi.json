@@ -1,0 +1,145 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "IncidentFlow MCP",
+    "description": "HTTP-based MCP server for IncidentFlow AI-powered incident management",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "ops"
+        ],
+        "summary": "Liveness probe",
+        "description": "Primary health endpoint for external probes/docs.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp": {
+      "get": {
+        "summary": "MCP transport (GET)",
+        "description": "Proxy GET /mcp requests directly to the FastMCP ASGI app.",
+        "operationId": "mcp_transport_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "summary": "MCP transport (POST)",
+        "description": "Proxy POST /mcp requests directly to the FastMCP ASGI app.",
+        "operationId": "mcp_transport_post",
+        "responses": {
+          "200": {
+            "description": "MCP stream response",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request (e.g. missing/invalid Content-Type)"
+          },
+          "406": {
+            "description": "Missing required Accept header"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": true,
+            "description": "MCP streamable HTTP requires both media types.",
+            "schema": {
+              "type": "string",
+              "default": "application/json, text/event-stream"
+            }
+          },
+          {
+            "name": "MCP-Protocol-Version",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "2025-03-26"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "examples": {
+                "initialize": {
+                  "summary": "MCP initialize request",
+                  "value": {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                      "protocolVersion": "2025-03-26",
+                      "clientInfo": {
+                        "name": "mintlify-playground",
+                        "version": "1.0.0"
+                      },
+                      "capabilities": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "PAT"
+      }
+    }
+  },
+  "servers": [
+    {
+      "url": "https://mcp.dmytroserbeniuk.com",
+      "description": "Configured by CLI export"
+    }
+  ]
+}

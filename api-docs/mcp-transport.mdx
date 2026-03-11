@@ -1,0 +1,61 @@
+---
+title: "MCP Transport"
+description: "Streamable HTTP transport endpoint for MCP requests."
+openapi: "/openapi.json GET /mcp"
+---
+
+`GET /mcp` exposes MCP/OAuth metadata on deployed environments and is convenient for quick inspection in docs.
+
+## POST transport
+
+`POST /mcp` is the primary Streamable HTTP transport for MCP protocol messages.
+The response is `text/event-stream`, so use curl or an MCP client for reliable testing.
+
+Requirements:
+
+- `Authorization: Bearer <token>` in protected mode
+- `Content-Type: application/json`
+- `Accept: application/json, text/event-stream`
+- Optional: `MCP-Protocol-Version: 2025-03-26`
+- Scope required by policy: `mcp:read` for `/mcp*`.
+- Payload format is MCP protocol JSON; tool-level contracts are documented in [MCP Tools](/mcp-tools).
+
+Initialize payload:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocolVersion": "2025-03-26",
+    "clientInfo": {
+      "name": "mintlify-playground",
+      "version": "1.0.0"
+    },
+    "capabilities": {}
+  }
+}
+```
+
+Initialize request:
+
+```bash
+curl -i -X POST 'https://mcp.dmytroserbeniuk.com/mcp' \
+  -H 'Authorization: Bearer <TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-03-26' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","clientInfo":{"name":"curl","version":"1.0.0"},"capabilities":{}}}'
+```
+
+List tools:
+
+```bash
+curl -i -X POST 'https://mcp.dmytroserbeniuk.com/mcp' \
+  -H 'Authorization: Bearer <TOKEN>' \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -H 'MCP-Protocol-Version: 2025-03-26' \
+  --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```

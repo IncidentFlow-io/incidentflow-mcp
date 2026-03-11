@@ -1,0 +1,35 @@
+---
+title: "Errors"
+description: "Authentication and authorization error formats."
+---
+
+## `401 Unauthorized`
+
+Returned when token is missing, malformed, invalid, expired, or revoked.
+
+Example:
+
+```json
+{
+  "detail": "Missing or malformed Authorization: Bearer <token>."
+}
+```
+
+## `403 Forbidden`
+
+Returned when token is valid but missing required scope (with scope enforcement enabled).
+
+Example:
+
+```json
+{
+  "error": "insufficient_scope",
+  "required_scope": "mcp:read"
+}
+```
+
+## Common causes
+
+1. Token sent in query params (`token` or `access_token`) instead of header.
+2. Token created without required scopes.
+3. `ENVIRONMENT=production` with strict scope checks enabled.

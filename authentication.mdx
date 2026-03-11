@@ -1,0 +1,37 @@
+---
+title: "Authentication"
+description: "Bearer PAT auth model, scopes, and behavior by environment."
+---
+
+## Overview
+
+Authentication is implemented by `BearerAuthMiddleware`.
+
+- Public paths: `/healthz`, `/docs`, `/redoc`, `/openapi.json`
+- Protected paths: `/mcp` and everything not listed as public
+
+Tokens must be sent only in `Authorization: Bearer <token>`.
+Query parameters (`token`, `access_token`) are rejected with `401`.
+
+## Supported token modes
+
+- Structured PAT from local token repository:
+  - Format: `if_pat_local_<token_id>.<secret>`
+  - Supports revocation, expiration, and scope checks
+- Legacy static token via `INCIDENTFLOW_PAT`:
+  - Simple constant-time comparison
+  - No scope-level enforcement for this mode
+
+## Scope policy
+
+- `/admin*` requires `admin`
+- `/mcp/tools*` requires `mcp:tools:run`
+- `/mcp/resources*` requires `mcp:read`
+- `/mcp*` requires `mcp:read`
+
+If `ENFORCE_SCOPES=true` (or `ENVIRONMENT=production` by default), missing scope returns `403`.
+
+## Unprotected mode
+
+If `INCIDENTFLOW_PAT` is empty and no repo tokens exist, requests without `Authorization` are allowed.
+Use this mode only for local development.
