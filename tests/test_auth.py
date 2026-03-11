@@ -193,7 +193,8 @@ class TestScopeEnforcement:
     ) -> tuple[TestClient, str]:
         settings = Settings(
             incidentflow_pat=None,
-            environment="production" if enforce else "development",
+            environment="test",
+            enforce_scopes=enforce or None,
             log_level="warning",
         )
         monkeypatch.setattr("incidentflow_mcp.config._settings", settings)

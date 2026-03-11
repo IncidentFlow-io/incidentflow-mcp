@@ -11,6 +11,7 @@ import logging
 from mcp.server.fastmcp import FastMCP
 
 from incidentflow_mcp.config import get_settings
+from incidentflow_mcp.mcp.resources import register_resources
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -93,5 +94,10 @@ def create_mcp_server() -> FastMCP:
         )
         result: CorrelateAlertsOutput = _correlate_alerts_impl(input_data)
         return result.model_dump_json(indent=2)
+
+    # ------------------------------------------------------------------
+    # Resources
+    # ------------------------------------------------------------------
+    register_resources(mcp)
 
     return mcp
