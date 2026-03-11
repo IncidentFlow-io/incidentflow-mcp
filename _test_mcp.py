@@ -4,7 +4,7 @@ import json
 import httpx
 
 BASE = "http://localhost:8000"
-TOKEN = "if_pat_local_8af60dcd.5XLFmgcqjrzPWU4LqjWUjDbV4sD8bwI2X4_wJgwu5Nk"
+TOKEN = ""
 
 MCP_HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
