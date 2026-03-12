@@ -35,6 +35,8 @@ COPY --from=deps /app/.venv /app/.venv
 # Copy application source
 COPY src/ ./src/
 COPY pyproject.toml ./
+COPY uv.lock* ./
+COPY README.md ./
 
 # Install the project itself (no deps, already installed)
 RUN uv sync --frozen --no-dev

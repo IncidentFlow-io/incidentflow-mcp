@@ -51,7 +51,14 @@ from incidentflow_mcp.config import get_settings
 logger = logging.getLogger(__name__)
 
 # Paths that do NOT require authentication
-_PUBLIC_PATHS: frozenset[str] = frozenset({"/healthz", "/readyz", "/docs", "/openapi.json", "/redoc"})
+_PUBLIC_PATHS: frozenset[str] = frozenset({
+    "/healthz",
+    "/readyz",
+    "/install.sh",
+    "/docs",
+    "/openapi.json",
+    "/redoc",
+})
 
 # ---------------------------------------------------------------------------
 # Scope policy — maps request path prefixes to the required token scope.
@@ -231,4 +238,3 @@ def _client_ip(request: Request) -> str:
     if request.client:
         return request.client.host
     return "unknown"
-
