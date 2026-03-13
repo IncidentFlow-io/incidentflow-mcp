@@ -20,6 +20,11 @@ from incidentflow_mcp.http.routers.ops import create_ops_router
 from incidentflow_mcp.http.routes.mcp_proxy import register_mcp_proxy_route
 from incidentflow_mcp.logging_config import configure_logging
 from incidentflow_mcp.mcp.server import create_mcp_server
+from incidentflow_mcp.rate_limit.bucket_keys import BucketKeyResolver
+from incidentflow_mcp.rate_limit.middleware import TransportRateLimitMiddleware
+from incidentflow_mcp.rate_limit.policy import DefaultPolicyResolver
+from incidentflow_mcp.rate_limit.redis_store import RedisRateLimitStore
+from incidentflow_mcp.rate_limit.tool_guard import ToolInvocationGuard
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,10 @@ def create_app() -> FastAPI:
     # share the same session_manager instance.
     mcp_server = create_mcp_server()
     mcp_http_app: ASGIApp = mcp_server.streamable_http_app()
+    rate_limit_store = RedisRateLimitStore(settings.redis_url)
+    rate_limit_policy = DefaultPolicyResolver(settings)
+    rate_limit_bucket_keys = BucketKeyResolver()
+    app_tool_guard = ToolInvocationGuard(rate_limit_store, rate_limit_policy, rate_limit_bucket_keys)
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -75,6 +84,7 @@ def create_app() -> FastAPI:
             logger.exception("application lifespan failed")
             raise
         finally:
+            await rate_limit_store.close()
             logger.info("shutdown complete")
 
     app = FastAPI(
@@ -90,8 +100,13 @@ def create_app() -> FastAPI:
     app.state.settings = settings
     app.state.mcp_server = mcp_server
     app.state.mcp_http_app = mcp_http_app
+    app.state.rate_limit_store = rate_limit_store
+    app.state.rate_limit_policy = rate_limit_policy
+    app.state.rate_limit_bucket_keys = rate_limit_bucket_keys
+    app.state.tool_guard = app_tool_guard
 
     # Middleware stack (outermost → innermost; add_middleware prepends).
+    app.add_middleware(TransportRateLimitMiddleware, settings=settings)
     app.add_middleware(BearerAuthMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
@@ -100,4 +115,3 @@ def create_app() -> FastAPI:
     register_mcp_proxy_route(routes=app.router.routes, path="/mcp", app=mcp_http_app)
 
     return app
-
