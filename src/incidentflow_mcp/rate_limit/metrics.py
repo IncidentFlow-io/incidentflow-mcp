@@ -73,3 +73,7 @@ mcp_tool_concurrency_rejections_total = _counter(
     "mcp_tool_concurrency_rejections_total",
     "Total number of MCP tool invocations rejected due to concurrency limits.",
 )
+mcp_rate_limit_backend_errors_total = _counter(
+    "mcp_rate_limit_backend_errors_total",
+    "Total number of Redis/backend errors while evaluating rate limits.",
+)
