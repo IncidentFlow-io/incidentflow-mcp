@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 
 try:
     from redis.asyncio import Redis, from_url
+    from redis.exceptions import RedisError
 except ImportError:  # pragma: no cover - exercised in dependency-missing envs
     Redis = None  # type: ignore[assignment,misc]
     from_url = None  # type: ignore[assignment,misc]
+    RedisError = Exception  # type: ignore[assignment,misc]
+
+from incidentflow_mcp.rate_limit.metrics import mcp_rate_limit_backend_errors_total
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -99,6 +106,7 @@ class RedisRateLimitStore:
             )
         self._client = from_url(redis_url, encoding="utf-8", decode_responses=True)
         self._prefix = key_prefix.rstrip(":")
+        self._last_backend_error_log_at = 0.0
 
     async def close(self) -> None:
         await self._client.aclose()
@@ -116,16 +124,25 @@ class RedisRateLimitStore:
         refill_per_sec = limit_per_min / 60.0
 
         key = self._key("bucket", scope, identity_key)
-        allowed, remaining, reset_after_ms = await self._client.eval(  # type: ignore[assignment]
-            _TOKEN_BUCKET_LUA,
-            1,
-            key,
-            now_ms,
-            limit_per_min,
-            refill_per_sec,
-            cost,
-            ttl_ms,
-        )
+        try:
+            allowed, remaining, reset_after_ms = await self._client.eval(  # type: ignore[assignment]
+                _TOKEN_BUCKET_LUA,
+                1,
+                key,
+                now_ms,
+                limit_per_min,
+                refill_per_sec,
+                cost,
+                ttl_ms,
+            )
+        except RedisError as exc:
+            self._on_backend_error("take_token", exc)
+            return TokenBucketResult(
+                allowed=True,
+                limit=limit_per_min,
+                remaining=limit_per_min,
+                reset_after_ms=0,
+            )
 
         return TokenBucketResult(
             allowed=bool(int(allowed)),
@@ -143,18 +160,38 @@ class RedisRateLimitStore:
         ttl_ms: int,
     ) -> bool:
         key = self._key("concurrency", scope, identity_key)
-        acquired, _ = await self._client.eval(  # type: ignore[assignment]
-            _ACQUIRE_CONCURRENCY_LUA,
-            1,
-            key,
-            limit,
-            ttl_ms,
-        )
-        return bool(int(acquired))
+        try:
+            acquired, _ = await self._client.eval(  # type: ignore[assignment]
+                _ACQUIRE_CONCURRENCY_LUA,
+                1,
+                key,
+                limit,
+                ttl_ms,
+            )
+            return bool(int(acquired))
+        except RedisError as exc:
+            self._on_backend_error("acquire_concurrency", exc)
+            return True
 
     async def release_concurrency(self, *, scope: str, identity_key: str) -> None:
         key = self._key("concurrency", scope, identity_key)
-        await self._client.eval(_RELEASE_CONCURRENCY_LUA, 1, key)
+        try:
+            await self._client.eval(_RELEASE_CONCURRENCY_LUA, 1, key)
+        except RedisError as exc:
+            self._on_backend_error("release_concurrency", exc)
 
     def _key(self, kind: str, scope: str, identity_key: str) -> str:
         return f"{self._prefix}:{kind}:{scope}:{identity_key}"
+
+    def _on_backend_error(self, operation: str, exc: Exception) -> None:
+        mcp_rate_limit_backend_errors_total.inc()
+        now = time.monotonic()
+        # Avoid log storms during outages while keeping recent signal.
+        if now - self._last_backend_error_log_at < 30:
+            return
+        self._last_backend_error_log_at = now
+        logger.error(
+            "rate_limit backend unavailable during %s; failing open",
+            operation,
+            exc_info=exc,
+        )
