@@ -5,7 +5,7 @@ Copy `.env.example` to `.env` and adjust values for local development.
 All settings can be overridden via real environment variables without a file.
 """
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     # -----------------------------------------------------------------------
@@ -65,6 +66,85 @@ class Settings(BaseSettings):
         default=60,
         description="Time window used by correlate_alerts tool",
     )
+
+    # -----------------------------------------------------------------------
+    # Rate limiting / Redis
+    # -----------------------------------------------------------------------
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL used for distributed rate limiting state",
+    )
+    rate_limit_unauth_per_min: int = Field(
+        default=20,
+        description="Transport-level requests per minute for unauthenticated IPs",
+    )
+    rate_limit_authenticated_per_min: int = Field(
+        default=60,
+        validation_alias=AliasChoices("RATE_LIMIT_AUTHENTICATED_PER_MIN", "RATE_LIMIT_FREE_PER_MIN"),
+        description="Transport-level requests per minute for authenticated identities",
+    )
+    tool_limit_authenticated_per_min: int = Field(
+        default=20,
+        validation_alias=AliasChoices("TOOL_LIMIT_AUTHENTICATED_PER_MIN", "TOOL_LIMIT_FREE_PER_MIN"),
+        description="MCP tools/call requests per minute for authenticated identities",
+    )
+    expensive_tool_limit_per_min: int = Field(
+        default=5,
+        description="Per-minute limit for expensive tools (per identity)",
+    )
+    tool_concurrency_authenticated: int = Field(
+        default=2,
+        validation_alias=AliasChoices("TOOL_CONCURRENCY_AUTHENTICATED", "TOOL_CONCURRENCY_FREE"),
+        description="Max concurrent tool executions for authenticated identities",
+    )
+    tool_timeout_seconds: int = Field(
+        default=30,
+        description="Default timeout (seconds) for tool execution",
+    )
+    expensive_tools: str = Field(
+        default="incident_graph_build,large_correlation,slack_thread_mining,github_org_search",
+        description="Comma-separated list of expensive MCP tools",
+    )
+    tool_timeout_overrides: str = Field(
+        default="",
+        description="Comma-separated per-tool timeout overrides, e.g. 'tool_a=15,tool_b=45'",
+    )
+    rate_limit_auth_endpoints: str = Field(
+        default="/authorize,/token,/register,/oauth/register",
+        description="Comma-separated auth endpoint prefixes to protect with transport-level rate limiting",
+    )
+    rate_limit_authenticated_bucket_scope: str = Field(
+        default="principal",
+        description="Bucket scope for authenticated identities: ip | principal | workspace",
+    )
+    rate_limit_unauthenticated_bucket_scope: str = Field(
+        default="ip",
+        description="Bucket scope for unauthenticated identities: ip | principal | workspace",
+    )
+
+    def expensive_tools_set(self) -> set[str]:
+        return {item.strip() for item in self.expensive_tools.split(",") if item.strip()}
+
+    def tool_timeout_overrides_map(self) -> dict[str, int]:
+        overrides: dict[str, int] = {}
+        for raw in self.tool_timeout_overrides.split(","):
+            part = raw.strip()
+            if not part or "=" not in part:
+                continue
+            name, value = part.split("=", 1)
+            tool = name.strip()
+            if not tool:
+                continue
+            try:
+                seconds = int(value.strip())
+            except ValueError:
+                continue
+            if seconds > 0:
+                overrides[tool] = seconds
+        return overrides
+
+    def rate_limited_auth_endpoints(self) -> list[str]:
+        return [item.strip() for item in self.rate_limit_auth_endpoints.split(",") if item.strip()]
 
 
 _settings: Settings | None = None

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, Response
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.http.install_script import render_install_script
+from incidentflow_mcp.rate_limit.metrics import METRICS_CONTENT_TYPE, render_prometheus_metrics
 
 
 def create_ops_router(settings: Settings) -> APIRouter:
@@ -44,5 +45,11 @@ def create_ops_router(settings: Settings) -> APIRouter:
     async def readyz() -> JSONResponse:
         """Returns 200 when the app is ready to serve traffic — no auth required."""
         return JSONResponse(content={"status": "ready"})
+
+    @router.get("/metrics", summary="Prometheus metrics")
+    async def metrics() -> Response:
+        """Prometheus metrics endpoint."""
+        payload = render_prometheus_metrics()
+        return Response(content=payload, media_type=METRICS_CONTENT_TYPE)
 
     return router

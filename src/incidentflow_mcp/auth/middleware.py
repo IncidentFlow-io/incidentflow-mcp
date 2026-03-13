@@ -55,9 +55,14 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
     "/healthz",
     "/readyz",
     "/install.sh",
+    "/metrics",
     "/docs",
     "/openapi.json",
     "/redoc",
+    "/authorize",
+    "/token",
+    "/register",
+    "/oauth/register",
 })
 
 # ---------------------------------------------------------------------------
@@ -113,6 +118,8 @@ def _verify_bearer(request: Request) -> JSONResponse | None:
 
     Returns None on success, or a JSONResponse with 401 on failure.
     """
+    _set_auth_context(request, authenticated=False)
+
     # Guard: tokens via query parameters are explicitly forbidden
     if "token" in request.query_params or "access_token" in request.query_params:
         logger.warning("auth: rejected token sent via query parameter from %s", _client_ip(request))
@@ -155,6 +162,11 @@ def _verify_bearer(request: Request) -> JSONResponse | None:
         logger.warning("auth: invalid token from %s", _client_ip(request))
         return _unauthorized("Invalid token.")
 
+    _set_auth_context(
+        request,
+        authenticated=True,
+        client_id="legacy_pat",
+    )
     return None
 
 
@@ -201,6 +213,18 @@ def _verify_repo_token(token: str, token_id: str, request: Request) -> JSONRespo
             )
 
     repo.update_last_used(token_id, now)
+    _set_auth_context(
+        request,
+        authenticated=True,
+        client_id=token_id,
+        workspace_id=request.headers.get("x-workspace-id"),
+        user_id=request.headers.get("x-user-id"),
+        plan=(
+            request.headers.get("x-plan")
+            or request.headers.get("x-plan-tier")
+            or request.headers.get("x-tier")
+        ),
+    )
     return None
 
 
@@ -238,3 +262,21 @@ def _client_ip(request: Request) -> str:
     if request.client:
         return request.client.host
     return "unknown"
+
+
+def _set_auth_context(
+    request: Request,
+    *,
+    authenticated: bool,
+    client_id: str | None = None,
+    workspace_id: str | None = None,
+    user_id: str | None = None,
+    plan: str | None = None,
+) -> None:
+    request.state.auth_context = {
+        "authenticated": authenticated,
+        "client_id": client_id,
+        "workspace_id": workspace_id,
+        "user_id": user_id,
+        "plan": plan,
+    }

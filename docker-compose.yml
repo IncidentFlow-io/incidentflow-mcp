@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   mcp:
     build: .
@@ -9,8 +7,12 @@ services:
       - INCIDENTFLOW_PAT=${INCIDENTFLOW_PAT:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ENVIRONMENT=${ENVIRONMENT:-development}
+      - REDIS_URL=${REDIS_URL:-redis://:redis-dev-password@redis:6379/0}
     env_file:
       - .env
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 30s
@@ -18,3 +20,21 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redis-dev-password}"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis-dev-password}", "PING"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
