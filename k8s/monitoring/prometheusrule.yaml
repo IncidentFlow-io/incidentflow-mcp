@@ -77,3 +77,46 @@ spec:
           annotations:
             summary: "IncidentFlow MCP 202 ratio is unusually high"
             description: "202 responses exceed 40% for /mcp over 15 minutes; investigate stuck async/session workflows."
+
+        - alert: IncidentflowMCPUnknownToolRatioHigh
+          expr: |
+            (
+              sum(rate(mcp_tool_requests_total{traffic_type="business",tool="unknown"}[10m]))
+              /
+              clamp_min(sum(rate(mcp_tool_requests_total{traffic_type="business"}[10m])), 0.001)
+            ) > 0.20
+          for: 15m
+          labels:
+            severity: warning
+            service: incidentflow-mcp
+          annotations:
+            summary: "IncidentFlow MCP unknown-tool ratio is high"
+            description: "More than 20% of tool requests are labeled unknown for 15 minutes."
+
+        - alert: IncidentflowMCPToolErrorRateHigh
+          expr: |
+            (
+              sum(rate(mcp_tool_requests_total{traffic_type="business",outcome="error"}[5m]))
+              /
+              clamp_min(sum(rate(mcp_tool_requests_total{traffic_type="business"}[5m])), 0.001)
+            ) > 0.10
+          for: 10m
+          labels:
+            severity: warning
+            service: incidentflow-mcp
+          annotations:
+            summary: "IncidentFlow MCP tool error rate is high"
+            description: "Tool request error ratio is above 10% for at least 10 minutes."
+
+        - alert: IncidentflowMCPConnectionsHighWithoutSessions
+          expr: |
+            sum(mcp_connections_active{traffic_type="business"}) > 50
+            and
+            sum(mcp_sessions_active) == 0
+          for: 10m
+          labels:
+            severity: warning
+            service: incidentflow-mcp
+          annotations:
+            summary: "IncidentFlow MCP has high activity with zero active sessions"
+            description: "Headerless MCP traffic may dominate; review session header propagation."
