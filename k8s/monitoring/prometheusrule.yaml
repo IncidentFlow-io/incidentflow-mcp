@@ -1,0 +1,79 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: incidentflow-mcp-alerts
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: incidentflow-mcp
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: incidentflow-mcp
+      rules:
+        - alert: IncidentflowMCPP95LatencyHigh
+          expr: |
+            histogram_quantile(
+              0.95,
+              sum by (le, pod) (
+                rate(http_request_duration_seconds_bucket{route="/mcp",traffic="business"}[5m])
+              )
+            ) > 1.5
+          for: 10m
+          labels:
+            severity: warning
+            service: incidentflow-mcp
+          annotations:
+            summary: "IncidentFlow MCP p95 latency is high"
+            description: "p95 latency for /mcp is above 1.5s for at least 10 minutes."
+
+        - alert: IncidentflowMCP5xxSpike
+          expr: |
+            (
+              sum(rate(http_requests_total{route="/mcp",traffic="business",status_code=~"5.."}[5m]))
+              /
+              clamp_min(sum(rate(http_requests_total{route="/mcp",traffic="business"}[5m])), 0.001)
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: critical
+            service: incidentflow-mcp
+          annotations:
+            summary: "IncidentFlow MCP 5xx error rate spike"
+            description: "5xx ratio for /mcp is above 5% in the last 5 minutes."
+
+        - alert: IncidentflowMCPNoTraffic
+          expr: |
+            sum(rate(http_requests_total{route="/mcp",traffic="business"}[15m])) < 0.01
+          for: 30m
+          labels:
+            severity: warning
+            service: incidentflow-mcp
+          annotations:
+            summary: "IncidentFlow MCP traffic dropped to near-zero"
+            description: "No meaningful /mcp traffic for 30 minutes (use only when traffic is expected)."
+
+        - alert: IncidentflowMCPTooManyActiveSessions
+          expr: |
+            sum(mcp_sessions_active) > 500
+          for: 10m
+          labels:
+            severity: warning
+            service: incidentflow-mcp
+          annotations:
+            summary: "IncidentFlow MCP active sessions are high"
+            description: "Active MCP sessions are above 500 for at least 10 minutes."
+
+        - alert: IncidentflowMCPAbnormal202Rate
+          expr: |
+            (
+              sum(rate(http_requests_total{route="/mcp",traffic="business",status_code="202"}[10m]))
+              /
+              clamp_min(sum(rate(http_requests_total{route="/mcp",traffic="business"}[10m])), 0.001)
+            ) > 0.40
+          for: 15m
+          labels:
+            severity: warning
+            service: incidentflow-mcp
+          annotations:
+            summary: "IncidentFlow MCP 202 ratio is unusually high"
+            description: "202 responses exceed 40% for /mcp over 15 minutes; investigate stuck async/session workflows."

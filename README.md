@@ -14,7 +14,7 @@ After deploying this service behind an ingress (for example, `https://mcp.incide
 the app exposes a dynamic installer endpoint:
 
 ```bash
-curl -fsSL https://incidentflow.io/install.sh | bash
+curl -fsSL https://mcp.incidentflow.io/install.sh | bash
 ```
 
 The script auto-configures VS Code workspace `.vscode/mcp.json` with:
@@ -116,3 +116,6 @@ Exposed on `/metrics` (Prometheus format):
 - `mcp_tool_rate_limited_total`
 - `mcp_tool_timeouts_total`
 - `mcp_tool_concurrency_rejections_total`
+
+For production MCP observability design, PromQL, and alert examples, see
+`docs/observability.md`.

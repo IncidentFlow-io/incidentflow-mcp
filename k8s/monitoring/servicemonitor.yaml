@@ -1,0 +1,32 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: incidentflow-mcp
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: incidentflow-mcp
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - incidentflow
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: incidentflow-mcp
+  endpoints:
+    - port: http
+      path: /metrics
+      scheme: http
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: false
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - action: replace
+          sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - action: replace
+          sourceLabels: [__meta_kubernetes_service_name]
+          targetLabel: service
