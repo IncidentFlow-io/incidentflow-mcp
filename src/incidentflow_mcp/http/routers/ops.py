@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse, Response
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.http.install_script import render_install_script
-from incidentflow_mcp.rate_limit.metrics import METRICS_CONTENT_TYPE, render_prometheus_metrics
+from incidentflow_mcp.observability.metrics import METRICS_CONTENT_TYPE, render_prometheus_metrics
 
 
 def create_ops_router(settings: Settings) -> APIRouter:

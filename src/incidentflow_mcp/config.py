@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     mcp_server_name: str = Field(default="incidentflow-mcp", description="MCP server name")
     mcp_server_version: str = Field(default="0.1.0", description="MCP server version")
+    mcp_session_idle_timeout_seconds: int = Field(
+        default=1800,
+        description=(
+            "Idle timeout for inferred MCP sessions; expired sessions are "
+            "marked as terminated for metrics."
+        ),
+    )
 
     # -----------------------------------------------------------------------
     # Example tool knobs (extend as needed)
