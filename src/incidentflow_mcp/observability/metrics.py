@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass
 from threading import Lock
 from time import monotonic
@@ -52,6 +54,7 @@ _MCP_METHOD_TO_REQUEST_TYPE = {
     "completion/complete": "CompleteRequest",
 }
 
+_TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 _KNOWN_ROUTES = frozenset({
     "/mcp",
     "/healthz",
@@ -88,11 +91,17 @@ mcp_sessions_active = Gauge(
 )
 mcp_sessions_started_total = Counter(
     "mcp_sessions_started_total",
-    "Total number of MCP sessions observed as started.",
+    "Total number of MCP session start events by reason.",
+    ("reason",),
+)
+mcp_sessions_ended_total = Counter(
+    "mcp_sessions_ended_total",
+    "Total number of MCP sessions observed as ended.",
+    ("reason",),
 )
 mcp_sessions_terminated_total = Counter(
     "mcp_sessions_terminated_total",
-    "Total number of MCP sessions observed as terminated.",
+    "Deprecated alias of mcp_sessions_ended_total.",
     ("reason",),
 )
 mcp_session_duration_seconds = Histogram(
@@ -100,6 +109,11 @@ mcp_session_duration_seconds = Histogram(
     "Observed MCP session duration in seconds.",
     ("reason",),
     buckets=_SESSION_DURATION_BUCKETS,
+)
+mcp_connections_active = Gauge(
+    "mcp_connections_active",
+    "Current in-flight MCP HTTP activity (not session lifecycle).",
+    ("namespace", "pod", "traffic_type", "session_mode"),
 )
 
 mcp_request_type_total = Counter(
@@ -112,6 +126,37 @@ mcp_request_type_duration_seconds = Histogram(
     "MCP request latency in seconds by request type and status code.",
     ("request_type", "status_code"),
     buckets=_HTTP_DURATION_BUCKETS,
+)
+mcp_tool_requests_total = Counter(
+    "mcp_tool_requests_total",
+    "Total MCP tool requests by tool/method/status/outcome.",
+    (
+        "namespace",
+        "pod",
+        "tool",
+        "method",
+        "status_code",
+        "status_class",
+        "outcome",
+        "traffic_type",
+        "session_mode",
+    ),
+)
+mcp_tool_request_duration_seconds = Histogram(
+    "mcp_tool_request_duration_seconds",
+    "MCP tool request latency in seconds by tool/method/outcome.",
+    ("namespace", "pod", "tool", "method", "outcome", "traffic_type"),
+    buckets=_HTTP_DURATION_BUCKETS,
+)
+mcp_tool_requests_in_flight = Gauge(
+    "mcp_tool_requests_in_flight",
+    "Current in-flight MCP tool requests.",
+    ("namespace", "pod", "tool", "traffic_type"),
+)
+mcp_tool_errors_total = Counter(
+    "mcp_tool_errors_total",
+    "Total MCP tool request errors.",
+    ("namespace", "pod", "tool", "method", "status_code", "status_class", "traffic_type"),
 )
 
 
@@ -145,6 +190,14 @@ def classify_status(status_code: int) -> str:
     return "1xx"
 
 
+def classify_outcome(status_code: int) -> str:
+    return "success" if status_code < 400 else "error"
+
+
+def status_class_from_code(status_code: int) -> str:
+    return classify_status(status_code)
+
+
 def detect_mcp_request_type(payload: Any) -> str:
     """Best-effort request-type extraction with bounded cardinality."""
     if isinstance(payload, list):
@@ -172,6 +225,41 @@ def detect_mcp_request_type(payload: Any) -> str:
     return "unknown"
 
 
+def extract_tool_name(payload: Any) -> str:
+    """Extract normalized tool name from tools/call payload."""
+    if isinstance(payload, list):
+        # Mixed batch calls are represented as unknown for low cardinality.
+        return "unknown"
+
+    if not isinstance(payload, dict):
+        return "unknown"
+
+    method = payload.get("method")
+    if method != "tools/call":
+        return "unknown"
+
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        return "unknown"
+
+    raw_name = params.get("name")
+    if not isinstance(raw_name, str):
+        return "unknown"
+
+    normalized = raw_name.strip()
+    if not normalized:
+        return "unknown"
+    if not _TOOL_NAME_RE.match(normalized):
+        return "unknown"
+    return normalized
+
+
+def pod_label_values() -> tuple[str, str]:
+    namespace = os.getenv("POD_NAMESPACE", "unknown")
+    pod = os.getenv("POD_NAME") or os.getenv("HOSTNAME") or "unknown"
+    return namespace, pod
+
+
 @dataclass
 class _SessionState:
     started_at: float
@@ -191,7 +279,7 @@ class SessionTracker:
             state = self._sessions.get(session_id)
             if state is None:
                 self._sessions[session_id] = _SessionState(started_at=ts, last_seen_at=ts)
-                mcp_sessions_started_total.inc()
+                mcp_sessions_started_total.labels(reason="header").inc()
                 mcp_sessions_active.set(len(self._sessions))
                 return True
 
@@ -206,6 +294,7 @@ class SessionTracker:
                 return False
 
             duration = max(0.0, ts - state.started_at)
+            mcp_sessions_ended_total.labels(reason=reason).inc()
             mcp_sessions_terminated_total.labels(reason=reason).inc()
             mcp_session_duration_seconds.labels(reason=reason).observe(duration)
             mcp_sessions_active.set(len(self._sessions))
@@ -231,6 +320,7 @@ class SessionTracker:
 
         for _, started_at in expired:
             duration = max(0.0, ts - started_at)
+            mcp_sessions_ended_total.labels(reason="idle_timeout").inc()
             mcp_sessions_terminated_total.labels(reason="idle_timeout").inc()
             mcp_session_duration_seconds.labels(reason="idle_timeout").observe(duration)
 

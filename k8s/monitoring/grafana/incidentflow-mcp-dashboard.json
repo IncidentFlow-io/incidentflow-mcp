@@ -10,39 +10,17 @@
     }
   ],
   "__requires": [
-    {
-      "type": "grafana",
-      "id": "grafana",
-      "name": "Grafana",
-      "version": "10.0.0"
-    },
-    {
-      "type": "panel",
-      "id": "timeseries",
-      "name": "Time series",
-      "version": ""
-    },
-    {
-      "type": "panel",
-      "id": "stat",
-      "name": "Stat",
-      "version": ""
-    },
-    {
-      "type": "datasource",
-      "id": "prometheus",
-      "name": "Prometheus",
-      "version": ""
-    }
+    {"type": "grafana", "id": "grafana", "name": "Grafana", "version": "10.0.0"},
+    {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": ""},
+    {"type": "panel", "id": "stat", "name": "Stat", "version": ""},
+    {"type": "panel", "id": "timeseries", "name": "Time series", "version": ""},
+    {"type": "panel", "id": "table", "name": "Table", "version": ""}
   ],
   "annotations": {
     "list": [
       {
         "builtIn": 1,
-        "datasource": {
-          "type": "grafana",
-          "uid": "-- Grafana --"
-        },
+        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -52,926 +30,275 @@
     ]
   },
   "editable": true,
-  "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": null,
   "links": [],
-  "liveNow": false,
   "panels": [
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 10
-              },
-              {
-                "color": "red",
-                "value": 50
-              }
-            ]
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 0,
-        "y": 0
-      },
       "id": 1,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "sum(rate(http_requests_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))",
-          "legendFormat": "RPS",
-          "refId": "A"
-        }
-      ],
       "title": "MCP RPS",
-      "type": "stat"
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))",
+          "legendFormat": "RPS"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 0.02
-              },
-              {
-                "color": "red",
-                "value": 0.05
-              }
-            ]
-          },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 6,
-        "y": 0
-      },
       "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "sum(rate(http_request_errors_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])) / clamp_min(sum(rate(http_requests_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])), 0.001)",
-          "legendFormat": "Error rate",
-          "refId": "A"
-        }
-      ],
       "title": "MCP Error Rate",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 200
-              },
-              {
-                "color": "red",
-                "value": 500
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 12,
-        "y": 0
-      },
-      "id": 3,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
       "targets": [
         {
-          "expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))",
-          "legendFormat": "p95",
-          "refId": "A"
-        }
-      ],
-      "title": "MCP Latency p95",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 100
-              },
-              {
-                "color": "red",
-                "value": 500
-              }
-            ]
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 18,
-        "y": 0
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "expr": "sum(mcp_sessions_active{namespace=~\"$namespace\",pod=~\"$pod\"})",
-          "legendFormat": "active",
-          "refId": "A"
-        }
-      ],
-      "title": "Active MCP Sessions",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 2,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              }
-            ]
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 5
-      },
-      "id": 5,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "expr": "sum by (status_code) (rate(http_requests_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))",
-          "legendFormat": "{{status_code}}",
-          "refId": "A"
-        }
-      ],
-      "title": "MCP Request Rate by Status Code",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 5
-      },
-      "id": 6,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "expr": "1000 * histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))",
-          "legendFormat": "p50",
-          "refId": "A"
-        },
-        {
-          "expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))",
-          "legendFormat": "p95",
-          "refId": "B"
-        },
-        {
-          "expr": "1000 * histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))",
-          "legendFormat": "p99",
-          "refId": "C"
-        }
-      ],
-      "title": "MCP Latency (p50/p95/p99)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 13
-      },
-      "id": 7,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
+          "refId": "A",
           "expr": "sum(rate(http_request_errors_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])) / clamp_min(sum(rate(http_requests_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])), 0.001)",
-          "legendFormat": "4xx+5xx ratio",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(rate(http_requests_total{route=\"/mcp\",traffic=\"business\",status_code=~\"5..\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])) / clamp_min(sum(rate(http_requests_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])), 0.001)",
-          "legendFormat": "5xx ratio",
-          "refId": "B"
+          "legendFormat": "Error rate"
         }
       ],
-      "title": "MCP Error Ratios",
-      "type": "timeseries"
+      "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "none"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 13
-      },
-      "id": 8,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
+      "id": 3,
+      "title": "MCP Latency p95",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
       "targets": [
         {
-          "expr": "sum(mcp_sessions_active{namespace=~\"$namespace\",pod=~\"$pod\"})",
-          "legendFormat": "active",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(rate(mcp_sessions_started_total{namespace=~\"$namespace\",pod=~\"$pod\"}[5m])) * 60",
-          "legendFormat": "starts/min",
-          "refId": "B"
-        },
-        {
-          "expr": "sum(rate(mcp_sessions_terminated_total{namespace=~\"$namespace\",pod=~\"$pod\"}[5m])) * 60",
-          "legendFormat": "terminations/min",
-          "refId": "C"
+          "refId": "A",
+          "expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))",
+          "legendFormat": "p95"
         }
       ],
-      "title": "MCP Sessions",
-      "type": "timeseries"
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 13
-      },
-      "id": 9,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(mcp_session_duration_seconds_bucket{namespace=~\"$namespace\",pod=~\"$pod\"}[15m])))",
-          "legendFormat": "session p95",
-          "refId": "A"
-        }
-      ],
-      "title": "Session Duration p95",
-      "type": "timeseries"
+      "id": 4,
+      "title": "Active MCP Sessions",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "targets": [{"refId": "A", "expr": "sum(mcp_sessions_active{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "active"}],
+      "fieldConfig": {"defaults": {"unit": "none"}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "bars",
-            "fillOpacity": 70,
-            "lineWidth": 1,
-            "showPoints": "never"
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 0,
-        "y": 21
-      },
-      "id": 10,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
+      "id": 5,
+      "title": "MCP Request Rate by Status Code",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 5},
+      "targets": [{"refId": "A", "expr": "sum by (status_code) (rate(http_requests_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))", "legendFormat": "{{status_code}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
+    },
+    {
+      "id": 6,
+      "title": "MCP Latency (p50/p95/p99)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 5},
       "targets": [
-        {
-          "expr": "topk(10, sum by (request_type) (rate(mcp_request_type_total{namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))",
-          "legendFormat": "{{request_type}}",
-          "refId": "A"
-        }
+        {"refId": "A", "expr": "1000 * histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))", "legendFormat": "p50"},
+        {"refId": "B", "expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))", "legendFormat": "p95"},
+        {"refId": "C", "expr": "1000 * histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))", "legendFormat": "p99"}
       ],
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
+    },
+    {
+      "id": 7,
       "title": "Top MCP Request Types",
-      "type": "timeseries"
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 5},
+      "targets": [{"refId": "A", "expr": "topk(10, sum by (request_type) (rate(mcp_request_type_total{namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))", "legendFormat": "{{request_type}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 8,
-        "y": 21
-      },
+      "id": 8,
+      "title": "Top MCP Tools by RPS",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 13},
+      "targets": [{"refId": "A", "expr": "topk(10, sum by (tool) (rate(mcp_tool_requests_total{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))", "legendFormat": "{{tool}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
+    },
+    {
+      "id": 9,
+      "title": "MCP Tool Request Rate",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 13},
+      "targets": [{"refId": "A", "expr": "sum by (tool) (rate(mcp_tool_requests_total{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m]))", "legendFormat": "{{tool}}"}],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
+    },
+    {
+      "id": 10,
+      "title": "MCP Tool p50/p95/p99 Latency",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 13},
+      "targets": [
+        {"refId": "A", "expr": "1000 * histogram_quantile(0.50, sum by (le, tool) (rate(mcp_tool_request_duration_seconds_bucket{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])))", "legendFormat": "{{tool}} p50"},
+        {"refId": "B", "expr": "1000 * histogram_quantile(0.95, sum by (le, tool) (rate(mcp_tool_request_duration_seconds_bucket{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])))", "legendFormat": "{{tool}} p95"},
+        {"refId": "C", "expr": "1000 * histogram_quantile(0.99, sum by (le, tool) (rate(mcp_tool_request_duration_seconds_bucket{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])))", "legendFormat": "{{tool}} p99"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
+    },
+    {
       "id": 11,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
+      "title": "MCP Tool Error Rate",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 21},
       "targets": [
         {
-          "expr": "1000 * histogram_quantile(0.95, sum by (le, request_type) (rate(mcp_request_type_duration_seconds_bucket{namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))",
-          "legendFormat": "{{request_type}}",
-          "refId": "A"
+          "refId": "A",
+          "expr": "sum by (tool) (rate(mcp_tool_requests_total{traffic_type=\"business\",outcome=\"error\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])) / clamp_min(sum by (tool) (rate(mcp_tool_requests_total{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])), 0.001)",
+          "legendFormat": "{{tool}}"
         }
       ],
-      "title": "MCP Request Type p95 Latency",
-      "type": "timeseries"
+      "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 8,
-        "x": 16,
-        "y": 21
-      },
       "id": 12,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
+      "title": "Per-Pod Tool p95 Latency",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 21},
       "targets": [
         {
-          "expr": "1000 * histogram_quantile(0.95, sum by (le, pod) (rate(http_request_duration_seconds_bucket{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])))",
-          "legendFormat": "{{pod}}",
-          "refId": "A"
+          "refId": "A",
+          "expr": "1000 * histogram_quantile(0.95, sum by (le, pod, tool) (rate(mcp_tool_request_duration_seconds_bucket{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])))",
+          "legendFormat": "{{pod}} / {{tool}}"
         }
       ],
-      "title": "Per-Pod MCP p95 Latency",
-      "type": "timeseries"
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 30
-      },
       "id": 13,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
+      "title": "MCP Activity (sessions vs connections)",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 21},
       "targets": [
-        {
-          "expr": "sum(rate(http_requests_total{traffic=\"probe\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))",
-          "legendFormat": "probe",
-          "refId": "A"
-        },
-        {
-          "expr": "sum(rate(http_requests_total{traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))",
-          "legendFormat": "business",
-          "refId": "B"
-        }
+        {"refId": "A", "expr": "sum(mcp_sessions_active{namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "sessions_active"},
+        {"refId": "B", "expr": "sum(mcp_connections_active{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"})", "legendFormat": "connections_active"},
+        {"refId": "C", "expr": "sum by (reason) (rate(mcp_sessions_started_total{namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))", "legendFormat": "starts/{{reason}}"}
       ],
-      "title": "Probe vs Business Traffic",
-      "type": "timeseries"
+      "fieldConfig": {"defaults": {"unit": "none"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          },
-          "unit": "percentunit"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 30
-      },
       "id": 14,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull",
-            "max"
-          ],
-          "displayMode": "table",
-          "placement": "right",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
+      "title": "Unknown Tool Ratio",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 29},
       "targets": [
         {
-          "expr": "sum(rate(http_requests_total{route=\"/mcp\",traffic=\"business\",status_code=\"202\",namespace=~\"$namespace\",pod=~\"$pod\"}[10m])) / clamp_min(sum(rate(http_requests_total{route=\"/mcp\",traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[10m])), 0.001)",
-          "legendFormat": "202 ratio",
-          "refId": "A"
+          "refId": "A",
+          "expr": "sum(rate(mcp_tool_requests_total{tool=\"unknown\",traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])) / clamp_min(sum(rate(mcp_tool_requests_total{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m])), 0.001)",
+          "legendFormat": "unknown ratio"
         }
       ],
-      "title": "MCP 202 Ratio",
-      "type": "timeseries"
+      "fieldConfig": {"defaults": {"unit": "percentunit"}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "reduceOptions": {"calcs": ["lastNotNull"], "values": false}}
+    },
+    {
+      "id": 15,
+      "title": "Probe vs Business Traffic",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 5, "w": 9, "x": 6, "y": 29},
+      "targets": [
+        {"refId": "A", "expr": "sum(rate(http_requests_total{traffic=\"probe\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))", "legendFormat": "probe"},
+        {"refId": "B", "expr": "sum(rate(http_requests_total{traffic=\"business\",namespace=~\"$namespace\",pod=~\"$pod\"}[5m]))", "legendFormat": "business"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "reqps"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "showLegend": true}}
+    },
+    {
+      "id": 16,
+      "title": "Tool Summary Table",
+      "type": "table",
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "gridPos": {"h": 10, "w": 9, "x": 15, "y": 29},
+      "targets": [
+        {"refId": "A", "expr": "sum by (tool) (rate(mcp_tool_requests_total{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m]))", "legendFormat": "{{tool}} rps"},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le, tool) (rate(mcp_tool_request_duration_seconds_bucket{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])))", "legendFormat": "{{tool}} p95"},
+        {"refId": "C", "expr": "sum by (tool) (rate(mcp_tool_requests_total{traffic_type=\"business\",outcome=\"error\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])) / clamp_min(sum by (tool) (rate(mcp_tool_requests_total{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"}[5m])), 0.001)", "legendFormat": "{{tool}} error_rate"},
+        {"refId": "D", "expr": "sum by (tool) (mcp_tool_requests_in_flight{traffic_type=\"business\",namespace=~\"$namespace\",pod=~\"$pod\",tool=~\"$tool\"})", "legendFormat": "{{tool}} in_flight"}
+      ],
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "options": {"showHeader": true}
     }
   ],
   "refresh": "30s",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": [
-    "incidentflow",
-    "mcp",
-    "prometheus"
-  ],
+  "tags": ["incidentflow", "mcp", "prometheus", "tools"],
   "templating": {
     "list": [
       {
-        "current": {
-          "selected": false,
-          "text": "All",
-          "value": ".*"
-        },
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "definition": "label_values(http_requests_total, namespace)",
-        "hide": 0,
-        "includeAll": true,
-        "label": "namespace",
-        "multi": false,
         "name": "namespace",
-        "options": [],
-        "query": {
-          "qryType": 1,
-          "query": "label_values(http_requests_total, namespace)",
-          "refId": "Prometheus-namespace"
-        },
+        "label": "namespace",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "query": {"query": "label_values(http_requests_total, namespace)", "refId": "namespace"},
+        "definition": "label_values(http_requests_total, namespace)",
+        "includeAll": true,
+        "multi": false,
         "refresh": 2,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query"
+        "current": {"text": "All", "value": ".*", "selected": false}
       },
       {
-        "current": {
-          "selected": false,
-          "text": "All",
-          "value": ".*"
-        },
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${DS_PROMETHEUS}"
-        },
-        "definition": "label_values(http_requests_total{namespace=~\"$namespace\"}, pod)",
-        "hide": 0,
-        "includeAll": true,
-        "label": "pod",
-        "multi": true,
         "name": "pod",
-        "options": [],
-        "query": {
-          "qryType": 1,
-          "query": "label_values(http_requests_total{namespace=~\"$namespace\"}, pod)",
-          "refId": "Prometheus-pod"
-        },
+        "label": "pod",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "query": {"query": "label_values(http_requests_total{namespace=~\"$namespace\"}, pod)", "refId": "pod"},
+        "definition": "label_values(http_requests_total{namespace=~\"$namespace\"}, pod)",
+        "includeAll": true,
+        "multi": true,
         "refresh": 2,
-        "regex": "",
-        "skipUrlSync": false,
-        "sort": 1,
-        "type": "query"
+        "current": {"text": "All", "value": ".*", "selected": false}
+      },
+      {
+        "name": "tool",
+        "label": "tool",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "query": {"query": "label_values(mcp_tool_requests_total{namespace=~\"$namespace\",pod=~\"$pod\",traffic_type=\"business\"}, tool)", "refId": "tool"},
+        "definition": "label_values(mcp_tool_requests_total{namespace=~\"$namespace\",pod=~\"$pod\",traffic_type=\"business\"}, tool)",
+        "includeAll": true,
+        "multi": true,
+        "refresh": 2,
+        "current": {"text": "All", "value": ".*", "selected": false}
       }
     ]
   },
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
-  "timepicker": {},
+  "time": {"from": "now-6h", "to": "now"},
   "timezone": "",
   "title": "IncidentFlow MCP Observability",
   "uid": "incidentflow-mcp-observability",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
