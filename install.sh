@@ -3,7 +3,7 @@ set -euo pipefail
 
 # IncidentFlow MCP Installer for VS Code workspace
 # Usage:
-#   curl -fsSL https://incidentflow.io/install.sh | bash
+#   curl -fsSL https://mcp.incidentflow.io/install.sh | bash
 #   OR
 #   ./install.sh
 
