@@ -35,6 +35,23 @@ class Settings(BaseSettings):
         description="Static Bearer PAT for local dev auth (INCIDENTFLOW_PAT)",
     )
 
+    # Optional managed-token verification via platform-api.
+    # When set, Bearer tokens are introspected remotely via
+    # POST {PLATFORM_API_BASE_URL}/api/v1/tokens/introspect.
+    platform_api_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("PLATFORM_API_BASE_URL", "INCIDENTFLOW_API_BASE_URL"),
+        description="Base URL for managed token introspection (e.g. http://127.0.0.1:8000)",
+    )
+    platform_api_introspect_path: str = Field(
+        default="/api/v1/tokens/introspect",
+        description="Path to managed token introspection endpoint on platform-api",
+    )
+    platform_api_timeout_seconds: float = Field(
+        default=5.0,
+        description="HTTP timeout for token introspection calls",
+    )
+
     # When True, tokens must carry all required scopes for the endpoint they
     # access; requests missing a scope get 403.  Defaults to True in
     # production, False in all other environments (dev-friendly mode).
@@ -52,6 +69,10 @@ class Settings(BaseSettings):
         if self.enforce_scopes is not None:
             return self.enforce_scopes
         return self.environment == "production"
+
+    def managed_token_introspection_enabled(self) -> bool:
+        """Return True when remote managed-token introspection is configured."""
+        return bool(self.platform_api_base_url)
 
     # -----------------------------------------------------------------------
     # MCP

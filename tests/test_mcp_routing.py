@@ -111,9 +111,9 @@ class TestRequestIDHeader:
 
 
 class TestProductionFailFast:
-    """create_app() must raise if INCIDENTFLOW_PAT is unset in production."""
+    """create_app() must raise when no auth source is configured in production."""
 
-    def test_raises_without_pat_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_raises_without_auth_source_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from incidentflow_mcp.config import Settings
 
         settings = Settings(incidentflow_pat=None, environment="production", log_level="warning")
@@ -121,8 +121,24 @@ class TestProductionFailFast:
 
         from incidentflow_mcp.app import create_app
 
-        with pytest.raises(RuntimeError, match="INCIDENTFLOW_PAT must be set in production"):
+        with pytest.raises(RuntimeError, match="Auth must be configured in production"):
             create_app()
+
+    def test_no_error_with_platform_api_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from incidentflow_mcp.config import Settings
+
+        settings = Settings(
+            incidentflow_pat=None,
+            platform_api_base_url="http://127.0.0.1:8000",
+            environment="production",
+            log_level="warning",
+        )
+        monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
+
+        from incidentflow_mcp.app import create_app
+
+        app = create_app()
+        assert app is not None
 
     def test_no_error_without_pat_in_development(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from incidentflow_mcp.config import Settings
