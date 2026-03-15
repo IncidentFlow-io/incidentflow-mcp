@@ -39,10 +39,14 @@ def create_app() -> FastAPI:
     """
     settings = get_settings()
 
-    if settings.environment == "production" and settings.incidentflow_pat is None:
+    if (
+        settings.environment == "production"
+        and settings.incidentflow_pat is None
+        and not settings.managed_token_introspection_enabled()
+    ):
         raise RuntimeError(
-            "INCIDENTFLOW_PAT must be set in production. "
-            "Set it via the INCIDENTFLOW_PAT environment variable or .env file."
+            "Auth must be configured in production. "
+            "Set INCIDENTFLOW_PAT or PLATFORM_API_BASE_URL."
         )
 
     # Create the MCP server once so both the lifespan and the route handler
@@ -59,10 +63,16 @@ def create_app() -> FastAPI:
         configure_logging(settings.log_level)
 
         try:
-            if settings.incidentflow_pat is None:
+            if settings.managed_token_introspection_enabled():
+                logger.info(
+                    "auth: platform-api introspection is active at %s%s",
+                    settings.platform_api_base_url,
+                    settings.platform_api_introspect_path,
+                )
+            elif settings.incidentflow_pat is None:
                 logger.warning(
-                    "INCIDENTFLOW_PAT is not set — MCP endpoint is UNPROTECTED. "
-                    "Set INCIDENTFLOW_PAT in your .env file for local dev auth."
+                    "auth: no auth provider configured — MCP endpoint is UNPROTECTED. "
+                    "Set INCIDENTFLOW_PAT or PLATFORM_API_BASE_URL in your .env file."
                 )
             else:
                 logger.info("auth: Bearer PAT protection is active")

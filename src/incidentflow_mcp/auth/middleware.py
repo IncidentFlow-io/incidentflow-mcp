@@ -1,44 +1,18 @@
 """
-Bearer PAT authentication for local HTTP dev mode.
+Bearer authentication middleware.
 
-Strategy
---------
-Two verification paths are tried in order:
-
-1. **Structured repo token** (``if_pat_local_<id>.<secret>``):
-   Parse the token_id, look up the record in the TokenRepository, verify
-   the SHA-256 hash with constant-time comparison, enforce revocation and
-   expiry, check required scopes, and update last_used_at on success.
-
-2. **Legacy env PAT** (any other token string):
-   Fall back to a direct constant-time comparison with INCIDENTFLOW_PAT
-   from settings.  Useful for quick local scripting without managing a
-   token DB entry.  Legacy tokens are not scope-checked.
-
-3. **UNPROTECTED mode**:
-   If neither a matching repo token nor INCIDENTFLOW_PAT is configured, the
-   server allows all requests and logs a warning on each.
-
-Tokens via query parameters are explicitly rejected in all cases.
-
-Scope enforcement
------------------
-Each endpoint maps to a required scope via ``_required_scope_for_request()``.
-When ``settings.scopes_enforced()`` is True (default in production), a token
-missing the required scope gets 403.  In dev mode (enforcement disabled) the
-scope mismatch is only logged as a warning.
-
-Future OAuth resource-server integration point
------------------------------------------------
-Replace ``_verify_repo_token()`` with a call to your authorization server's
-token introspection endpoint (RFC 7662).  The request-extraction logic and
-error-response helpers stay the same.
+Verification strategy (in order):
+1. Managed-token introspection against platform-api (if configured)
+2. Structured local repo token (if_pat_local_<id>.<secret>)
+3. Legacy INCIDENTFLOW_PAT constant-time comparison
+4. Unprotected mode only when no auth source is configured
 """
 
 import hmac
 import logging
 from datetime import datetime, timezone
 
+import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -66,19 +40,17 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
 })
 
 # ---------------------------------------------------------------------------
-# Scope policy — maps request path prefixes to the required token scope.
-# The first match wins; None means no scope is required beyond authentication.
+# Scope policy — maps request path prefixes to required scopes.
 # ---------------------------------------------------------------------------
 _SCOPE_POLICY: list[tuple[str, str]] = [
     ("/admin", "admin"),
     ("/mcp/tools", "mcp:tools:run"),
     ("/mcp/resources", "mcp:read"),
-    ("/mcp", "mcp:read"),        # catch-all for the MCP endpoint
+    ("/mcp", "mcp:read"),
 ]
 
 
 def _required_scope_for_request(request: Request) -> str | None:
-    """Return the scope required to access this endpoint, or None."""
     path = request.url.path
     for prefix, scope in _SCOPE_POLICY:
         if path.startswith(prefix):
@@ -87,50 +59,28 @@ def _required_scope_for_request(request: Request) -> str | None:
 
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """
-    Starlette middleware that enforces Bearer PAT authentication on all
-    non-public paths.
-
-    Mount order: this middleware should be added to the FastAPI app AFTER
-    any trusted infrastructure middleware (e.g. ProxyHeaders) but BEFORE
-    any business-logic middleware.
-    """
-
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         if request.url.path in _PUBLIC_PATHS:
             return await call_next(request)
 
-        error = _verify_bearer(request)
+        error = await _verify_bearer(request)
         if error is not None:
             return error
 
         return await call_next(request)
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _verify_bearer(request: Request) -> JSONResponse | None:
-    """
-    Validate the Bearer token on the incoming request.
-
-    Returns None on success, or a JSONResponse with 401 on failure.
-    """
+async def _verify_bearer(request: Request) -> JSONResponse | None:
     _set_auth_context(request, authenticated=False)
 
-    # Guard: tokens via query parameters are explicitly forbidden
     if "token" in request.query_params or "access_token" in request.query_params:
         logger.warning("auth: rejected token sent via query parameter from %s", _client_ip(request))
         return _unauthorized("Tokens must be sent in the Authorization header, not as query parameters.")
 
     auth_header = request.headers.get("Authorization", "")
-
-    # No auth header — allow only if nothing is configured (unprotected mode)
     if not auth_header:
         if not _any_auth_configured():
-            logger.warning("auth: INCIDENTFLOW_PAT is not set — server running in UNPROTECTED mode")
+            logger.warning("auth: no auth provider configured — MCP endpoint is UNPROTECTED")
             return None
         logger.warning("auth: missing Authorization header from %s", _client_ip(request))
         return _unauthorized("Missing or malformed Authorization: Bearer <token>.")
@@ -143,40 +93,99 @@ def _verify_bearer(request: Request) -> JSONResponse | None:
     if not provided:
         return _unauthorized("Empty Bearer token.")
 
-    # --- Path 1: structured repo token (if_pat_local_<id>.<secret>) ---
+    required_scope = _required_scope_for_request(request)
+    settings = get_settings()
+
+    # Path 1: managed token introspection via platform-api.
+    if settings.managed_token_introspection_enabled():
+        return await _verify_platform_api_token(
+            request=request,
+            token=provided,
+            required_scope=required_scope,
+        )
+
+    # Path 2: structured local repo token.
     token_id = parse_token_id(provided)
     if token_id is not None:
-        return _verify_repo_token(provided, token_id, request)
+        return _verify_repo_token(provided, token_id, request, required_scope=required_scope)
 
-    # --- Path 2: legacy plain token → compare with INCIDENTFLOW_PAT ---
-    settings = get_settings()
+    # Path 3: legacy env PAT.
     expected_pat = settings.incidentflow_pat
-
     if expected_pat is None:
-        # Plain (non-structured) token, but no INCIDENTFLOW_PAT set → unprotected
-        logger.warning("auth: INCIDENTFLOW_PAT is not set — server running in UNPROTECTED mode")
-        return None
+        if not _any_auth_configured():
+            logger.warning("auth: no auth provider configured — MCP endpoint is UNPROTECTED")
+            return None
+        logger.warning("auth: invalid token from %s", _client_ip(request))
+        return _unauthorized("Invalid token.")
 
     expected = expected_pat.get_secret_value()
     if not hmac.compare_digest(provided.encode(), expected.encode()):
         logger.warning("auth: invalid token from %s", _client_ip(request))
         return _unauthorized("Invalid token.")
 
-    _set_auth_context(
-        request,
-        authenticated=True,
-        client_id="legacy_pat",
-    )
+    _set_auth_context(request, authenticated=True, client_id="legacy_pat")
     return None
 
 
-def _verify_repo_token(token: str, token_id: str, request: Request) -> JSONResponse | None:
-    """
-    Look up the token record, enforce revocation/expiry, verify the hash,
-    check scopes, and update last_used_at on success.
+async def _verify_platform_api_token(
+    *,
+    request: Request,
+    token: str,
+    required_scope: str | None,
+) -> JSONResponse | None:
+    settings = get_settings()
+    if not settings.platform_api_base_url:
+        return _unauthorized("Managed token introspection is not configured.")
 
-    Future OAuth integration point: replace body with an introspection call.
-    """
+    url = f"{settings.platform_api_base_url.rstrip('/')}{settings.platform_api_introspect_path}"
+    payload = {"required_scope": required_scope}
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.platform_api_timeout_seconds) as client:
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("auth: platform-api introspection failed (%s): %s", url, str(exc))
+        return _service_unavailable("Token verification service unavailable")
+
+    if response.status_code == 200:
+        data = response.json()
+        _set_auth_context(
+            request,
+            authenticated=True,
+            client_id=data.get("credential_id"),
+            workspace_id=data.get("workspace_id"),
+            user_id=data.get("user_id"),
+            plan=None,
+        )
+        return None
+
+    if response.status_code == 403:
+        message = "Insufficient token scope"
+        try:
+            body = response.json()
+            message = body.get("message") or message
+        except ValueError:
+            pass
+        return _forbidden_detail(message)
+
+    if response.status_code == 401:
+        return _unauthorized("Invalid token.")
+
+    logger.warning("auth: unexpected introspection status=%s body=%s", response.status_code, response.text)
+    return _service_unavailable("Token verification service error")
+
+
+def _verify_repo_token(
+    token: str,
+    token_id: str,
+    request: Request,
+    *,
+    required_scope: str | None,
+) -> JSONResponse | None:
     repo = get_token_repository()
     record = repo.find_by_id(token_id)
 
@@ -197,19 +206,17 @@ def _verify_repo_token(token: str, token_id: str, request: Request) -> JSONRespo
         logger.warning("auth: invalid token secret for %r from %s", token_id, _client_ip(request))
         return _unauthorized("Invalid token.")
 
-    # --- Scope check ---
-    required = _required_scope_for_request(request)
-    if required is not None:
-        if required in record.scopes:
-            logger.info("auth_scope_granted token_id=%s scope=%s", token_id, required)
+    if required_scope is not None:
+        if required_scope in record.scopes:
+            logger.info("auth_scope_granted token_id=%s scope=%s", token_id, required_scope)
         elif get_settings().scopes_enforced():
-            logger.warning("auth_scope_denied token_id=%s required_scope=%s", token_id, required)
-            return _forbidden(required)
+            logger.warning("auth_scope_denied token_id=%s required_scope=%s", token_id, required_scope)
+            return _forbidden(required_scope)
         else:
             logger.warning(
                 "auth_scope_bypass token_id=%s required_scope=%s (enforcement disabled — dev mode)",
                 token_id,
-                required,
+                required_scope,
             )
 
     repo.update_last_used(token_id, now)
@@ -229,13 +236,10 @@ def _verify_repo_token(token: str, token_id: str, request: Request) -> JSONRespo
 
 
 def _any_auth_configured() -> bool:
-    """
-    Return True if the server has at least one authentication mechanism enabled.
-
-    Checked on every request that arrives without an Authorization header, so
-    the implementation intentionally stays cheap for the common (protected) case.
-    """
-    if get_settings().incidentflow_pat is not None:
+    settings = get_settings()
+    if settings.managed_token_introspection_enabled():
+        return True
+    if settings.incidentflow_pat is not None:
         return True
     return bool(get_token_repository().list_all())
 
@@ -253,6 +257,14 @@ def _forbidden(required_scope: str) -> JSONResponse:
         status_code=403,
         content={"error": "insufficient_scope", "required_scope": required_scope},
     )
+
+
+def _forbidden_detail(detail: str) -> JSONResponse:
+    return JSONResponse(status_code=403, content={"detail": detail})
+
+
+def _service_unavailable(detail: str) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": detail})
 
 
 def _client_ip(request: Request) -> str:

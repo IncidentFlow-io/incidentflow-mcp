@@ -119,3 +119,23 @@ Exposed on `/metrics` (Prometheus format):
 
 For production MCP observability design, PromQL, and alert examples, see
 `docs/observability.md`.
+
+## Managed token introspection mode (recommended)
+
+For SaaS deployments, prefer managed credentials from `platform-api` over a static `INCIDENTFLOW_PAT`.
+
+Set these variables in `incidentflow-mcp`:
+
+```bash
+PLATFORM_API_BASE_URL=http://127.0.0.1:8000
+PLATFORM_API_INTROSPECT_PATH=/api/v1/tokens/introspect
+PLATFORM_API_TIMEOUT_SECONDS=5
+```
+
+In this mode, MCP verifies incoming bearer tokens via platform-api and receives
+workspace/user/scope context from the introspection response. Token metadata such
+as `last_used_at` is updated in platform-api during introspection.
+
+Fallback behavior:
+- If `PLATFORM_API_BASE_URL` is not set, MCP uses local auth (`INCIDENTFLOW_PAT` and/or local repo tokens).
+- In production, at least one auth source must be configured (`PLATFORM_API_BASE_URL` or `INCIDENTFLOW_PAT`).
