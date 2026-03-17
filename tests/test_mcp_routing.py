@@ -116,7 +116,13 @@ class TestProductionFailFast:
     def test_raises_without_auth_source_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from incidentflow_mcp.config import Settings
 
-        settings = Settings(incidentflow_pat=None, environment="production", log_level="warning")
+        settings = Settings(
+            _env_file=None,
+            incidentflow_pat=None,
+            platform_api_base_url=None,
+            environment="production",
+            log_level="warning",
+        )
         monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
 
         from incidentflow_mcp.app import create_app
@@ -128,6 +134,7 @@ class TestProductionFailFast:
         from incidentflow_mcp.config import Settings
 
         settings = Settings(
+            _env_file=None,
             incidentflow_pat=None,
             platform_api_base_url="http://127.0.0.1:8000",
             environment="production",
@@ -143,7 +150,13 @@ class TestProductionFailFast:
     def test_no_error_without_pat_in_development(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from incidentflow_mcp.config import Settings
 
-        settings = Settings(incidentflow_pat=None, environment="development", log_level="warning")
+        settings = Settings(
+            _env_file=None,
+            incidentflow_pat=None,
+            platform_api_base_url=None,
+            environment="development",
+            log_level="warning",
+        )
         monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
 
         from incidentflow_mcp.app import create_app

@@ -124,7 +124,9 @@ def test_bucket_key_resolution_depends_on_bucket_scope() -> None:
 
 def test_default_policy_resolver_is_authenticated_vs_unauthenticated_only() -> None:
     settings = Settings(
+        _env_file=None,
         redis_url="redis://test-only",
+        platform_api_base_url=None,
         rate_limit_unauth_per_min=7,
         rate_limit_authenticated_per_min=42,
         tool_limit_authenticated_per_min=11,

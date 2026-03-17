@@ -47,6 +47,16 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "default": True,
                     "description": "Include impacted service list in the response",
                 },
+                "execution_mode": {
+                    "type": "string",
+                    "enum": ["auto", "sync", "async"],
+                    "default": "auto",
+                    "description": "Execution strategy. auto => async in production, sync elsewhere.",
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Optional workspace scope for async orchestration",
+                },
             },
             "required": ["incident_id"],
         },
@@ -80,6 +90,16 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "type": "integer",
                     "default": 2,
                     "description": "Minimum number of alerts required to form a cluster",
+                },
+                "execution_mode": {
+                    "type": "string",
+                    "enum": ["auto", "sync", "async"],
+                    "default": "auto",
+                    "description": "Execution strategy. auto => async in production, sync elsewhere.",
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Optional workspace scope for async orchestration",
                 },
             },
             "required": ["alerts_json"],
