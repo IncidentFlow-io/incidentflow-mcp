@@ -43,7 +43,9 @@ def _make_client(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> TestCli
 class TestTransportRateLimiting:
     def test_unauthenticated_ip_rate_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         settings = Settings(
+            _env_file=None,
             incidentflow_pat=None,
+            platform_api_base_url=None,
             environment="test",
             log_level="warning",
             redis_url="redis://test-only",
@@ -64,7 +66,9 @@ class TestTransportRateLimiting:
 
     def test_authenticated_principal_rate_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         settings = Settings(
+            _env_file=None,
             incidentflow_pat="test-secret-token",
+            platform_api_base_url=None,
             environment="test",
             log_level="warning",
             redis_url="redis://test-only",
@@ -86,7 +90,9 @@ class TestTransportRateLimiting:
 
     def test_multi_instance_shares_same_store_where_practical(self, monkeypatch: pytest.MonkeyPatch) -> None:
         settings = Settings(
+            _env_file=None,
             incidentflow_pat="test-secret-token",
+            platform_api_base_url=None,
             environment="test",
             log_level="warning",
             redis_url="redis://test-only",
@@ -111,7 +117,9 @@ class TestTransportRateLimiting:
 class TestToolRateLimiting:
     def test_expensive_tool_limit(self, monkeypatch: pytest.MonkeyPatch) -> None:
         settings = Settings(
+            _env_file=None,
             incidentflow_pat="test-secret-token",
+            platform_api_base_url=None,
             environment="test",
             log_level="warning",
             redis_url="redis://test-only",
@@ -154,7 +162,9 @@ class TestToolGuardUnit:
     @pytest.mark.asyncio
     async def test_concurrency_limit_enforced(self, rate_limit_store) -> None:  # noqa: ANN001
         settings = Settings(
+            _env_file=None,
             redis_url="redis://test-only",
+            platform_api_base_url=None,
             tool_concurrency_authenticated=1,
             tool_limit_authenticated_per_min=100,
             expensive_tools="",
@@ -207,7 +217,9 @@ class TestToolGuardUnit:
     @pytest.mark.asyncio
     async def test_timeout_behavior(self, rate_limit_store) -> None:  # noqa: ANN001
         settings = Settings(
+            _env_file=None,
             redis_url="redis://test-only",
+            platform_api_base_url=None,
             tool_timeout_seconds=1,
             tool_limit_authenticated_per_min=100,
             expensive_tools="",

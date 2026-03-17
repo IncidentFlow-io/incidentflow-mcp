@@ -123,7 +123,13 @@ class TestRepoAuth:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        settings = Settings(incidentflow_pat=None, environment="test", log_level="warning")
+        settings = Settings(
+            _env_file=None,
+            incidentflow_pat=None,
+            platform_api_base_url=None,
+            environment="test",
+            log_level="warning",
+        )
         monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
 
         repo = InMemoryTokenRepository()
@@ -150,7 +156,13 @@ class TestRepoAuth:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        settings = Settings(incidentflow_pat=None, environment="test", log_level="warning")
+        settings = Settings(
+            _env_file=None,
+            incidentflow_pat=None,
+            platform_api_base_url=None,
+            environment="test",
+            log_level="warning",
+        )
         monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
 
         repo = InMemoryTokenRepository()
@@ -192,7 +204,9 @@ class TestScopeEnforcement:
         enforce: bool,
     ) -> tuple[TestClient, str]:
         settings = Settings(
+            _env_file=None,
             incidentflow_pat=None,
+            platform_api_base_url=None,
             environment="test",
             enforce_scopes=enforce or None,
             log_level="warning",
@@ -278,4 +292,3 @@ class TestScopeEnforcement:
         # Middleware passes; MCP layer may return any non-auth status
         assert resp.status_code != 401
         assert resp.status_code != 403
-

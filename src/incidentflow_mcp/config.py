@@ -51,6 +51,20 @@ class Settings(BaseSettings):
         default=5.0,
         description="HTTP timeout for token introspection calls",
     )
+    platform_api_internal_api_key: SecretStr | None = Field(
+        default=None,
+        description="Optional service-to-service API key for MCP -> platform-api calls",
+    )
+    platform_api_ai_jobs_path: str = Field(
+        default="/api/v1/ai/jobs",
+        description="Path for MCP async job submit/poll endpoints on platform-api",
+    )
+    platform_api_ai_poll_after_seconds: int = Field(
+        default=2,
+        ge=1,
+        le=60,
+        description="Suggested poll interval in async MCP tool responses",
+    )
 
     # When True, tokens must carry all required scopes for the endpoint they
     # access; requests missing a scope get 403.  Defaults to True in
@@ -74,6 +88,11 @@ class Settings(BaseSettings):
         """Return True when remote managed-token introspection is configured."""
         return bool(self.platform_api_base_url)
 
+    def async_tools_enabled(self) -> bool:
+        if self.mcp_async_tools_enabled is not None:
+            return self.mcp_async_tools_enabled
+        return self.environment == "production"
+
     # -----------------------------------------------------------------------
     # MCP
     # -----------------------------------------------------------------------
@@ -85,6 +104,10 @@ class Settings(BaseSettings):
             "Idle timeout for inferred MCP sessions; expired sessions are "
             "marked as terminated for metrics."
         ),
+    )
+    mcp_async_tools_enabled: bool | None = Field(
+        default=None,
+        description="Enable async orchestration for heavy MCP tools (default: True in production).",
     )
 
     # -----------------------------------------------------------------------

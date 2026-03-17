@@ -39,6 +39,8 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
     "/oauth/register",
 })
 
+_MCP_ALLOWED_METHODS: frozenset[str] = frozenset({"GET", "POST", "OPTIONS"})
+
 # ---------------------------------------------------------------------------
 # Scope policy — maps request path prefixes to required scopes.
 # ---------------------------------------------------------------------------
@@ -60,6 +62,10 @@ def _required_scope_for_request(request: Request) -> str | None:
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        if request.url.path == "/mcp" and request.method.upper() not in _MCP_ALLOWED_METHODS:
+            # Let router return 404/405 for unsupported methods.
+            return await call_next(request)
+
         if request.url.path in _PUBLIC_PATHS:
             return await call_next(request)
 

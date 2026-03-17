@@ -99,7 +99,9 @@ class InMemoryRateLimitStore:
 def _settings_with_pat(pat: str | None = "test-secret-token") -> Settings:
     """Return a Settings instance with a known PAT for testing."""
     return Settings(
+        _env_file=None,
         incidentflow_pat=pat,
+        platform_api_base_url=None,
         environment="test",
         log_level="warning",
         redis_url="redis://test-only",
@@ -108,7 +110,9 @@ def _settings_with_pat(pat: str | None = "test-secret-token") -> Settings:
 
 def _settings_without_pat() -> Settings:
     return Settings(
+        _env_file=None,
         incidentflow_pat=None,
+        platform_api_base_url=None,
         environment="test",
         log_level="warning",
         redis_url="redis://test-only",
@@ -125,6 +129,16 @@ def rate_limit_store(monkeypatch: pytest.MonkeyPatch) -> InMemoryRateLimitStore:
 
     monkeypatch.setattr("incidentflow_mcp.app.RedisRateLimitStore", _factory)
     return store
+
+
+@pytest.fixture(autouse=True)
+def isolate_token_repository(monkeypatch: pytest.MonkeyPatch) -> InMemoryTokenRepository:
+    """
+    Ensure tests never read developer-local ~/.incidentflow/tokens.json.
+    """
+    repo = InMemoryTokenRepository()
+    monkeypatch.setattr("incidentflow_mcp.auth.repository._repo", repo)
+    return repo
 
 
 # ---------------------------------------------------------------------------

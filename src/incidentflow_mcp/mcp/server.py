@@ -7,11 +7,13 @@ All tools are registered here and wired to their implementation modules.
 
 import json
 import logging
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
 from incidentflow_mcp.config import get_settings
 from incidentflow_mcp.mcp.resources import register_resources
+from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -23,6 +25,35 @@ from incidentflow_mcp.tools.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+_VALID_EXECUTION_MODES = {"auto", "sync", "async"}
+
+
+def _resolve_execution_mode(settings, requested_mode: str) -> str:
+    mode = requested_mode.lower().strip()
+    if mode not in _VALID_EXECUTION_MODES:
+        raise ValueError(f"Unsupported execution_mode: {requested_mode}")
+    if mode == "auto":
+        return "async" if settings.async_tools_enabled() else "sync"
+    return mode
+
+
+def _build_async_result(
+    *,
+    job_id: str,
+    status: str,
+    poll_after_seconds: int,
+    extra: dict[str, Any] | None = None,
+) -> str:
+    payload: dict[str, Any] = {
+        "mode": "async",
+        "job_id": job_id,
+        "status": status,
+        "poll_after_seconds": poll_after_seconds,
+    }
+    if extra:
+        payload.update(extra)
+    return json.dumps(payload, indent=2)
 
 
 def create_mcp_server() -> FastMCP:
@@ -58,19 +89,43 @@ def create_mcp_server() -> FastMCP:
         name="incident_summary",
         description=_specs["incident_summary"].description,
     )
-    def incident_summary(
+    async def incident_summary(
         incident_id: str,
         include_timeline: bool = True,
         include_affected_services: bool = True,
+        execution_mode: str = "auto",
+        workspace_id: str | None = None,
     ) -> str:
         """MCP tool wrapper for incident_summary."""
+        mode = _resolve_execution_mode(settings, execution_mode)
         input_data = IncidentSummaryInput(
             incident_id=incident_id,
             include_timeline=include_timeline,
             include_affected_services=include_affected_services,
         )
-        result: IncidentSummaryOutput = _incident_summary_impl(input_data)
-        return result.model_dump_json(indent=2)
+
+        if mode == "sync":
+            result: IncidentSummaryOutput = _incident_summary_impl(input_data)
+            return result.model_dump_json(indent=2)
+
+        client = PlatformAPIJobsClient(settings)
+        submitted = await client.submit_job(
+            {
+                "job_type": "incident.summary.generate",
+                "runner_mode": "summary",
+                "task_profile": "summary.small",
+                "workspace_id": workspace_id or "default",
+                "incident_id": incident_id,
+                "payload": input_data.model_dump(),
+                "artifact_refs": [],
+                "evidence_refs": [],
+            }
+        )
+        return _build_async_result(
+            job_id=submitted["job_id"],
+            status=submitted.get("status", "queued"),
+            poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
+        )
 
     # ------------------------------------------------------------------
     # Tool: correlate_alerts
@@ -80,7 +135,13 @@ def create_mcp_server() -> FastMCP:
         name="correlate_alerts",
         description=_specs["correlate_alerts"].description,
     )
-    def correlate_alerts(alerts_json: str, window_minutes: int = 60, min_cluster_size: int = 2) -> str:
+    async def correlate_alerts(
+        alerts_json: str,
+        window_minutes: int = 60,
+        min_cluster_size: int = 2,
+        execution_mode: str = "auto",
+        workspace_id: str | None = None,
+    ) -> str:
         """
         MCP tool wrapper for correlate_alerts.
 
@@ -92,8 +153,33 @@ def create_mcp_server() -> FastMCP:
             window_minutes=window_minutes,
             min_cluster_size=min_cluster_size,
         )
-        result: CorrelateAlertsOutput = _correlate_alerts_impl(input_data)
-        return result.model_dump_json(indent=2)
+        mode = _resolve_execution_mode(settings, execution_mode)
+
+        if mode == "sync":
+            result: CorrelateAlertsOutput = _correlate_alerts_impl(input_data)
+            return result.model_dump_json(indent=2)
+
+        client = PlatformAPIJobsClient(settings)
+        submitted = await client.submit_job(
+            {
+                "job_type": "incident.graph.build",
+                "runner_mode": "graph",
+                "task_profile": "graph.standard",
+                "workspace_id": workspace_id or "default",
+                "payload": {
+                    "alerts": [a.model_dump(mode="json") for a in input_data.alerts],
+                    "window_minutes": window_minutes,
+                    "min_cluster_size": min_cluster_size,
+                },
+                "artifact_refs": [],
+                "evidence_refs": [],
+            }
+        )
+        return _build_async_result(
+            job_id=submitted["job_id"],
+            status=submitted.get("status", "queued"),
+            poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
+        )
 
     # ------------------------------------------------------------------
     # Resources
