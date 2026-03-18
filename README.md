@@ -139,3 +139,36 @@ as `last_used_at` is updated in platform-api during introspection.
 Fallback behavior:
 - If `PLATFORM_API_BASE_URL` is not set, MCP uses local auth (`INCIDENTFLOW_PAT` and/or local repo tokens).
 - In production, at least one auth source must be configured (`PLATFORM_API_BASE_URL` or `INCIDENTFLOW_PAT`).
+
+## `external_status_check` response modes
+
+`external_status_check` supports two output modes:
+
+- `response_mode=compact` (default): chat-safe summary for VS Code/Copilot rendering.
+- `response_mode=full`: raw platform job payload for deep RCA analysis.
+
+Polling behavior:
+- If `check_id` is provided, MCP polls that existing `job_id` and does not create a new job.
+- If `check_id` is omitted, MCP submits a new async job.
+
+Example (compact):
+
+```json
+{
+  "providers": ["github"],
+  "wait_for_result": true,
+  "days_back": 30,
+  "response_mode": "compact"
+}
+```
+
+Example (full):
+
+```json
+{
+  "providers": ["github"],
+  "wait_for_result": true,
+  "days_back": 30,
+  "response_mode": "full"
+}
+```

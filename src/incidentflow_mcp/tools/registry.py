@@ -111,6 +111,66 @@ _TOOL_SPECS: list[ToolSpec] = [
             "openWorldHint": False,
         },
     ),
+    ToolSpec(
+        name="external_status_check",
+        description=(
+            "Fetch real-time and historical AWS/GitHub status via async jobs. "
+            "Default response_mode=compact returns a chat-safe summary. Use "
+            "response_mode=full for complete raw payload (including larger data such as "
+            "incident updates). Set wait_for_result=false to get an async job_id for "
+            "manual polling."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "providers": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["aws", "github"]},
+                    "default": ["aws", "github"],
+                    "description": "External status providers to query",
+                },
+                "days_back": {
+                    "type": "integer",
+                    "default": 30,
+                    "minimum": 1,
+                    "maximum": 365,
+                    "description": "How many days of incident history to fetch (default: 30)",
+                },
+                "wait_for_result": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "If true (default), polls until the job completes. If false, returns job_id immediately for manual polling.",
+                },
+                "execution_mode": {
+                    "type": "string",
+                    "enum": ["auto", "sync", "async"],
+                    "default": "async",
+                    "description": "Runner orchestration mode. auto/sync are coerced to async.",
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Optional workspace scope for async orchestration",
+                },
+                "check_id": {
+                    "type": "string",
+                    "description": "Existing async job_id for polling (when provided, MCP polls this job and does not create a new one)",
+                },
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact returns chat-safe summary; full returns raw job result payload.",
+                },
+            },
+            "required": [],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
 ]
 
 
