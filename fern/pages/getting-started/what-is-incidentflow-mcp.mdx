@@ -1,0 +1,50 @@
+# What is IncidentFlow MCP
+
+> **TL;DR**  
+> IncidentFlow MCP is an MCP-compatible incident intelligence platform for AI-powered SRE workflows.
+
+IncidentFlow MCP is an MCP-compatible service designed to make operational data (alerts, incidents, metrics, logs) accessible to AI systems in a structured and actionable way.
+
+It acts as a bridge between:
+
+- Observability systems (Prometheus, CloudWatch, Grafana, etc.)
+- Incident management tools (PagerDuty, Slack, Jira)
+- AI agents (via MCP protocol)
+
+Instead of raw alerts, IncidentFlow provides:
+
+- normalized signals
+- correlated events
+- incident context
+- historical patterns
+
+This allows AI agents to answer questions like:
+
+> Has this incident happened before?
+>
+> What was the root cause last time?
+>
+> What actions usually fix this?
+
+## Why MCP?
+
+Model Context Protocol (MCP) enables AI systems to:
+
+- discover tools dynamically
+- access structured data
+- execute actions safely
+
+IncidentFlow MCP exposes operational intelligence via MCP so that AI agents can:
+
+- query incident history
+- analyze real-time signals
+- assist SRE workflows
+- automate diagnostics
+
+## Key capabilities
+
+- Event ingestion (alerts, logs, metrics)
+- Correlation engine (group related signals)
+- Incident graph (relationships between events)
+- Retrieval layer (historical knowledge)
+- MCP interface for AI agents

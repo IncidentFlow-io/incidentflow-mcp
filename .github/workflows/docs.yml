@@ -1,0 +1,142 @@
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - 'openapi/**'
+      - 'fern/**'
+      - 'scripts/**'
+      - 'src/**'
+      - 'Makefile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'openapi/**'
+      - 'fern/**'
+      - 'scripts/**'
+      - 'src/**'
+      - 'Makefile'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+    inputs:
+      publish_production:
+        description: 'Publish docs to production custom domain'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  validate:
+    name: Validate OpenAPI + Fern
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Fern CLI
+        run: npm install -g fern-api
+
+      - name: Generate OpenAPI
+        run: make openapi-generate
+
+      - name: Ensure OpenAPI is committed
+        run: git diff --exit-code -- openapi/openapi.yaml
+
+      - name: Validate OpenAPI
+        run: make openapi-validate
+
+      - name: Check Fern
+        run: make fern-check
+
+  publish-preview:
+    name: Publish Fern Docs Preview
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.FERN_TOKEN != ''
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Fern CLI
+        run: npm install -g fern-api
+
+      - name: Generate OpenAPI
+        run: make openapi-generate
+
+      - name: Publish preview docs
+        env:
+          FERN_TOKEN: ${{ secrets.FERN_TOKEN }}
+        run: make fern-docs-generate
+
+  publish-production:
+    name: Publish Fern Docs Production
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_production == true && secrets.FERN_TOKEN != ''
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Fern CLI
+        run: npm install -g fern-api
+
+      - name: Generate OpenAPI
+        run: make openapi-generate
+
+      - name: Publish production docs
+        env:
+          FERN_TOKEN: ${{ secrets.FERN_TOKEN }}
+        run: make fern-docs-publish

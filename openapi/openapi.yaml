@@ -1,0 +1,857 @@
+openapi: 3.1.0
+info:
+  title: IncidentFlow MCP API
+  description: Canonical API specification for IncidentFlow MCP. Generated from FastAPI routes and MCP
+    tool metadata.
+  version: 0.1.0
+paths:
+  /install.sh:
+    get:
+      tags:
+      - ops
+      summary: Installer script
+      description: Return a curl-able installer script with a URL derived from current host.
+      operationId: install_sh_install_sh_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security: []
+  /healthz:
+    get:
+      tags:
+      - ops
+      summary: Liveness probe
+      description: "Returns 200 OK. Used by Docker/Kubernetes liveness probes \u2014 no auth required."
+      operationId: healthz_healthz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security: []
+  /readyz:
+    get:
+      tags:
+      - ops
+      summary: Readiness probe
+      description: "Returns 200 when the app is ready to serve traffic \u2014 no auth required."
+      operationId: readyz_readyz_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security: []
+  /metrics:
+    get:
+      tags:
+      - ops
+      summary: Prometheus metrics
+      description: Prometheus metrics endpoint.
+      operationId: metrics_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+            text/plain:
+              schema:
+                type: string
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security: []
+  /mcp:
+    get:
+      tags:
+      - mcp
+      operationId: mcpGet
+      summary: MCP Streamable HTTP handshake
+      description: MCP Streamable HTTP endpoint (custom ASGI proxy route). GET is supported by transport
+        and may be used by MCP clients for handshake/session semantics.
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: MCP GET response from FastMCP transport
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+            text/event-stream:
+              schema:
+                type: string
+              example: 'event: message\ndata: {...}\n\n'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    options:
+      tags:
+      - mcp
+      operationId: mcpOptions
+      summary: MCP CORS preflight
+      description: OPTIONS support for MCP endpoint (kept for CORS preflight compatibility).
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: CORS preflight response
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      tags:
+      - mcp
+      operationId: mcpPost
+      summary: MCP JSON-RPC endpoint
+      description: Primary MCP endpoint. Accepts JSON-RPC requests such as `initialize`, `tools/list`,
+        and `tools/call`. Some responses may stream over SSE depending on client transport/session flow.
+      security:
+      - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JsonRpcRequest'
+            examples:
+              initialize:
+                summary: Initialize session
+                value:
+                  jsonrpc: '2.0'
+                  id: 1
+                  method: initialize
+                  params:
+                    protocolVersion: '2024-11-05'
+                    capabilities: {}
+                    clientInfo:
+                      name: local-dev
+                      version: 0.1.0
+              toolsList:
+                summary: List available tools
+                value:
+                  jsonrpc: '2.0'
+                  id: 2
+                  method: tools/list
+                  params: {}
+              incidentSummaryCall:
+                summary: Call incident_summary
+                value:
+                  jsonrpc: '2.0'
+                  id: 3
+                  method: tools/call
+                  params:
+                    name: incident_summary
+                    arguments:
+                      incident_id: INC-001
+                      include_timeline: true
+                      include_affected_services: true
+                      execution_mode: auto
+              correlateAlertsCall:
+                summary: Call correlate_alerts
+                value:
+                  jsonrpc: '2.0'
+                  id: 4
+                  method: tools/call
+                  params:
+                    name: correlate_alerts
+                    arguments:
+                      alerts_json: '[{"alert_id":"a1","name":"HighMemoryUsage","service":"api-gateway","severity":"critical","status":"firing","fired_at":"2024-01-15T10:00:00Z","labels":{"env":"prod"}}]'
+                      window_minutes: 30
+                      min_cluster_size: 2
+                      execution_mode: auto
+              externalStatusCall:
+                summary: Call external_status_check
+                value:
+                  jsonrpc: '2.0'
+                  id: 5
+                  method: tools/call
+                  params:
+                    name: external_status_check
+                    arguments:
+                      providers:
+                      - github
+                      days_back: 30
+                      wait_for_result: true
+                      execution_mode: async
+                      response_mode: compact
+      responses:
+        '200':
+          description: JSON-RPC success or error payload
+          content:
+            application/json:
+              schema:
+                oneOf:
+                - $ref: '#/components/schemas/JsonRpcSuccessResponse'
+                - $ref: '#/components/schemas/JsonRpcErrorResponse'
+              examples:
+                success:
+                  summary: Generic success response
+                  value:
+                    jsonrpc: '2.0'
+                    id: 2
+                    result:
+                      tools: []
+                rateLimitToolError:
+                  summary: Tool-level guard error (still HTTP 200)
+                  value:
+                    jsonrpc: '2.0'
+                    id: 2
+                    error:
+                      code: -32029
+                      message: Rate limit exceeded for tool invocation
+            text/event-stream:
+              schema:
+                type: string
+              example: 'event: message\ndata: {...}\n\n'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '429':
+          $ref: '#/components/responses/RateLimitError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+tags:
+- name: ops
+  description: Operational/public endpoints
+- name: mcp
+  description: MCP Streamable HTTP transport endpoint
+components:
+  schemas:
+    IncidentSummaryInput:
+      description: Input for the incident_summary tool.
+      properties:
+        incident_id:
+          description: Unique incident identifier
+          maxLength: 128
+          minLength: 1
+          title: Incident Id
+          type: string
+        include_timeline:
+          default: true
+          description: Include event timeline in summary
+          title: Include Timeline
+          type: boolean
+        include_affected_services:
+          default: true
+          description: Include impacted service list
+          title: Include Affected Services
+          type: boolean
+      required:
+      - incident_id
+      title: IncidentSummaryInput
+      type: object
+    Severity:
+      enum:
+      - critical
+      - high
+      - medium
+      - low
+      - info
+      title: Severity
+      type: string
+    TimelineEvent:
+      properties:
+        timestamp:
+          format: date-time
+          title: Timestamp
+          type: string
+        description:
+          title: Description
+          type: string
+        actor:
+          anyOf:
+          - type: string
+          - type: 'null'
+          default: null
+          title: Actor
+      required:
+      - timestamp
+      - description
+      title: TimelineEvent
+      type: object
+    IncidentSummaryOutput:
+      description: Output from the incident_summary tool.
+      properties:
+        incident_id:
+          title: Incident Id
+          type: string
+        title:
+          title: Title
+          type: string
+        severity:
+          $ref: '#/components/schemas/Severity'
+        status:
+          title: Status
+          type: string
+        summary:
+          title: Summary
+          type: string
+        affected_services:
+          items:
+            type: string
+          title: Affected Services
+          type: array
+        timeline:
+          items:
+            $ref: '#/components/schemas/TimelineEvent'
+          title: Timeline
+          type: array
+        recommendations:
+          items:
+            type: string
+          title: Recommendations
+          type: array
+      required:
+      - incident_id
+      - title
+      - severity
+      - status
+      - summary
+      - affected_services
+      - timeline
+      - recommendations
+      title: IncidentSummaryOutput
+      type: object
+    Alert:
+      description: A single alert to be correlated.
+      properties:
+        alert_id:
+          maxLength: 128
+          minLength: 1
+          title: Alert Id
+          type: string
+        name:
+          title: Name
+          type: string
+        service:
+          title: Service
+          type: string
+        severity:
+          $ref: '#/components/schemas/Severity'
+        status:
+          $ref: '#/components/schemas/AlertStatus'
+        fired_at:
+          format: date-time
+          title: Fired At
+          type: string
+        labels:
+          additionalProperties:
+            type: string
+          title: Labels
+          type: object
+      required:
+      - alert_id
+      - name
+      - service
+      - severity
+      - status
+      - fired_at
+      title: Alert
+      type: object
+    AlertStatus:
+      enum:
+      - firing
+      - resolved
+      - pending
+      title: AlertStatus
+      type: string
+    CorrelateAlertsInput:
+      description: Input for the correlate_alerts tool.
+      properties:
+        alerts:
+          description: List of alerts to correlate
+          items:
+            $ref: '#/components/schemas/Alert'
+          maxItems: 500
+          minItems: 1
+          title: Alerts
+          type: array
+        window_minutes:
+          default: 60
+          description: Correlation time window in minutes
+          maximum: 1440
+          minimum: 1
+          title: Window Minutes
+          type: integer
+        min_cluster_size:
+          default: 2
+          description: Minimum alerts in a cluster to report
+          minimum: 1
+          title: Min Cluster Size
+          type: integer
+      required:
+      - alerts
+      title: CorrelateAlertsInput
+      type: object
+    AlertCluster:
+      description: A group of correlated alerts.
+      properties:
+        cluster_id:
+          title: Cluster Id
+          type: string
+        alert_ids:
+          items:
+            type: string
+          title: Alert Ids
+          type: array
+        services:
+          items:
+            type: string
+          title: Services
+          type: array
+        dominant_severity:
+          $ref: '#/components/schemas/Severity'
+        likely_root_cause:
+          title: Likely Root Cause
+          type: string
+        confidence:
+          maximum: 1.0
+          minimum: 0.0
+          title: Confidence
+          type: number
+      required:
+      - cluster_id
+      - alert_ids
+      - services
+      - dominant_severity
+      - likely_root_cause
+      - confidence
+      title: AlertCluster
+      type: object
+    CorrelateAlertsOutput:
+      description: Output from the correlate_alerts tool.
+      properties:
+        total_alerts:
+          title: Total Alerts
+          type: integer
+        clusters:
+          items:
+            $ref: '#/components/schemas/AlertCluster'
+          title: Clusters
+          type: array
+        uncorrelated_alert_ids:
+          items:
+            type: string
+          title: Uncorrelated Alert Ids
+          type: array
+        analysis_window_minutes:
+          title: Analysis Window Minutes
+          type: integer
+        summary:
+          title: Summary
+          type: string
+      required:
+      - total_alerts
+      - clusters
+      - uncorrelated_alert_ids
+      - analysis_window_minutes
+      - summary
+      title: CorrelateAlertsOutput
+      type: object
+    incident_summaryArguments:
+      type: object
+      properties:
+        incident_id:
+          type: string
+          description: Unique incident identifier (e.g. INC-001)
+        include_timeline:
+          type: boolean
+          default: true
+          description: Include event timeline in the response
+        include_affected_services:
+          type: boolean
+          default: true
+          description: Include impacted service list in the response
+        execution_mode:
+          type: string
+          enum:
+          - auto
+          - sync
+          - async
+          default: auto
+          description: Execution strategy. auto => async in production, sync elsewhere.
+        workspace_id:
+          type: string
+          description: Optional workspace scope for async orchestration
+      required:
+      - incident_id
+      title: incident_summaryArguments
+    correlate_alertsArguments:
+      type: object
+      properties:
+        alerts_json:
+          type: string
+          description: JSON array of Alert objects to correlate
+        window_minutes:
+          type: integer
+          default: 60
+          description: "Correlation time window in minutes (1\u20131440)"
+        min_cluster_size:
+          type: integer
+          default: 2
+          description: Minimum number of alerts required to form a cluster
+        execution_mode:
+          type: string
+          enum:
+          - auto
+          - sync
+          - async
+          default: auto
+          description: Execution strategy. auto => async in production, sync elsewhere.
+        workspace_id:
+          type: string
+          description: Optional workspace scope for async orchestration
+      required:
+      - alerts_json
+      title: correlate_alertsArguments
+    external_status_checkArguments:
+      type: object
+      properties:
+        providers:
+          type: array
+          items:
+            type: string
+            enum:
+            - aws
+            - github
+          default:
+          - aws
+          - github
+          description: External status providers to query
+        days_back:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 365
+          description: 'How many days of incident history to fetch (default: 30)'
+        wait_for_result:
+          type: boolean
+          default: true
+          description: If true (default), polls until the job completes. If false, returns job_id immediately
+            for manual polling.
+        execution_mode:
+          type: string
+          enum:
+          - auto
+          - sync
+          - async
+          default: async
+          description: Runner orchestration mode. auto/sync are coerced to async.
+        workspace_id:
+          type: string
+          description: Optional workspace scope for async orchestration
+        check_id:
+          type: string
+          description: Existing async job_id for polling (when provided, MCP polls this job and does not
+            create a new one)
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact returns chat-safe summary; full returns raw job result payload.
+      required: []
+      title: external_status_checkArguments
+    InitializeParams:
+      type: object
+      properties:
+        protocolVersion:
+          type: string
+          example: '2024-11-05'
+        capabilities:
+          type: object
+          additionalProperties: true
+        clientInfo:
+          type: object
+          properties:
+            name:
+              type: string
+            version:
+              type: string
+          required:
+          - name
+          - version
+      required:
+      - protocolVersion
+      - capabilities
+      - clientInfo
+    ToolsListParams:
+      type: object
+      additionalProperties: false
+    ToolsCallParams:
+      oneOf:
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - correlate_alerts
+          arguments:
+            $ref: '#/components/schemas/correlate_alertsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - external_status_check
+          arguments:
+            $ref: '#/components/schemas/external_status_checkArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - incident_summary
+          arguments:
+            $ref: '#/components/schemas/incident_summaryArguments'
+      description: Tool invocation envelope. `arguments` schema is selected by `name`.
+    JsonRpcInitializeRequest:
+      type: object
+      required:
+      - jsonrpc
+      - id
+      - method
+      - params
+      properties:
+        jsonrpc:
+          type: string
+          enum:
+          - '2.0'
+        id:
+          oneOf:
+          - type: integer
+          - type: string
+        method:
+          type: string
+          enum:
+          - initialize
+        params:
+          $ref: '#/components/schemas/InitializeParams'
+    JsonRpcToolsListRequest:
+      type: object
+      required:
+      - jsonrpc
+      - id
+      - method
+      - params
+      properties:
+        jsonrpc:
+          type: string
+          enum:
+          - '2.0'
+        id:
+          oneOf:
+          - type: integer
+          - type: string
+        method:
+          type: string
+          enum:
+          - tools/list
+        params:
+          $ref: '#/components/schemas/ToolsListParams'
+    JsonRpcToolsCallRequest:
+      type: object
+      required:
+      - jsonrpc
+      - id
+      - method
+      - params
+      properties:
+        jsonrpc:
+          type: string
+          enum:
+          - '2.0'
+        id:
+          oneOf:
+          - type: integer
+          - type: string
+        method:
+          type: string
+          enum:
+          - tools/call
+        params:
+          $ref: '#/components/schemas/ToolsCallParams'
+    JsonRpcRequest:
+      oneOf:
+      - $ref: '#/components/schemas/JsonRpcInitializeRequest'
+      - $ref: '#/components/schemas/JsonRpcToolsListRequest'
+      - $ref: '#/components/schemas/JsonRpcToolsCallRequest'
+    JsonRpcSuccessResponse:
+      type: object
+      required:
+      - jsonrpc
+      - id
+      - result
+      properties:
+        jsonrpc:
+          type: string
+          enum:
+          - '2.0'
+        id:
+          oneOf:
+          - type: integer
+          - type: string
+          - type: 'null'
+        result:
+          type: object
+          additionalProperties: true
+    JsonRpcError:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: integer
+        message:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+    JsonRpcErrorResponse:
+      type: object
+      required:
+      - jsonrpc
+      - id
+      - error
+      properties:
+        jsonrpc:
+          type: string
+          enum:
+          - '2.0'
+        id:
+          oneOf:
+          - type: integer
+          - type: string
+          - type: 'null'
+        error:
+          $ref: '#/components/schemas/JsonRpcError'
+    UnauthorizedError:
+      type: object
+      required:
+      - detail
+      properties:
+        detail:
+          type: string
+          example: 'Missing or malformed Authorization: Bearer <token>.'
+    ForbiddenScopeError:
+      type: object
+      required:
+      - error
+      - required_scope
+      properties:
+        error:
+          type: string
+          enum:
+          - insufficient_scope
+        required_scope:
+          type: string
+          example: mcp:tools:run
+    ForbiddenDetailError:
+      type: object
+      required:
+      - detail
+      properties:
+        detail:
+          type: string
+          example: Insufficient token scope
+    RateLimitError:
+      type: object
+      required:
+      - detail
+      properties:
+        detail:
+          type: string
+          example: Too Many Requests
+    InternalServerError:
+      type: object
+      required:
+      - detail
+      properties:
+        detail:
+          type: string
+          example: internal server error
+  responses:
+    UnauthorizedError:
+      description: Unauthorized
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+          example: Bearer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UnauthorizedError'
+    ForbiddenError:
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            oneOf:
+            - $ref: '#/components/schemas/ForbiddenScopeError'
+            - $ref: '#/components/schemas/ForbiddenDetailError'
+    RateLimitError:
+      description: Rate limited
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/RateLimitError'
+    InternalServerError:
+      description: Unhandled exception
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/InternalServerError'
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token auth. In development with no auth provider configured, /mcp may run unprotected.

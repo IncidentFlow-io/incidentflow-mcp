@@ -1,0 +1,12 @@
+# How it works
+
+1. Signals are ingested from external systems:
+   - Prometheus alerts
+   - CloudWatch alarms
+   - Slack incidents
+   - Logs and metrics
+2. Signals are normalized into a common format.
+3. A correlation engine groups signals into incidents.
+4. Events are stored in an event store.
+5. A retrieval layer allows querying past incidents.
+6. MCP interface exposes this data to AI systems.

@@ -1,0 +1,12 @@
+api:
+  specs:
+    - openapi: ../openapi/openapi.yaml
+
+groups:
+  docs:
+    generators:
+      - name: fernapi/fern-docs
+        version: latest
+        output:
+          location: local-file-system
+          path: ../.fern-docs
