@@ -1,0 +1,17 @@
+instances:
+  - url: https://incidentflow.docs.buildwithfern.com
+    custom-domain: docs.incidentflow.io
+
+navigation:
+  - section: Getting Started
+    contents:
+      - page: What is IncidentFlow MCP
+        path: pages/getting-started/what-is-incidentflow-mcp.mdx
+      - page: How it works
+        path: pages/getting-started/how-it-works.mdx
+      - page: MCP Integration
+        path: pages/getting-started/mcp-integration.mdx
+
+  - section: API Reference
+    contents:
+      - api: incidentflow-mcp

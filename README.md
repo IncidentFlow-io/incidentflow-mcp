@@ -8,6 +8,96 @@ The IncidentFlow MCP server is open-source under the MIT License.
 
 IncidentFlow Cloud platform and hosted services are proprietary.
 
+## Local API Docs (OpenAPI + Fern)
+
+This repository includes a code-derived OpenAPI spec and Fern docs config so contributors can inspect the full public API surface locally.
+
+### What is documented
+
+- Public ops endpoints: `/install.sh`, `/healthz`, `/readyz`, `/metrics`
+- MCP transport endpoint: `/mcp` (`GET`, `POST`, `OPTIONS`)
+- Auth requirements
+- Request/response schemas
+- Reusable components
+- Common error responses (`401`, `403`, `429`, `500`)
+- JSON-RPC request examples for MCP (`initialize`, `tools/list`, `tools/call`)
+
+### Prerequisites
+
+Install Fern CLI:
+
+```bash
+npm install -g fern-api
+```
+
+### Generate and validate OpenAPI
+
+```bash
+make openapi-generate
+make openapi-validate
+```
+
+Output spec:
+
+- `openapi/openapi.yaml`
+
+### Run Fern checks and docs locally
+
+```bash
+make fern-check
+make fern-docs-dev
+```
+
+Alternative direct commands:
+
+```bash
+cd fern
+FERN_NO_VERSION_REDIRECTION=true fern check
+FERN_NO_VERSION_REDIRECTION=true fern docs dev
+FERN_NO_VERSION_REDIRECTION=true fern generate --docs --preview
+```
+
+`fern generate --docs --preview` may require `fern login` (or `FERN_TOKEN`) depending on your Fern account/workspace setup.
+
+### Custom domain for docs
+
+Fern docs are configured with a custom domain:
+
+- `docs.incidentflow.io`
+
+For production publishing:
+
+```bash
+make fern-docs-publish
+```
+
+For preview publishing:
+
+```bash
+make fern-docs-generate
+```
+
+DNS note:
+
+- Create the `CNAME` record for `docs.incidentflow.io` to the Fern-provided target in your Fern dashboard/domain settings.
+
+### Notes on MCP schema fidelity
+
+The `/mcp` endpoint is implemented as a custom ASGI proxy route and supports Streamable HTTP behavior (including SSE paths) that OpenAPI cannot fully encode.  
+The OpenAPI document intentionally captures the stable HTTP + JSON-RPC contract and representative examples without inventing non-existent endpoints or transport behavior.
+
+### CI automation (GitHub Actions)
+
+This repository includes a docs workflow at `.github/workflows/docs.yml`:
+
+- On pull requests: generates OpenAPI, validates it, and runs `fern check`.
+- On push to `main`: does the same validation and then runs `fern generate --docs --preview` if `FERN_TOKEN` is configured.
+- On manual run (`workflow_dispatch`): set `publish_production=true` to publish to the custom domain.
+
+Required repository secret for publishing previews:
+
+- `FERN_TOKEN`
+
 ## VS Code MCP installer
 
 After deploying this service behind an ingress (for example, `https://mcp.incidentflow.io`),
