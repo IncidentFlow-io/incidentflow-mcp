@@ -109,6 +109,10 @@ class Settings(BaseSettings):
         default=None,
         description="Enable async orchestration for heavy MCP tools (default: True in production).",
     )
+    mcp_oms_persist_enabled: bool = Field(
+        default=False,
+        description="When true, external status tool requests trigger OMS persistence side-effects.",
+    )
 
     # -----------------------------------------------------------------------
     # Example tool knobs (extend as needed)
