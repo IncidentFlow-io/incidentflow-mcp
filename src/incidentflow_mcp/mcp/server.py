@@ -159,12 +159,17 @@ def _compact_external_status_result(result: Any) -> Any:
             }
         )
 
-    return {
+    compact_result = {
         "status": result.get("status"),
         "action": result.get("action"),
         "providers_succeeded": result.get("providers_succeeded"),
         "external_status": compact_statuses,
     }
+    if "persistence" in result:
+        compact_result["persistence"] = result.get("persistence")
+    if "provenance" in result:
+        compact_result["provenance"] = result.get("provenance")
+    return compact_result
 
 
 def _normalize_polled_external_status_job(
@@ -272,6 +277,7 @@ async def _execute_external_status_check(
                 "providers": selected_providers,
                 "external_status_only": True,
                 "days_back": days_back,
+                "persist_to_oms": settings.mcp_oms_persist_enabled,
             },
             "artifact_refs": [],
             "evidence_refs": [],
