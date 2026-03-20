@@ -5,9 +5,12 @@ Tests for the Bearer PAT authentication middleware.
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from incidentflow_mcp.app import create_app
+from incidentflow_mcp.auth.context import get_current_auth_context
+from incidentflow_mcp.auth.middleware import BearerAuthMiddleware
 from incidentflow_mcp.auth.repository import InMemoryTokenRepository, TokenRecord
 from incidentflow_mcp.auth.tokens import generate_pat
 from incidentflow_mcp.config import Settings
@@ -89,6 +92,61 @@ class TestAuthSuccess:
     def test_unprotected_mode_no_token_needed(self, unauth_client: TestClient) -> None:
         resp = unauth_client.get("/mcp")
         assert resp.status_code != 401
+
+    def test_auth_context_is_available_during_request_and_cleared_after(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        settings = Settings(
+            _env_file=None,
+            incidentflow_pat="test-secret-token",
+            platform_api_base_url=None,
+            environment="test",
+            log_level="warning",
+        )
+        monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
+        monkeypatch.setattr("incidentflow_mcp.auth.repository._repo", InMemoryTokenRepository())
+
+        app = FastAPI()
+        app.add_middleware(BearerAuthMiddleware)
+
+        @app.get("/whoami")
+        async def whoami() -> dict[str, object]:
+            return get_current_auth_context() or {"authenticated": False}
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/whoami", headers={"Authorization": "Bearer test-secret-token"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["authenticated"] is True
+        assert body["client_id"] == "legacy_pat"
+        assert get_current_auth_context() is None
+
+    def test_auth_context_is_cleared_after_failed_auth(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        settings = Settings(
+            _env_file=None,
+            incidentflow_pat="test-secret-token",
+            platform_api_base_url=None,
+            environment="test",
+            log_level="warning",
+        )
+        monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
+        monkeypatch.setattr("incidentflow_mcp.auth.repository._repo", InMemoryTokenRepository())
+
+        app = FastAPI()
+        app.add_middleware(BearerAuthMiddleware)
+
+        @app.get("/whoami")
+        async def whoami() -> dict[str, object]:
+            return get_current_auth_context() or {"authenticated": False}
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/whoami")
+        assert response.status_code == 401
+        assert get_current_auth_context() is None
 
 
 class TestRepoAuth:

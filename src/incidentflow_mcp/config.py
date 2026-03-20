@@ -65,6 +65,11 @@ class Settings(BaseSettings):
         le=60,
         description="Suggested poll interval in async MCP tool responses",
     )
+    mcp_default_workspace_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_DEFAULT_WORKSPACE_ID", "DEFAULT_WORKSPACE_ID"),
+        description="Optional default workspace_id used for async job orchestration when tool input omits workspace_id.",
+    )
 
     # When True, tokens must carry all required scopes for the endpoint they
     # access; requests missing a scope get 403.  Defaults to True in

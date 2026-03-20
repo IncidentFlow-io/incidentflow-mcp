@@ -55,7 +55,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Optional workspace scope for async orchestration",
+                    "description": "Workspace scope for async orchestration. Optional when token has workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured.",
                 },
             },
             "required": ["incident_id"],
@@ -99,7 +99,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Optional workspace scope for async orchestration",
+                    "description": "Workspace scope for async orchestration. Optional when token has workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured.",
                 },
             },
             "required": ["alerts_json"],
@@ -149,7 +149,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Optional workspace scope for async orchestration",
+                    "description": "Workspace scope for async orchestration. Optional when token has workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured.",
                 },
                 "check_id": {
                     "type": "string",
