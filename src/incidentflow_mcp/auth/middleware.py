@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
+from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.auth.repository import get_token_repository
 from incidentflow_mcp.auth.tokens import parse_token_id, verify_token
 from incidentflow_mcp.config import get_settings
@@ -62,18 +63,22 @@ def _required_scope_for_request(request: Request) -> str | None:
 
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        if request.url.path == "/mcp" and request.method.upper() not in _MCP_ALLOWED_METHODS:
-            # Let router return 404/405 for unsupported methods.
+        clear_current_auth_context()
+        try:
+            if request.url.path == "/mcp" and request.method.upper() not in _MCP_ALLOWED_METHODS:
+                # Let router return 404/405 for unsupported methods.
+                return await call_next(request)
+
+            if request.url.path in _PUBLIC_PATHS:
+                return await call_next(request)
+
+            error = await _verify_bearer(request)
+            if error is not None:
+                return error
+
             return await call_next(request)
-
-        if request.url.path in _PUBLIC_PATHS:
-            return await call_next(request)
-
-        error = await _verify_bearer(request)
-        if error is not None:
-            return error
-
-        return await call_next(request)
+        finally:
+            clear_current_auth_context()
 
 
 async def _verify_bearer(request: Request) -> JSONResponse | None:
@@ -291,10 +296,12 @@ def _set_auth_context(
     user_id: str | None = None,
     plan: str | None = None,
 ) -> None:
-    request.state.auth_context = {
+    context = {
         "authenticated": authenticated,
         "client_id": client_id,
         "workspace_id": workspace_id,
         "user_id": user_id,
         "plan": plan,
     }
+    request.state.auth_context = context
+    set_current_auth_context(context)

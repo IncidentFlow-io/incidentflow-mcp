@@ -12,6 +12,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from incidentflow_mcp.auth.context import get_current_auth_context
 from incidentflow_mcp.config import Settings, get_settings
 from incidentflow_mcp.mcp.resources import register_resources
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
@@ -54,6 +55,47 @@ def _resolve_response_mode(requested_mode: str) -> str:
     if mode not in _VALID_RESPONSE_MODES:
         raise ValueError(f"Unsupported response_mode: {requested_mode}")
     return mode
+
+
+def _current_token_workspace_id() -> str | None:
+    auth_context = get_current_auth_context()
+    if not auth_context:
+        return None
+    workspace_id = auth_context.get("workspace_id")
+    if workspace_id is None:
+        return None
+    normalized = str(workspace_id).strip()
+    return normalized or None
+
+
+def _resolve_job_workspace_id(
+    workspace_id: str | None,
+    *,
+    token_workspace_id: str | None = None,
+    default_workspace_id: str | None = None,
+) -> str:
+    explicit_workspace_id = workspace_id.strip() if workspace_id is not None else ""
+    token_workspace_id_normalized = (
+        token_workspace_id.strip() if token_workspace_id is not None else ""
+    )
+
+    if explicit_workspace_id:
+        if token_workspace_id_normalized and explicit_workspace_id != token_workspace_id_normalized:
+            raise ValueError(
+                "workspace_scope_mismatch: explicit workspace_id does not match token workspace scope"
+            )
+        return explicit_workspace_id
+
+    if token_workspace_id_normalized:
+        return token_workspace_id_normalized
+
+    if default_workspace_id is not None and default_workspace_id.strip():
+        return default_workspace_id.strip()
+
+    raise ValueError(
+        "workspace_id is required for async job orchestration. "
+        "Pass workspace_id or configure MCP_DEFAULT_WORKSPACE_ID."
+    )
 
 
 def _normalize_providers(providers: list[str] | None) -> list[str]:
@@ -246,7 +288,14 @@ async def _execute_external_status_check(
     wait_for_result: bool = True,
     days_back: int = 30,
     response_mode: str = "compact",
+    token_workspace_id: str | None = None,
 ) -> str:
+    resolved_token_workspace_id = token_workspace_id or _current_token_workspace_id()
+    resolved_workspace_id = _resolve_job_workspace_id(
+        workspace_id,
+        token_workspace_id=resolved_token_workspace_id,
+        default_workspace_id=settings.mcp_default_workspace_id,
+    )
     selected_response_mode = _resolve_response_mode(response_mode)
     selected_providers = _normalize_providers(providers)
 
@@ -271,7 +320,7 @@ async def _execute_external_status_check(
             "job_type": "alert.group.summary.generate",
             "runner_mode": "summary",
             "task_profile": "summary.small",
-            "workspace_id": workspace_id or "default",
+            "workspace_id": resolved_workspace_id,
             "incident_id": "external-status",
             "payload": {
                 "providers": selected_providers,
@@ -285,6 +334,11 @@ async def _execute_external_status_check(
     )
 
     job_id = submitted["job_id"]
+    logger.info(
+        "mcp_async_job_submitted tool=external_status_check job_id=%s workspace_id=%s",
+        job_id,
+        resolved_workspace_id,
+    )
 
     if not wait_for_result:
         return _build_async_result(
@@ -344,6 +398,11 @@ def create_mcp_server() -> FastMCP:
             include_affected_services=include_affected_services,
         )
 
+        resolved_workspace_id = _resolve_job_workspace_id(
+            workspace_id,
+            token_workspace_id=_current_token_workspace_id(),
+            default_workspace_id=settings.mcp_default_workspace_id,
+        )
         if mode == "sync":
             result: IncidentSummaryOutput = _incident_summary_impl(input_data)
             return result.model_dump_json(indent=2)
@@ -354,12 +413,17 @@ def create_mcp_server() -> FastMCP:
                 "job_type": "incident.summary.generate",
                 "runner_mode": "summary",
                 "task_profile": "summary.small",
-                "workspace_id": workspace_id or "default",
+                "workspace_id": resolved_workspace_id,
                 "incident_id": incident_id,
                 "payload": input_data.model_dump(),
                 "artifact_refs": [],
                 "evidence_refs": [],
             }
+        )
+        logger.info(
+            "mcp_async_job_submitted tool=incident_summary job_id=%s workspace_id=%s",
+            submitted["job_id"],
+            resolved_workspace_id,
         )
         return _build_async_result(
             job_id=submitted["job_id"],
@@ -385,6 +449,11 @@ def create_mcp_server() -> FastMCP:
             min_cluster_size=min_cluster_size,
         )
         mode = _resolve_execution_mode(settings, execution_mode)
+        resolved_workspace_id = _resolve_job_workspace_id(
+            workspace_id,
+            token_workspace_id=_current_token_workspace_id(),
+            default_workspace_id=settings.mcp_default_workspace_id,
+        )
 
         if mode == "sync":
             result: CorrelateAlertsOutput = _correlate_alerts_impl(input_data)
@@ -396,7 +465,7 @@ def create_mcp_server() -> FastMCP:
                 "job_type": "incident.graph.build",
                 "runner_mode": "graph",
                 "task_profile": "graph.standard",
-                "workspace_id": workspace_id or "default",
+                "workspace_id": resolved_workspace_id,
                 "payload": {
                     "alerts": [a.model_dump(mode="json") for a in input_data.alerts],
                     "window_minutes": window_minutes,
@@ -405,6 +474,11 @@ def create_mcp_server() -> FastMCP:
                 "artifact_refs": [],
                 "evidence_refs": [],
             }
+        )
+        logger.info(
+            "mcp_async_job_submitted tool=correlate_alerts job_id=%s workspace_id=%s",
+            submitted["job_id"],
+            resolved_workspace_id,
         )
         return _build_async_result(
             job_id=submitted["job_id"],

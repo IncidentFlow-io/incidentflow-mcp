@@ -9,6 +9,7 @@ from incidentflow_mcp.mcp.server import (
     _execute_external_status_check,
     _normalize_polled_external_status_job,
     _resolve_execution_mode,
+    _resolve_job_workspace_id,
 )
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -31,6 +32,43 @@ def test_external_status_check_schema_contains_response_mode_and_check_id_pollin
     assert properties["response_mode"]["default"] == "compact"
     assert properties["response_mode"]["enum"] == ["compact", "full"]
     assert "polls this job" in properties["check_id"]["description"]
+
+
+def test_resolve_job_workspace_id_prefers_explicit_scope_or_default() -> None:
+    with pytest.raises(ValueError):
+        _resolve_job_workspace_id(None)
+    assert (
+        _resolve_job_workspace_id(
+            None,
+            default_workspace_id="35b02121-716b-4097-a851-84485d39b76f",
+        )
+        == "35b02121-716b-4097-a851-84485d39b76f"
+    )
+    assert (
+        _resolve_job_workspace_id(
+            "   ",
+            default_workspace_id="35b02121-716b-4097-a851-84485d39b76f",
+        )
+        == "35b02121-716b-4097-a851-84485d39b76f"
+    )
+    assert _resolve_job_workspace_id("ws_1", default_workspace_id="ws_default") == "ws_1"
+    assert (
+        _resolve_job_workspace_id(
+            None,
+            token_workspace_id="35b02121-716b-4097-a851-84485d39b76f",
+            default_workspace_id="ws_default",
+        )
+        == "35b02121-716b-4097-a851-84485d39b76f"
+    )
+
+
+def test_resolve_job_workspace_id_rejects_workspace_scope_mismatch() -> None:
+    with pytest.raises(ValueError, match="workspace_scope_mismatch"):
+        _resolve_job_workspace_id(
+            "ws_explicit",
+            token_workspace_id="ws_from_token",
+            default_workspace_id="ws_default",
+        )
 
 
 @pytest.mark.asyncio
@@ -260,3 +298,133 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
     assert payload["status"] == "failed"
     assert payload["error"]["reason"] == "provider timeout"
     assert payload["response_mode"] == "compact"
+
+
+@pytest.mark.asyncio
+async def test_external_status_check_rejects_missing_workspace_scope() -> None:
+    class FakeClient:
+        async def submit_job(self, payload: dict) -> dict:  # pragma: no cover - should not be called
+            return {"job_id": "unused", "status": "queued"}
+
+        async def get_job(self, job_id: str) -> dict:  # pragma: no cover - should not be called
+            return {"job_id": job_id, "status": "queued"}
+
+    settings = Settings(
+        _env_file=None,
+        environment="development",
+        platform_api_base_url="http://platform.test",
+    )
+    with pytest.raises(ValueError):
+        await _execute_external_status_check(
+            settings=settings,
+            client=FakeClient(),
+            providers=["aws"],
+            workspace_id=None,
+            check_id=None,
+            wait_for_result=False,
+            response_mode="compact",
+        )
+
+
+@pytest.mark.asyncio
+async def test_external_status_check_uses_default_workspace_when_omitted() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.payload: dict | None = None
+
+        async def submit_job(self, payload: dict) -> dict:
+            self.payload = payload
+            return {"job_id": "job_default_ws", "status": "queued"}
+
+        async def get_job(self, job_id: str) -> dict:  # pragma: no cover - should not be called
+            return {"job_id": job_id, "status": "queued"}
+
+    settings = Settings(
+        _env_file=None,
+        environment="development",
+        platform_api_base_url="http://platform.test",
+        mcp_default_workspace_id="35b02121-716b-4097-a851-84485d39b76f",
+    )
+    fake_client = FakeClient()
+
+    output = await _execute_external_status_check(
+        settings=settings,
+        client=fake_client,
+        providers=["github"],
+        workspace_id=None,
+        check_id=None,
+        wait_for_result=False,
+        response_mode="compact",
+    )
+    payload = json.loads(output)
+
+    assert fake_client.payload is not None
+    assert fake_client.payload["workspace_id"] == "35b02121-716b-4097-a851-84485d39b76f"
+    assert payload["mode"] == "async"
+    assert payload["job_id"] == "job_default_ws"
+
+
+@pytest.mark.asyncio
+async def test_external_status_check_uses_token_workspace_when_omitted() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.payload: dict | None = None
+
+        async def submit_job(self, payload: dict) -> dict:
+            self.payload = payload
+            return {"job_id": "job_token_ws", "status": "queued"}
+
+        async def get_job(self, job_id: str) -> dict:  # pragma: no cover - should not be called
+            return {"job_id": job_id, "status": "queued"}
+
+    settings = Settings(
+        _env_file=None,
+        environment="development",
+        platform_api_base_url="http://platform.test",
+        mcp_default_workspace_id="35b02121-716b-4097-a851-84485d39b76f",
+    )
+    fake_client = FakeClient()
+
+    output = await _execute_external_status_check(
+        settings=settings,
+        client=fake_client,
+        providers=["github"],
+        workspace_id=None,
+        check_id=None,
+        wait_for_result=False,
+        response_mode="compact",
+        token_workspace_id="7b6f0f1d-8e89-4a53-85ef-bc2e4cd9ba9b",
+    )
+    payload = json.loads(output)
+
+    assert fake_client.payload is not None
+    assert fake_client.payload["workspace_id"] == "7b6f0f1d-8e89-4a53-85ef-bc2e4cd9ba9b"
+    assert payload["job_id"] == "job_token_ws"
+
+
+@pytest.mark.asyncio
+async def test_external_status_check_rejects_explicit_workspace_scope_mismatch() -> None:
+    class FakeClient:
+        async def submit_job(self, payload: dict) -> dict:  # pragma: no cover - should not be called
+            return {"job_id": "unused", "status": "queued"}
+
+        async def get_job(self, job_id: str) -> dict:  # pragma: no cover - should not be called
+            return {"job_id": job_id, "status": "queued"}
+
+    settings = Settings(
+        _env_file=None,
+        environment="development",
+        platform_api_base_url="http://platform.test",
+    )
+
+    with pytest.raises(ValueError, match="workspace_scope_mismatch"):
+        await _execute_external_status_check(
+            settings=settings,
+            client=FakeClient(),
+            providers=["github"],
+            workspace_id="ws_explicit",
+            check_id=None,
+            wait_for_result=False,
+            response_mode="compact",
+            token_workspace_id="ws_from_token",
+        )
