@@ -43,10 +43,12 @@ def create_app() -> FastAPI:
         settings.environment == "production"
         and settings.incidentflow_pat is None
         and not settings.managed_token_introspection_enabled()
+        and not settings.allow_unprotected_in_production
     ):
         raise RuntimeError(
             "Auth must be configured in production. "
-            "Set INCIDENTFLOW_PAT or PLATFORM_API_BASE_URL."
+            "Set INCIDENTFLOW_PAT or PLATFORM_API_BASE_URL. "
+            "To bypass temporarily, set ALLOW_UNPROTECTED_IN_PRODUCTION=true."
         )
 
     # Create the MCP server once so both the lifespan and the route handler
