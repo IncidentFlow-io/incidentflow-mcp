@@ -684,6 +684,79 @@
       "options": {
         "showHeader": true
       }
+    },
+    {
+      "id": 17,
+      "title": "Platform API Async Job Errors (by status)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 15,
+        "x": 0,
+        "y": 34
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation, status_code) (rate(mcp_platform_api_jobs_errors_total{namespace=~\"${namespace:regex}\",pod=~\"${pod:regex}\"}[5m]))",
+          "legendFormat": "{{operation}} / {{status_code}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "showLegend": true
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Platform API Async Job Errors (5m total)",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 15,
+        "y": 39
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(mcp_platform_api_jobs_errors_total{namespace=~\"${namespace:regex}\",pod=~\"${pod:regex}\"}[5m]))",
+          "legendFormat": "errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        }
+      }
     }
   ],
   "refresh": "30s",
@@ -780,6 +853,6 @@
   "timezone": "",
   "title": "IncidentFlow MCP Observability",
   "uid": "incidentflow-mcp-observability",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }

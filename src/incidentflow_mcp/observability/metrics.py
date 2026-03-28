@@ -158,6 +158,11 @@ mcp_tool_errors_total = Counter(
     "Total MCP tool request errors.",
     ("namespace", "pod", "tool", "method", "status_code", "status_class", "traffic_type"),
 )
+mcp_platform_api_jobs_errors_total = Counter(
+    "mcp_platform_api_jobs_errors_total",
+    "Total platform-api async jobs client errors by operation and status code.",
+    ("namespace", "pod", "operation", "status_code", "error_type"),
+)
 
 
 def render_prometheus_metrics() -> bytes:
