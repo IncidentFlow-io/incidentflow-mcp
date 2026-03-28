@@ -9,6 +9,7 @@ Verification strategy (in order):
 """
 
 import hmac
+import ipaddress
 import logging
 from datetime import datetime, timezone
 
@@ -30,7 +31,6 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
     "/healthz",
     "/readyz",
     "/install.sh",
-    "/metrics",
     "/docs",
     "/openapi.json",
     "/redoc",
@@ -38,6 +38,10 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
     "/token",
     "/register",
     "/oauth/register",
+    "/.well-known/oauth-protected-resource",
+    "/.well-known/oauth-protected-resource/mcp",
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/openid-configuration",
 })
 
 _MCP_ALLOWED_METHODS: frozenset[str] = frozenset({"GET", "POST", "OPTIONS"})
@@ -90,6 +94,8 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header:
+        if request.url.path == "/metrics" and _is_metrics_request_allowed_without_auth(request):
+            return None
         if not _any_auth_configured():
             logger.warning("auth: no auth provider configured — MCP endpoint is UNPROTECTED")
             return None
@@ -285,6 +291,24 @@ def _client_ip(request: Request) -> str:
     if request.client:
         return request.client.host
     return "unknown"
+
+
+def _is_metrics_request_allowed_without_auth(request: Request) -> bool:
+    client_ip = _client_ip(request)
+    try:
+        ip_obj = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+
+    settings = get_settings()
+    for cidr in settings.metrics_trusted_cidrs_list():
+        try:
+            if ip_obj in ipaddress.ip_network(cidr, strict=False):
+                return True
+        except ValueError:
+            logger.warning("auth: invalid CIDR in METRICS_TRUSTED_CIDRS: %s", cidr)
+            continue
+    return False
 
 
 def _set_auth_context(

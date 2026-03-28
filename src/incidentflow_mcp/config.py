@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, description="Bind port")
     log_level: str = Field(default="info", description="Logging level")
     environment: str = Field(default="development", description="Environment name")
+    allow_unprotected_in_production: bool = Field(
+        default=False,
+        description=(
+            "Allow startup in production without auth providers. "
+            "Default false (fail-closed)."
+        ),
+    )
 
     # -----------------------------------------------------------------------
     # Auth
@@ -181,6 +188,13 @@ class Settings(BaseSettings):
         default="ip",
         description="Bucket scope for unauthenticated identities: ip | principal | workspace",
     )
+    metrics_trusted_cidrs: str = Field(
+        default="127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+        description=(
+            "Comma-separated CIDRs allowed to read /metrics without bearer auth. "
+            "Use private cluster CIDRs to keep Prometheus scraping working."
+        ),
+    )
 
     def expensive_tools_set(self) -> set[str]:
         return {item.strip() for item in self.expensive_tools.split(",") if item.strip()}
@@ -205,6 +219,9 @@ class Settings(BaseSettings):
 
     def rate_limited_auth_endpoints(self) -> list[str]:
         return [item.strip() for item in self.rate_limit_auth_endpoints.split(",") if item.strip()]
+
+    def metrics_trusted_cidrs_list(self) -> list[str]:
+        return [item.strip() for item in self.metrics_trusted_cidrs.split(",") if item.strip()]
 
 
 _settings: Settings | None = None
