@@ -54,11 +54,17 @@ def create_ops_router(settings: Settings) -> APIRouter:
 
     @router.get("/.well-known/oauth-protected-resource", summary="OAuth protected resource metadata")
     async def oauth_protected_resource(request: Request) -> JSONResponse:
-        origin = str(request.base_url).rstrip("/")
+        _ = request
+        auth_server = (
+            settings.oauth_expected_issuer
+            or settings.platform_api_base_url
+            or str(request.base_url).rstrip("/")
+        )
         return JSONResponse(
             content={
-                "resource": f"{origin}/mcp",
-                "authorization_servers": [origin],
+                "resource": settings.mcp_canonical_resource,
+                "authorization_servers": [auth_server],
+                "scopes_supported": ["mcp:read", "mcp:tools:run", "admin"],
             }
         )
 
@@ -67,41 +73,17 @@ def create_ops_router(settings: Settings) -> APIRouter:
         summary="OAuth protected resource metadata (MCP path)",
     )
     async def oauth_protected_resource_mcp(request: Request) -> JSONResponse:
-        origin = str(request.base_url).rstrip("/")
-        return JSONResponse(
-            content={
-                "resource": f"{origin}/mcp",
-                "authorization_servers": [origin],
-            }
+        _ = request
+        auth_server = (
+            settings.oauth_expected_issuer
+            or settings.platform_api_base_url
+            or str(request.base_url).rstrip("/")
         )
-
-    @router.get("/.well-known/oauth-authorization-server", summary="OAuth authorization server metadata")
-    async def oauth_authorization_server_metadata(request: Request) -> JSONResponse:
-        origin = str(request.base_url).rstrip("/")
         return JSONResponse(
             content={
-                "issuer": origin,
-                "authorization_endpoint": f"{origin}/authorize",
-                "token_endpoint": f"{origin}/token",
-                "registration_endpoint": f"{origin}/register",
-                "response_types_supported": ["code"],
-                "grant_types_supported": ["authorization_code", "refresh_token"],
-                "token_endpoint_auth_methods_supported": ["none"],
-            }
-        )
-
-    @router.get("/.well-known/openid-configuration", summary="OIDC discovery document")
-    async def openid_configuration(request: Request) -> JSONResponse:
-        origin = str(request.base_url).rstrip("/")
-        return JSONResponse(
-            content={
-                "issuer": origin,
-                "authorization_endpoint": f"{origin}/authorize",
-                "token_endpoint": f"{origin}/token",
-                "registration_endpoint": f"{origin}/register",
-                "response_types_supported": ["code"],
-                "subject_types_supported": ["public"],
-                "id_token_signing_alg_values_supported": ["RS256"],
+                "resource": settings.mcp_canonical_resource,
+                "authorization_servers": [auth_server],
+                "scopes_supported": ["mcp:read", "mcp:tools:run", "admin"],
             }
         )
 

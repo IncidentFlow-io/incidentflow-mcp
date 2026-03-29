@@ -58,6 +58,18 @@ class Settings(BaseSettings):
         default=5.0,
         description="HTTP timeout for token introspection calls",
     )
+    oauth_expected_issuer: str | None = Field(
+        default=None,
+        description="Expected issuer for OAuth JWT access tokens",
+    )
+    oauth_jwks_url: str | None = Field(
+        default=None,
+        description="JWKS URL for OAuth access token signature verification",
+    )
+    auth_mode: str = Field(
+        default="dual",
+        description="Auth mode. dual keeps OAuth + PAT fallback paths enabled.",
+    )
     platform_api_internal_api_key: SecretStr | None = Field(
         default=None,
         description="Optional service-to-service API key for MCP -> platform-api calls",
@@ -110,6 +122,14 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     mcp_server_name: str = Field(default="incidentflow-mcp", description="MCP server name")
     mcp_server_version: str = Field(default="0.1.0", description="MCP server version")
+    mcp_canonical_resource: str = Field(
+        default="https://mcp.incidentflow.io/mcp",
+        description="Canonical OAuth resource identifier for this MCP server",
+    )
+    mcp_resource_metadata_url: str = Field(
+        default="https://mcp.incidentflow.io/.well-known/oauth-protected-resource",
+        description="Canonical OAuth protected resource metadata URL",
+    )
     mcp_session_idle_timeout_seconds: int = Field(
         default=1800,
         description=(
@@ -222,6 +242,9 @@ class Settings(BaseSettings):
 
     def metrics_trusted_cidrs_list(self) -> list[str]:
         return [item.strip() for item in self.metrics_trusted_cidrs.split(",") if item.strip()]
+
+    def oauth_validation_enabled(self) -> bool:
+        return bool(self.oauth_expected_issuer and self.oauth_jwks_url)
 
 
 _settings: Settings | None = None
