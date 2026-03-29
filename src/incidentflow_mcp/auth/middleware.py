@@ -1,12 +1,6 @@
-"""
-Bearer authentication middleware.
+"""Bearer authentication middleware with dual OAuth+PAT mode."""
 
-Verification strategy (in order):
-1. Managed-token introspection against platform-api (if configured)
-2. Structured local repo token (if_pat_local_<id>.<secret>)
-3. Legacy INCIDENTFLOW_PAT constant-time comparison
-4. Unprotected mode only when no auth source is configured
-"""
+from __future__ import annotations
 
 import hmac
 import ipaddress
@@ -20,13 +14,13 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response
 
 from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
+from incidentflow_mcp.auth.oauth import validate_oauth_access_token
 from incidentflow_mcp.auth.repository import get_token_repository
 from incidentflow_mcp.auth.tokens import parse_token_id, verify_token
 from incidentflow_mcp.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Paths that do NOT require authentication
 _PUBLIC_PATHS: frozenset[str] = frozenset({
     "/healthz",
     "/readyz",
@@ -34,21 +28,17 @@ _PUBLIC_PATHS: frozenset[str] = frozenset({
     "/docs",
     "/openapi.json",
     "/redoc",
-    "/authorize",
-    "/token",
-    "/register",
-    "/oauth/register",
     "/.well-known/oauth-protected-resource",
     "/.well-known/oauth-protected-resource/mcp",
     "/.well-known/oauth-authorization-server",
     "/.well-known/openid-configuration",
+    "/.well-known/jwks.json",
+    "/register",
+    "/oauth/register",
 })
 
 _MCP_ALLOWED_METHODS: frozenset[str] = frozenset({"GET", "POST", "OPTIONS"})
 
-# ---------------------------------------------------------------------------
-# Scope policy — maps request path prefixes to required scopes.
-# ---------------------------------------------------------------------------
 _SCOPE_POLICY: list[tuple[str, str]] = [
     ("/admin", "admin"),
     ("/mcp/tools", "mcp:tools:run"),
@@ -70,7 +60,6 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
         clear_current_auth_context()
         try:
             if request.url.path == "/mcp" and request.method.upper() not in _MCP_ALLOWED_METHODS:
-                # Let router return 404/405 for unsupported methods.
                 return await call_next(request)
 
             if request.url.path in _PUBLIC_PATHS:
@@ -106,64 +95,103 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
         logger.warning("auth: malformed Authorization header from %s", _client_ip(request))
         return _unauthorized("Missing or malformed Authorization: Bearer <token>.")
 
-    provided = auth_header[len("bearer "):].strip()
-    if not provided:
+    token = auth_header[len("bearer ") :].strip()
+    if not token:
         return _unauthorized("Empty Bearer token.")
 
     required_scope = _required_scope_for_request(request)
-    settings = get_settings()
 
-    # Path 1: managed token introspection via platform-api.
-    if settings.managed_token_introspection_enabled():
-        return await _verify_platform_api_token(
-            request=request,
-            token=provided,
-            required_scope=required_scope,
-        )
-
-    # Path 2: structured local repo token.
-    token_id = parse_token_id(provided)
-    if token_id is not None:
-        return _verify_repo_token(provided, token_id, request, required_scope=required_scope)
-
-    # Path 3: legacy env PAT.
-    expected_pat = settings.incidentflow_pat
-    if expected_pat is None:
-        if not _any_auth_configured():
-            logger.warning("auth: no auth provider configured — MCP endpoint is UNPROTECTED")
+    oauth_check = await _attempt_oauth_validation(request=request, token=token, required_scope=required_scope)
+    if oauth_check is not None:
+        if oauth_check.status_code == 200:
             return None
-        logger.warning("auth: invalid token from %s", _client_ip(request))
-        return _unauthorized("Invalid token.")
+        return oauth_check
 
-    expected = expected_pat.get_secret_value()
-    if not hmac.compare_digest(provided.encode(), expected.encode()):
-        logger.warning("auth: invalid token from %s", _client_ip(request))
-        return _unauthorized("Invalid token.")
+    pat_check = await introspect_managed_pat(request=request, token=token, required_scope=required_scope)
+    if pat_check is not None:
+        if pat_check.status_code == 200:
+            return None
+        if pat_check.status_code != 404:
+            return pat_check
 
-    _set_auth_context(request, authenticated=True, client_id="legacy_pat")
-    return None
+    local_check = validate_local_pat(request=request, token=token, required_scope=required_scope)
+    if local_check is not None:
+        if local_check.status_code == 200:
+            return None
+        if local_check.status_code != 404:
+            return local_check
+
+    static_check = validate_static_pat(request=request, token=token)
+    if static_check is not None:
+        if static_check.status_code == 200:
+            return None
+        return static_check
+
+    if not _any_auth_configured():
+        logger.warning("auth: no auth provider configured — MCP endpoint is UNPROTECTED")
+        return None
+
+    return _unauthorized("Invalid token.", required_scope=required_scope)
 
 
-async def _verify_platform_api_token(
+async def _attempt_oauth_validation(
     *,
     request: Request,
     token: str,
     required_scope: str | None,
 ) -> JSONResponse | None:
     settings = get_settings()
-    if not settings.platform_api_base_url:
-        return _unauthorized("Managed token introspection is not configured.")
+    if not settings.oauth_validation_enabled():
+        return None
+
+    result = await validate_oauth_access_token(
+        token=token,
+        jwks_url=str(settings.oauth_jwks_url),
+        issuer=str(settings.oauth_expected_issuer),
+        audience=settings.mcp_canonical_resource,
+        required_scope=required_scope,
+        timeout_seconds=settings.platform_api_timeout_seconds,
+    )
+
+    if result.ok:
+        claims = result.claims or {}
+        _set_auth_context(
+            request,
+            authenticated=True,
+            client_id=str(claims.get("client_id") or "oauth_client"),
+            workspace_id=(str(claims.get("workspace_id")) if claims.get("workspace_id") else None),
+            user_id=(str(claims.get("user_id")) if claims.get("user_id") else None),
+            plan=None,
+        )
+        return JSONResponse(status_code=200, content={})
+
+    if result.code == "insufficient_scope":
+        return _unauthorized("Insufficient token scope", required_scope=required_scope)
+
+    # This looks like OAuth but failed validation; do not downcast to PAT.
+    if result.code == "oauth_invalid":
+        return _unauthorized(result.detail, required_scope=required_scope)
+
+    # not_oauth -> continue with PAT fallback.
+    return None
+
+
+async def introspect_managed_pat(
+    *,
+    request: Request,
+    token: str,
+    required_scope: str | None,
+) -> JSONResponse | None:
+    settings = get_settings()
+    if not settings.managed_token_introspection_enabled():
+        return JSONResponse(status_code=404, content={})
 
     url = f"{settings.platform_api_base_url.rstrip('/')}{settings.platform_api_introspect_path}"
     payload = {"required_scope": required_scope}
 
     try:
         async with httpx.AsyncClient(timeout=settings.platform_api_timeout_seconds) as client:
-            response = await client.post(
-                url,
-                headers={"Authorization": f"Bearer {token}"},
-                json=payload,
-            )
+            response = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
     except httpx.HTTPError as exc:
         logger.warning("auth: platform-api introspection failed (%s): %s", url, str(exc))
         return _service_unavailable("Token verification service unavailable")
@@ -178,63 +206,50 @@ async def _verify_platform_api_token(
             user_id=data.get("user_id"),
             plan=None,
         )
-        return None
+        return JSONResponse(status_code=200, content={})
 
     if response.status_code == 403:
-        message = "Insufficient token scope"
-        try:
-            body = response.json()
-            message = body.get("message") or message
-        except ValueError:
-            pass
-        return _forbidden_detail(message)
+        return _unauthorized("Insufficient token scope", required_scope=required_scope)
 
     if response.status_code == 401:
-        return _unauthorized("Invalid token.")
+        return JSONResponse(status_code=404, content={})
 
     logger.warning("auth: unexpected introspection status=%s body=%s", response.status_code, response.text)
     return _service_unavailable("Token verification service error")
 
 
-def _verify_repo_token(
-    token: str,
-    token_id: str,
-    request: Request,
+def validate_local_pat(
     *,
+    request: Request,
+    token: str,
     required_scope: str | None,
 ) -> JSONResponse | None:
+    token_id = parse_token_id(token)
+    if token_id is None:
+        return JSONResponse(status_code=404, content={})
+
     repo = get_token_repository()
     record = repo.find_by_id(token_id)
-
     if record is None:
         logger.warning("auth: unknown token_id %r from %s", token_id, _client_ip(request))
-        return _unauthorized("Invalid token.")
+        return _unauthorized("Invalid token.", required_scope=required_scope)
 
     if record.revoked_at is not None:
         logger.warning("auth: revoked token %r used from %s", token_id, _client_ip(request))
-        return _unauthorized("Token has been revoked.")
+        return _unauthorized("Token has been revoked.", required_scope=required_scope)
 
     now = datetime.now(timezone.utc)
     if record.expires_at is not None and record.expires_at < now:
         logger.warning("auth: expired token %r used from %s", token_id, _client_ip(request))
-        return _unauthorized("Token has expired.")
+        return _unauthorized("Token has expired.", required_scope=required_scope)
 
     if not verify_token(token, record.token_hash):
         logger.warning("auth: invalid token secret for %r from %s", token_id, _client_ip(request))
-        return _unauthorized("Invalid token.")
+        return _unauthorized("Invalid token.", required_scope=required_scope)
 
-    if required_scope is not None:
-        if required_scope in record.scopes:
-            logger.info("auth_scope_granted token_id=%s scope=%s", token_id, required_scope)
-        elif get_settings().scopes_enforced():
-            logger.warning("auth_scope_denied token_id=%s required_scope=%s", token_id, required_scope)
-            return _forbidden(required_scope)
-        else:
-            logger.warning(
-                "auth_scope_bypass token_id=%s required_scope=%s (enforcement disabled — dev mode)",
-                token_id,
-                required_scope,
-            )
+    if required_scope is not None and required_scope not in record.scopes and get_settings().scopes_enforced():
+        logger.warning("auth_scope_denied token_id=%s required_scope=%s", token_id, required_scope)
+        return _unauthorized("Insufficient token scope", required_scope=required_scope)
 
     repo.update_last_used(token_id, now)
     _set_auth_context(
@@ -243,17 +258,30 @@ def _verify_repo_token(
         client_id=token_id,
         workspace_id=request.headers.get("x-workspace-id"),
         user_id=request.headers.get("x-user-id"),
-        plan=(
-            request.headers.get("x-plan")
-            or request.headers.get("x-plan-tier")
-            or request.headers.get("x-tier")
-        ),
+        plan=(request.headers.get("x-plan") or request.headers.get("x-plan-tier") or request.headers.get("x-tier")),
     )
-    return None
+    return JSONResponse(status_code=200, content={})
+
+
+def validate_static_pat(*, request: Request, token: str) -> JSONResponse | None:
+    settings = get_settings()
+    expected_pat = settings.incidentflow_pat
+    if expected_pat is None:
+        return None
+
+    expected = expected_pat.get_secret_value()
+    if not hmac.compare_digest(token.encode(), expected.encode()):
+        logger.warning("auth: invalid static PAT token from %s", _client_ip(request))
+        return _unauthorized("Invalid token.")
+
+    _set_auth_context(request, authenticated=True, client_id="legacy_pat")
+    return JSONResponse(status_code=200, content={})
 
 
 def _any_auth_configured() -> bool:
     settings = get_settings()
+    if settings.oauth_validation_enabled():
+        return True
     if settings.managed_token_introspection_enabled():
         return True
     if settings.incidentflow_pat is not None:
@@ -261,23 +289,20 @@ def _any_auth_configured() -> bool:
     return bool(get_token_repository().list_all())
 
 
-def _unauthorized(detail: str) -> JSONResponse:
+def _www_authenticate_value(required_scope: str | None = None) -> str:
+    settings = get_settings()
+    base = f'Bearer resource_metadata="{settings.mcp_resource_metadata_url}"'
+    if required_scope:
+        return f'{base}, scope="{required_scope}"'
+    return base
+
+
+def _unauthorized(detail: str, *, required_scope: str | None = None) -> JSONResponse:
     return JSONResponse(
         status_code=401,
         content={"detail": detail},
-        headers={"WWW-Authenticate": "Bearer"},
+        headers={"WWW-Authenticate": _www_authenticate_value(required_scope)},
     )
-
-
-def _forbidden(required_scope: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=403,
-        content={"error": "insufficient_scope", "required_scope": required_scope},
-    )
-
-
-def _forbidden_detail(detail: str) -> JSONResponse:
-    return JSONResponse(status_code=403, content={"detail": detail})
 
 
 def _service_unavailable(detail: str) -> JSONResponse:

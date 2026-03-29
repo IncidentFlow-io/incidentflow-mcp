@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     if (
         settings.environment == "production"
         and settings.incidentflow_pat is None
+        and not settings.oauth_validation_enabled()
         and not settings.managed_token_introspection_enabled()
         and not settings.allow_unprotected_in_production
     ):
@@ -65,6 +66,12 @@ def create_app() -> FastAPI:
         configure_logging(settings.log_level)
 
         try:
+            if settings.oauth_validation_enabled():
+                logger.info(
+                    "auth: OAuth JWT validation is active (issuer=%s jwks=%s)",
+                    settings.oauth_expected_issuer,
+                    settings.oauth_jwks_url,
+                )
             if settings.managed_token_introspection_enabled():
                 logger.info(
                     "auth: platform-api introspection is active at %s%s",
