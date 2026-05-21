@@ -25,12 +25,24 @@ from incidentflow_mcp.tools.schemas import (
     IncidentSummaryInput,
     IncidentSummaryOutput,
 )
+from incidentflow_mcp.tools.slack_alerts import (
+    fetch_slack_alert_thread,
+    fetch_slack_alerts,
+    summarize_incident_thread,
+)
 
 logger = logging.getLogger(__name__)
 
 _VALID_EXECUTION_MODES = {"auto", "sync", "async"}
 _TERMINAL_JOB_STATUSES = {"succeeded", "failed", "cancelled", "canceled"}
 _VALID_RESPONSE_MODES = {"compact", "full"}
+_VALID_SLACK_THREAD_MODES = {"none", "metadata", "full"}
+_SLACK_THREAD_MODE_ALIASES = {
+    "summarize": "full",
+    "summary": "full",
+    "analysis": "full",
+    "analyze": "full",
+}
 
 
 def _resolve_execution_mode(settings: Settings, requested_mode: str) -> str:
@@ -54,6 +66,17 @@ def _resolve_response_mode(requested_mode: str) -> str:
     mode = requested_mode.lower().strip()
     if mode not in _VALID_RESPONSE_MODES:
         raise ValueError(f"Unsupported response_mode: {requested_mode}")
+    return mode
+
+
+def _normalize_slack_thread_mode(requested_mode: str) -> str:
+    mode = requested_mode.lower().strip()
+    mode = _SLACK_THREAD_MODE_ALIASES.get(mode, mode)
+    if mode not in _VALID_SLACK_THREAD_MODES:
+        raise ValueError(
+            "thread_mode must be one of: none, metadata, full "
+            "(summarize and analysis are accepted aliases for full)"
+        )
     return mode
 
 
@@ -82,7 +105,8 @@ def _resolve_job_workspace_id(
     if explicit_workspace_id:
         if token_workspace_id_normalized and explicit_workspace_id != token_workspace_id_normalized:
             raise ValueError(
-                "workspace_scope_mismatch: explicit workspace_id does not match token workspace scope"
+                "workspace_scope_mismatch: explicit workspace_id does not match "
+                "token workspace scope"
             )
         return explicit_workspace_id
 
@@ -514,6 +538,87 @@ def create_mcp_server() -> FastMCP:
             days_back=days_back,
             response_mode=response_mode,
         )
+
+    @mcp.tool(
+        name="slack_alerts_list",
+        description=_specs["slack_alerts_list"].description,
+    )
+    async def slack_alerts_list(
+        channel: str | None = None,
+        limit: int | None = None,
+        include_raw: bool = False,
+        include_threads: bool = False,
+        thread_mode: str = "none",
+        max_thread_replies: int = 20,
+    ) -> str:
+        token = settings.slack_bot_token
+        if token is None:
+            raise ValueError("SLACK_BOT_TOKEN is required for slack_alerts_list")
+
+        selected_channel = (channel or settings.slack_alerts_channel).strip() or "alerts"
+        selected_limit = limit or settings.slack_alerts_default_limit
+        if selected_limit < 1 or selected_limit > 200:
+            raise ValueError("limit must be between 1 and 200")
+        selected_thread_mode = _normalize_slack_thread_mode(thread_mode)
+        if max_thread_replies < 0 or max_thread_replies > 200:
+            raise ValueError("max_thread_replies must be between 0 and 200")
+
+        result = await fetch_slack_alerts(
+            token=token.get_secret_value(),
+            channel=selected_channel,
+            limit=selected_limit,
+            include_raw=include_raw,
+            include_threads=include_threads,
+            thread_mode=selected_thread_mode,  # type: ignore[arg-type]
+            max_thread_replies=max_thread_replies,
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(
+        name="slack_alert_thread_get",
+        description=_specs["slack_alert_thread_get"].description,
+    )
+    async def slack_alert_thread_get(
+        channel_id: str,
+        message_ts: str,
+        include_root: bool = True,
+        max_replies: int = 50,
+    ) -> str:
+        token = settings.slack_bot_token
+        if token is None:
+            raise ValueError("SLACK_BOT_TOKEN is required for slack_alert_thread_get")
+        if max_replies < 0 or max_replies > 200:
+            raise ValueError("max_replies must be between 0 and 200")
+
+        result = await fetch_slack_alert_thread(
+            token=token.get_secret_value(),
+            channel_id=channel_id,
+            message_ts=message_ts,
+            include_root=include_root,
+            max_replies=max_replies,
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(
+        name="incident_thread_summary",
+        description=_specs["incident_thread_summary"].description,
+    )
+    async def incident_thread_summary(
+        channel_id: str,
+        thread_ts: str,
+        alert_context: dict[str, Any] | None = None,
+    ) -> str:
+        token = settings.slack_bot_token
+        if token is None:
+            raise ValueError("SLACK_BOT_TOKEN is required for incident_thread_summary")
+
+        result = await summarize_incident_thread(
+            token=token.get_secret_value(),
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            alert_context=alert_context,
+        )
+        return json.dumps(result, indent=2)
 
     register_resources(mcp)
 

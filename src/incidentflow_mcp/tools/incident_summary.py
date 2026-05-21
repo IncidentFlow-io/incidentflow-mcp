@@ -10,7 +10,7 @@ external dependencies.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from incidentflow_mcp.tools.schemas import (
     IncidentSummaryInput,
@@ -49,6 +49,7 @@ _FAKE_INCIDENTS: dict[str, dict] = {
             "Add circuit breaker on payments-service → database calls",
             "Review slow query log weekly as part of SRE hygiene",
         ],
+        "human_context_from_slack_thread": None,
     },
     "INC-002": {
         "title": "Memory leak in notification-worker causing OOMKilled pods",
@@ -71,6 +72,15 @@ _FAKE_INCIDENTS: dict[str, dict] = {
             "Add memory limit alerts at 80% threshold for notification-worker",
             "Require memory profiling step in CI for services with template rendering",
         ],
+        "human_context_from_slack_thread": {
+            "summary": "Slack thread includes rollback discussion and mitigation confirmation.",
+            "hypotheses": ["looks like the new renderer is retaining template objects"],
+            "actions_tried": ["rolled back notification-worker to v2.3.0"],
+            "runbooks": [],
+            "commands": [],
+            "resolution_signal": True,
+            "resolution_confidence": "medium",
+        },
     },
 }
 
@@ -82,6 +92,7 @@ _UNKNOWN_INCIDENT: dict = {
     "affected_services": [],
     "timeline": [],
     "recommendations": ["Verify the incident ID and try again."],
+    "human_context_from_slack_thread": None,
 }
 
 
@@ -129,4 +140,5 @@ def incident_summary(input_data: IncidentSummaryInput) -> IncidentSummaryOutput:
         affected_services=affected,
         timeline=timeline,
         recommendations=raw["recommendations"],
+        human_context_from_slack_thread=raw.get("human_context_from_slack_thread"),
     )

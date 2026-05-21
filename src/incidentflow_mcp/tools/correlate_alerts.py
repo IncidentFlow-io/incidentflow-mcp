@@ -15,7 +15,6 @@ from collections import defaultdict
 from datetime import timedelta
 from itertools import combinations
 
-from incidentflow_mcp.config import get_settings
 from incidentflow_mcp.tools.schemas import (
     Alert,
     AlertCluster,
@@ -75,7 +74,8 @@ def correlate_alerts(input_data: CorrelateAlertsInput) -> CorrelateAlertsOutput:
 
         shares_service = a.service == b.service
         shared_label_values = set(a.labels.values()) & set(b.labels.values())
-        if shares_service or shared_label_values:
+        shared_thread_hints = _thread_hints(a) & _thread_hints(b)
+        if shares_service or shared_label_values or shared_thread_hints:
             union(a.alert_id, b.alert_id)
 
     # Group by cluster root
@@ -96,6 +96,9 @@ def correlate_alerts(input_data: CorrelateAlertsInput) -> CorrelateAlertsOutput:
         dominant = _dominant_severity([a.severity for a in members])
         confidence = _confidence(members, window)
         likely_cause = _infer_root_cause(members)
+        human_context = _cluster_human_context(members)
+        if human_context:
+            confidence = min(1.0, round(confidence + 0.1, 2))
 
         clusters.append(
             AlertCluster(
@@ -105,6 +108,7 @@ def correlate_alerts(input_data: CorrelateAlertsInput) -> CorrelateAlertsOutput:
                 dominant_severity=dominant,
                 likely_root_cause=likely_cause,
                 confidence=confidence,
+                human_context=human_context or None,
             )
         )
         clustered_ids.update(a.alert_id for a in members)
@@ -162,6 +166,14 @@ def _infer_root_cause(members: list[Alert]) -> str:
     """Best-effort root-cause label from shared alert names and labels."""
     names = [a.name for a in members]
     services = list({a.service for a in members})
+    hypotheses = [
+        item
+        for alert in members
+        for item in _thread_analysis(alert).get("engineer_hypotheses", [])
+        if isinstance(item, str)
+    ]
+    if hypotheses:
+        return f"Engineer hypothesis: {hypotheses[-1]}"
 
     # Look for common keywords in alert names
     for keyword in ("database", "db", "memory", "cpu", "disk", "network", "timeout", "latency"):
@@ -169,6 +181,62 @@ def _infer_root_cause(members: list[Alert]) -> str:
             return f"Possible {keyword} issue affecting {', '.join(services)}"
 
     return f"Correlated alerts across {', '.join(services)} — manual investigation recommended"
+
+
+def _thread_hints(alert: Alert) -> set[str]:
+    analysis = _thread_analysis(alert)
+    hints = set()
+    for item in analysis.get("mentioned_services", []):
+        if isinstance(item, str) and item.strip():
+            hints.add(item.strip().lower())
+    for key in ("namespace", "service", "cluster"):
+        value = alert.labels.get(key)
+        if value:
+            hints.add(value.lower())
+    return hints
+
+
+def _thread_analysis(alert: Alert) -> dict:
+    if not isinstance(alert.thread, dict):
+        return {}
+    analysis = alert.thread.get("analysis")
+    return analysis if isinstance(analysis, dict) else {}
+
+
+def _cluster_human_context(members: list[Alert]) -> dict[str, object]:
+    hypotheses: list[str] = []
+    commands: list[str] = []
+    runbooks: list[object] = []
+    resolution_signal = False
+    resolution_confidence = "low"
+
+    for alert in members:
+        analysis = _thread_analysis(alert)
+        hypotheses.extend(
+            item for item in analysis.get("engineer_hypotheses", []) if isinstance(item, str)
+        )
+        commands.extend(
+            item for item in analysis.get("commands_found", []) if isinstance(item, str)
+        )
+        links = analysis.get("runbook_links", [])
+        if isinstance(links, list):
+            runbooks.extend(links)
+        if analysis.get("resolution_signal"):
+            resolution_signal = True
+            if analysis.get("resolution_confidence") in {"medium", "high"}:
+                resolution_confidence = str(analysis["resolution_confidence"])
+
+    context: dict[str, object] = {}
+    if hypotheses:
+        context["engineer_hypotheses"] = sorted(set(hypotheses))
+    if commands:
+        context["commands_found"] = sorted(set(commands))
+    if runbooks:
+        context["runbook_links"] = runbooks
+    if resolution_signal:
+        context["resolution_signal"] = True
+        context["resolution_confidence"] = resolution_confidence
+    return context
 
 
 def _build_summary(total: int, clusters: list[AlertCluster], uncorrelated: list[str]) -> str:

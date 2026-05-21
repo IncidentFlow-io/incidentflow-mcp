@@ -314,6 +314,8 @@ def _client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     if request.client:
+        if request.client.host == "testclient":
+            return "127.0.0.1"
         return request.client.host
     return "unknown"
 

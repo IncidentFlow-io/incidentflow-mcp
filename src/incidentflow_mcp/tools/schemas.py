@@ -7,7 +7,7 @@ before reaching tool logic.
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Any, Annotated
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -61,6 +61,7 @@ class IncidentSummaryOutput(BaseModel):
     affected_services: list[str]
     timeline: list[TimelineEvent]
     recommendations: list[str]
+    human_context_from_slack_thread: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +79,8 @@ class Alert(BaseModel):
     status: AlertStatus
     fired_at: datetime
     labels: dict[str, str] = Field(default_factory=dict)
+    slack: dict[str, Any] | None = None
+    thread: dict[str, Any] | None = None
 
 
 class CorrelateAlertsInput(BaseModel):
@@ -113,6 +116,7 @@ class AlertCluster(BaseModel):
     dominant_severity: Severity
     likely_root_cause: str
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]
+    human_context: dict[str, Any] | None = None
 
 
 class CorrelateAlertsOutput(BaseModel):
