@@ -171,6 +171,132 @@ _TOOL_SPECS: list[ToolSpec] = [
             "openWorldHint": True,
         },
     ),
+    ToolSpec(
+        name="slack_alerts_list",
+        description=(
+            "Read recent alert messages from a Slack alert channel, parse Grafana/"
+            "Alertmanager-style payloads, and return a structured JSON list with "
+            "status, labels, summaries, timestamps, and Slack permalinks."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "type": "string",
+                    "default": "alerts",
+                    "description": "Slack channel name (#alerts or alerts) or channel ID.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200,
+                    "description": "Number of recent channel messages to inspect.",
+                },
+                "include_raw": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Include extracted raw Slack text in each parsed alert.",
+                },
+                "include_threads": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable Slack thread metadata or full thread enrichment.",
+                },
+                "thread_mode": {
+                    "type": "string",
+                    "enum": ["none", "metadata", "full"],
+                    "default": "none",
+                    "description": "none returns alert messages only; metadata returns thread counts/users; full fetches replies and analysis.",
+                },
+                "max_thread_replies": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 0,
+                    "maximum": 200,
+                    "description": "Maximum thread replies to fetch when thread_mode=full.",
+                },
+            },
+            "required": [],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+    ToolSpec(
+        name="slack_alert_thread_get",
+        description=(
+            "Read a Slack alert message thread by channel_id and message_ts/thread_ts "
+            "and return parsed engineer replies, commands, links, hypotheses, decisions, "
+            "and possible resolution signals."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "channel_id": {
+                    "type": "string",
+                    "description": "Slack channel ID containing the alert message.",
+                },
+                "message_ts": {
+                    "type": "string",
+                    "description": "Slack root message timestamp or thread_ts.",
+                },
+                "include_root": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include parsed root alert details in the response.",
+                },
+                "max_replies": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 0,
+                    "maximum": 200,
+                    "description": "Maximum Slack thread replies to fetch.",
+                },
+            },
+            "required": ["channel_id", "message_ts"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+    ToolSpec(
+        name="incident_thread_summary",
+        description=(
+            "Given Slack alert context, read the related Slack thread and produce an "
+            "SRE-focused human-context summary without executing any suggested command."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "channel_id": {
+                    "type": "string",
+                    "description": "Slack channel ID containing the thread.",
+                },
+                "thread_ts": {
+                    "type": "string",
+                    "description": "Slack thread timestamp.",
+                },
+                "alert_context": {
+                    "type": "object",
+                    "description": "Optional alert or incident context to shape the summary title/root-cause hints.",
+                },
+            },
+            "required": ["channel_id", "thread_ts"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
 ]
 
 

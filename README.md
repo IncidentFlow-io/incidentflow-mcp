@@ -230,6 +230,95 @@ Fallback behavior:
 - If `PLATFORM_API_BASE_URL` is not set, MCP uses local auth (`INCIDENTFLOW_PAT` and/or local repo tokens).
 - In production, at least one auth source must be configured (`PLATFORM_API_BASE_URL` or `INCIDENTFLOW_PAT`).
 
+## Thread-aware Slack analysis
+
+`slack_alerts_list` is thread-safe by default: it does not fetch Slack threads unless requested.
+Use metadata mode for lightweight thread counts, and full mode when you need parsed engineer replies.
+
+Example alert listing with full thread analysis:
+
+```json
+{
+  "channel": "alerts",
+  "limit": 20,
+  "include_threads": true,
+  "thread_mode": "full",
+  "max_thread_replies": 20
+}
+```
+
+Example direct thread read:
+
+```json
+{
+  "channel_id": "C12345678",
+  "message_ts": "1710000000.000100",
+  "include_root": true,
+  "max_replies": 50
+}
+```
+
+Example SRE summary:
+
+```json
+{
+  "channel_id": "C12345678",
+  "thread_ts": "1710000000.000100",
+  "alert_context": {
+    "alert_name": "InstanceDown",
+    "namespace": "cert-manager"
+  }
+}
+```
+
+Compact output shape:
+
+```json
+{
+  "slack": {
+    "channel_id": "C12345678",
+    "channel_name": "alerts",
+    "message_ts": "1710000000.000100",
+    "thread_ts": "1710000000.000100",
+    "permalink": "https://workspace.slack.com/archives/C123/p1710000000000100",
+    "thread_permalink": "https://workspace.slack.com/archives/C123/p1710000000000100"
+  },
+  "thread": {
+    "reply_count": 2,
+    "last_reply_ts": "1710000010.000100",
+    "participants": ["U123", "U456"],
+    "replies": [
+      {
+        "ts": "1710000005.000100",
+        "user": "U123",
+        "text": "I think service: cert-manager lost endpoints",
+        "contains_command": false,
+        "contains_runbook_link": false,
+        "contains_hypothesis": true,
+        "contains_resolution": false
+      }
+    ],
+    "analysis": {
+      "summary": "1 hypothesis signal(s), 1 command(s)",
+      "engineer_hypotheses": ["I think service: cert-manager lost endpoints"],
+      "commands_found": ["kubectl get pods -n cert-manager"],
+      "runbook_links": [
+        {
+          "url": "https://confluence.example/runbook/cert-manager",
+          "label": "Runbook",
+          "type": "runbook"
+        }
+      ],
+      "resolution_signal": false,
+      "resolution_confidence": "low"
+    }
+  }
+}
+```
+
+Slack commands found in threads are extracted only for display. IncidentFlow MCP never executes
+commands from Slack; remediation must be a separate approved action.
+
 ## `external_status_check` response modes
 
 `external_status_check` supports two output modes:

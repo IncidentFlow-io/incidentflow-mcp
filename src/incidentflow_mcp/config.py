@@ -145,6 +145,20 @@ class Settings(BaseSettings):
         default=False,
         description="When true, external status tool requests trigger OMS persistence side-effects.",
     )
+    slack_bot_token: SecretStr | None = Field(
+        default=None,
+        description="Slack Bot User OAuth Token used by Slack read-only MCP tools.",
+    )
+    slack_alerts_channel: str = Field(
+        default="alerts",
+        description="Default Slack channel name or ID for alert retrieval.",
+    )
+    slack_alerts_default_limit: int = Field(
+        default=50,
+        ge=1,
+        le=200,
+        description="Default number of recent Slack alert messages to retrieve.",
+    )
 
     # -----------------------------------------------------------------------
     # Example tool knobs (extend as needed)
