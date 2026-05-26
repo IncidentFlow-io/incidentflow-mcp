@@ -194,8 +194,19 @@ Rate-limit and concurrency state is Redis-backed to work across multiple app rep
 In local development:
 
 ```bash
-REDIS_URL=redis://:redis-dev-password@127.0.0.1:6379/0
+REDIS_URL=redis://host.docker.internal:6379/0
 ```
+
+The Docker Compose default expects the shared Redis from `incidentflow-platform`
+to be running on host port `6379`. To run an MCP-only Redis fallback:
+
+```bash
+REDIS_URL=redis://:redis-dev-password@redis:6379/0 docker compose --profile local-deps up
+```
+
+The compose file also points `PLATFORM_API_BASE_URL` at the shared
+`incidentflow-platform` API via `http://host.docker.internal:8000`. Override it
+with `MCP_PLATFORM_API_BASE_URL=...` when needed.
 
 ### Metrics
 
