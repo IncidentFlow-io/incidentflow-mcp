@@ -10,11 +10,13 @@ import json
 import logging
 from typing import Any
 
+import httpx
 from mcp.server.fastmcp import FastMCP
 
 from incidentflow_mcp.auth.context import get_current_auth_context
 from incidentflow_mcp.config import Settings, get_settings
 from incidentflow_mcp.mcp.resources import register_resources
+from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
 from incidentflow_mcp.platform_api.slack_client import PlatformSlackClient
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
@@ -38,6 +40,26 @@ _VALID_EXECUTION_MODES = {"auto", "sync", "async"}
 _TERMINAL_JOB_STATUSES = {"succeeded", "failed", "cancelled", "canceled"}
 _VALID_RESPONSE_MODES = {"compact", "full"}
 _VALID_SLACK_THREAD_MODES = {"none", "metadata", "full"}
+_K8S_ALLOWED_ACTIONS = {
+    "k8s.list_namespaces",
+    "k8s.list_pods",
+    "k8s.get_pod",
+    "k8s.get_pod_logs",
+    "k8s.list_events",
+    "k8s.list_deployments",
+    "k8s.list_services",
+    "k8s.get_rollout_status",
+}
+_NO_CONNECTED_CLUSTER_MESSAGE = (
+    "No Kubernetes cluster is connected to this workspace. "
+    "Connect a cluster in Integrations -> Kubernetes first."
+)
+_MULTIPLE_CLUSTERS_MESSAGE = (
+    "Multiple Kubernetes clusters are connected. Please specify environment, "
+    "for example production, staging, or dev."
+)
+_UNAUTHORIZED_CLUSTER_MESSAGE = "You are not authorized to access this Kubernetes cluster or namespace."
+_MISSING_NAMESPACE_MESSAGE = "Please specify a namespace, or use list_namespaces first."
 _SLACK_THREAD_MODE_ALIASES = {
     "summarize": "full",
     "summary": "full",
@@ -90,6 +112,188 @@ def _current_token_workspace_id() -> str | None:
         return None
     normalized = str(workspace_id).strip()
     return normalized or None
+
+
+def _current_bearer_token() -> str:
+    auth_context = get_current_auth_context()
+    if not auth_context:
+        raise ValueError("Authenticated MCP request context is required")
+    token = (auth_context.get("bearer_token") or "").strip()
+    if not token:
+        raise ValueError("Bearer token is required for Kubernetes agent tools")
+    return token
+
+
+def _normalize_k8s_environment(environment: str | None) -> str | None:
+    if environment is None:
+        return None
+    normalized = environment.strip().lower()
+    if not normalized:
+        return None
+    aliases = {
+        "prod": "production",
+        "production": "production",
+        "stage": "staging",
+        "staging": "staging",
+        "dev": "dev",
+        "development": "dev",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _cluster_search_values(cluster: dict[str, Any]) -> set[str]:
+    values = {str(cluster.get("name") or "").strip().lower()}
+    environment = _normalize_k8s_environment(str(cluster.get("environment") or ""))
+    if environment:
+        values.add(environment)
+    aliases = cluster.get("aliases")
+    if isinstance(aliases, list):
+        values.update(str(item).strip().lower() for item in aliases if str(item).strip())
+    return {item for item in values if item}
+
+
+async def _resolve_k8s_cluster_id(
+    *,
+    client: PlatformAPIAgentCommandsClient,
+    bearer_token: str,
+    cluster_id: str | None = None,
+    environment: str | None = None,
+    cluster_name: str | None = None,
+) -> str:
+    explicit_cluster_id = cluster_id.strip() if cluster_id is not None else ""
+    if explicit_cluster_id:
+        return explicit_cluster_id
+
+    try:
+        clusters = await client.list_clusters(bearer_token=bearer_token)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403}:
+            raise ValueError(_UNAUTHORIZED_CLUSTER_MESSAGE) from exc
+        raise
+
+    connected = [item for item in clusters if item.get("connected") is True]
+    if not connected:
+        raise ValueError(_NO_CONNECTED_CLUSTER_MESSAGE)
+
+    wanted_environment = _normalize_k8s_environment(environment)
+    wanted_name = cluster_name.strip().lower() if cluster_name is not None else ""
+
+    matches = connected
+    if wanted_environment:
+        matches = [
+            item
+            for item in matches
+            if _normalize_k8s_environment(str(item.get("environment") or ""))
+            == wanted_environment
+            or wanted_environment in _cluster_search_values(item)
+        ]
+    if wanted_name:
+        matches = [item for item in matches if wanted_name in _cluster_search_values(item)]
+
+    if not wanted_environment and not wanted_name and len(matches) == 1:
+        return str(matches[0]["cluster_id"])
+
+    if not matches:
+        raise ValueError(_NO_CONNECTED_CLUSTER_MESSAGE)
+
+    if len(matches) > 1:
+        raise ValueError(_MULTIPLE_CLUSTERS_MESSAGE)
+
+    return str(matches[0]["cluster_id"])
+
+
+async def _dispatch_k8s_agent_command(
+    *,
+    settings: Settings,
+    cluster_id: str | None,
+    action: str,
+    params: dict[str, Any] | None = None,
+    timeout_seconds: int = 30,
+    environment: str | None = None,
+    cluster_name: str | None = None,
+) -> str:
+    if action not in _K8S_ALLOWED_ACTIONS:
+        raise ValueError(f"Unsupported Kubernetes agent action: {action}")
+    if timeout_seconds < 1 or timeout_seconds > 60:
+        raise ValueError("timeout_seconds must be between 1 and 60")
+
+    client = PlatformAPIAgentCommandsClient(settings)
+    bearer_token = _current_bearer_token()
+    resolved_cluster_id = await _resolve_k8s_cluster_id(
+        client=client,
+        bearer_token=bearer_token,
+        cluster_id=cluster_id,
+        environment=environment,
+        cluster_name=cluster_name,
+    )
+    try:
+        result = await client.dispatch(
+            bearer_token=bearer_token,
+            cluster_id=resolved_cluster_id,
+            action=action,
+            params=params or {},
+            timeout_seconds=timeout_seconds,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code in {401, 403}:
+            raise ValueError(_UNAUTHORIZED_CLUSTER_MESSAGE) from exc
+        raise
+    return json.dumps(result, indent=2)
+
+
+async def _dispatch_k8s_pods_for_analysis(
+    *,
+    settings: Settings,
+    namespace: str | None,
+    cluster_id: str | None,
+    environment: str | None,
+    cluster_name: str | None,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    raw = await _dispatch_k8s_agent_command(
+        settings=settings,
+        cluster_id=cluster_id,
+        environment=environment,
+        cluster_name=cluster_name,
+        action="k8s.list_pods",
+        params={"namespace": namespace} if namespace else {},
+        timeout_seconds=timeout_seconds,
+    )
+    return json.loads(raw)
+
+
+def _is_unhealthy_pod(pod: dict[str, Any]) -> bool:
+    if str(pod.get("phase") or "").lower() not in {"running", "succeeded"}:
+        return True
+    containers = pod.get("containers")
+    if not isinstance(containers, list):
+        return False
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        if container.get("ready") is False:
+            return True
+        try:
+            if int(container.get("restart_count") or container.get("restartCount") or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _select_workload_pod(pods: list[Any], workload: str) -> str | None:
+    workload = workload.strip()
+    if not workload:
+        return None
+    candidates = [pod for pod in pods if isinstance(pod, dict)]
+    for pod in candidates:
+        if pod.get("name") == workload:
+            return str(pod["name"])
+    for pod in candidates:
+        name = str(pod.get("name") or "")
+        if name.startswith(f"{workload}-"):
+            return name
+    return None
 
 
 def _resolve_job_workspace_id(
@@ -644,6 +848,358 @@ def create_mcp_server() -> FastMCP:
             client=platform_client,
         )
         return json.dumps(result, indent=2)
+
+    @mcp.tool(
+        name="k8s_agent_command",
+        description=_specs["k8s_agent_command"].description,
+    )
+    async def k8s_agent_command(
+        action: str,
+        params: dict[str, Any] | None = None,
+        cluster_id: str | None = None,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action=action,
+            params=params,
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_list_namespaces",
+        description=_specs["k8s_list_namespaces"].description,
+    )
+    async def k8s_list_namespaces(
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.list_namespaces",
+            params={},
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_list_pods",
+        description=_specs["k8s_list_pods"].description,
+    )
+    async def k8s_list_pods(
+        namespace: str | None = None,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.list_pods",
+            params={"namespace": namespace} if namespace else {},
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_get_pod",
+        description=_specs["k8s_get_pod"].description,
+    )
+    async def k8s_get_pod(
+        namespace: str,
+        pod: str,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        if not namespace:
+            raise ValueError(_MISSING_NAMESPACE_MESSAGE)
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.get_pod",
+            params={"namespace": namespace, "pod": pod},
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_get_pod_logs",
+        description=_specs["k8s_get_pod_logs"].description,
+    )
+    async def k8s_get_pod_logs(
+        namespace: str,
+        pod: str,
+        container: str | None = None,
+        tail_lines: int = 200,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        if not namespace:
+            raise ValueError(_MISSING_NAMESPACE_MESSAGE)
+        params: dict[str, Any] = {
+            "namespace": namespace,
+            "pod": pod,
+            "tail_lines": tail_lines,
+        }
+        if container:
+            params["container"] = container
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.get_pod_logs",
+            params=params,
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_list_events",
+        description=_specs["k8s_list_events"].description,
+    )
+    async def k8s_list_events(
+        namespace: str | None = None,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.list_events",
+            params={"namespace": namespace} if namespace else {},
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_list_deployments",
+        description=_specs["k8s_list_deployments"].description,
+    )
+    async def k8s_list_deployments(
+        namespace: str | None = None,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.list_deployments",
+            params={"namespace": namespace} if namespace else {},
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_list_services",
+        description=_specs["k8s_list_services"].description,
+    )
+    async def k8s_list_services(
+        namespace: str | None = None,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.list_services",
+            params={"namespace": namespace} if namespace else {},
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_get_rollout_status",
+        description=_specs["k8s_get_rollout_status"].description,
+    )
+    async def k8s_get_rollout_status(
+        namespace: str,
+        deployment: str,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        if not namespace:
+            raise ValueError(_MISSING_NAMESPACE_MESSAGE)
+        return await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.get_rollout_status",
+            params={"namespace": namespace, "deployment": deployment},
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_show_namespaces",
+        description=_specs["k8s_show_namespaces"].description,
+    )
+    async def k8s_show_namespaces(
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        return await k8s_list_namespaces(
+            environment=environment,
+            cluster_name=cluster_name,
+            cluster_id=cluster_id,
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_show_pods",
+        description=_specs["k8s_show_pods"].description,
+    )
+    async def k8s_show_pods(
+        namespace: str | None = None,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        return await k8s_list_pods(
+            namespace=namespace,
+            environment=environment,
+            cluster_name=cluster_name,
+            cluster_id=cluster_id,
+            timeout_seconds=timeout_seconds,
+        )
+
+    @mcp.tool(
+        name="k8s_show_unhealthy_pods",
+        description=_specs["k8s_show_unhealthy_pods"].description,
+    )
+    async def k8s_show_unhealthy_pods(
+        namespace: str | None = None,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        result = await _dispatch_k8s_pods_for_analysis(
+            settings=settings,
+            namespace=namespace,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            timeout_seconds=timeout_seconds,
+        )
+        data = result.get("data") if isinstance(result, dict) else None
+        pods = data.get("pods") if isinstance(data, dict) else []
+        pods = pods if isinstance(pods, list) else []
+        unhealthy = [pod for pod in pods if isinstance(pod, dict) and _is_unhealthy_pod(pod)]
+        return json.dumps(
+            {
+                "status": "success",
+                "data": {
+                    "pods": unhealthy,
+                    "count": len(unhealthy),
+                },
+                "error": None,
+            },
+            indent=2,
+        )
+
+    @mcp.tool(
+        name="k8s_analyze_workload",
+        description=_specs["k8s_analyze_workload"].description,
+    )
+    async def k8s_analyze_workload(
+        workload: str | None = None,
+        namespace: str | None = None,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        tail_lines: int = 100,
+        timeout_seconds: int = 30,
+    ) -> str:
+        if not namespace:
+            raise ValueError(_MISSING_NAMESPACE_MESSAGE)
+        if not workload:
+            raise ValueError("Please specify a pod or deployment name to analyze.")
+
+        rollout = await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.get_rollout_status",
+            params={"namespace": namespace, "deployment": workload},
+            timeout_seconds=timeout_seconds,
+        )
+        pods = await _dispatch_k8s_pods_for_analysis(
+            settings=settings,
+            namespace=namespace,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            timeout_seconds=timeout_seconds,
+        )
+        pods_data = pods.get("data") if isinstance(pods, dict) else None
+        pod_items = pods_data.get("pods") if isinstance(pods_data, dict) else []
+        selected_pod = _select_workload_pod(pod_items if isinstance(pod_items, list) else [], workload)
+        logs_data = None
+        if selected_pod:
+            logs = await _dispatch_k8s_agent_command(
+                settings=settings,
+                cluster_id=cluster_id,
+                environment=environment,
+                cluster_name=cluster_name,
+                action="k8s.get_pod_logs",
+                params={
+                    "namespace": namespace,
+                    "pod": selected_pod,
+                    "tail_lines": tail_lines,
+                },
+                timeout_seconds=timeout_seconds,
+            )
+            logs_data = json.loads(logs).get("data")
+        return json.dumps(
+            {
+                "status": "success",
+                "data": {
+                    "rollout_status": json.loads(rollout).get("data"),
+                    "pods": pods.get("data"),
+                    "logs": logs_data,
+                    "selected_pod": selected_pod,
+                    "hint": (
+                        "No matching pod was found for logs."
+                        if selected_pod is None
+                        else "Logs are from the selected pod."
+                    ),
+                    "tail_lines": tail_lines,
+                },
+                "error": None,
+            },
+            indent=2,
+        )
 
     register_resources(mcp)
 

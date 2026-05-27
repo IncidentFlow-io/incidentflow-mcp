@@ -8,6 +8,7 @@ from typing import TypedDict
 
 class AuthContext(TypedDict):
     authenticated: bool
+    bearer_token: str | None
     client_id: str | None
     workspace_id: str | None
     user_id: str | None
