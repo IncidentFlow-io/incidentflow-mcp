@@ -216,6 +216,13 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "maximum": 200,
                     "description": "Maximum thread replies to fetch when thread_mode=full.",
                 },
+                "workspace_id": {
+                    "type": "string",
+                    "description": (
+                        "Workspace scope for platform Slack mode. Optional when "
+                        "INCIDENTFLOW_WORKSPACE_ID is configured."
+                    ),
+                },
             },
             "required": [],
         },
@@ -256,6 +263,13 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "maximum": 200,
                     "description": "Maximum Slack thread replies to fetch.",
                 },
+                "workspace_id": {
+                    "type": "string",
+                    "description": (
+                        "Workspace scope for platform Slack mode. Optional when "
+                        "INCIDENTFLOW_WORKSPACE_ID is configured."
+                    ),
+                },
             },
             "required": ["channel_id", "message_ts"],
         },
@@ -286,6 +300,13 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "alert_context": {
                     "type": "object",
                     "description": "Optional alert or incident context to shape the summary title/root-cause hints.",
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": (
+                        "Workspace scope for platform Slack mode. Optional when "
+                        "INCIDENTFLOW_WORKSPACE_ID is configured."
+                    ),
                 },
             },
             "required": ["channel_id", "thread_ts"],

@@ -242,15 +242,19 @@ def _parse_alert_message(
 
 async def fetch_slack_alerts(
     *,
-    token: str,
+    token: str | None = None,
     channel: str,
     limit: int,
     include_raw: bool = False,
     include_threads: bool = False,
     thread_mode: ThreadMode = "none",
     max_thread_replies: int = 20,
+    client: Any | None = None,
 ) -> SlackAlertsOutput:
-    client = SlackClient(token)
+    if client is None:
+        if token is None:
+            raise ValueError("Slack token or platform client is required")
+        client = SlackClient(token)
     cache: dict[tuple[str, str], SlackThreadContext] = {}
     channel_id, channel_name = await client.resolve_channel(channel)
     messages = await client.conversation_history(channel_id=channel_id, limit=limit)
@@ -303,13 +307,17 @@ async def fetch_slack_alerts(
 
 async def fetch_slack_alert_thread(
     *,
-    token: str,
+    token: str | None = None,
     channel_id: str,
     message_ts: str,
     include_root: bool = True,
     max_replies: int = 50,
+    client: Any | None = None,
 ) -> SlackAlertThreadOutput:
-    client = SlackClient(token)
+    if client is None:
+        if token is None:
+            raise ValueError("Slack token or platform client is required")
+        client = SlackClient(token)
     fetched = await client.thread_replies(
         channel_id=channel_id,
         thread_ts=message_ts,
@@ -349,10 +357,11 @@ async def fetch_slack_alert_thread(
 
 async def summarize_incident_thread(
     *,
-    token: str,
+    token: str | None = None,
     channel_id: str,
     thread_ts: str,
     alert_context: dict[str, Any] | None = None,
+    client: Any | None = None,
 ) -> dict[str, Any]:
     output = await fetch_slack_alert_thread(
         token=token,
@@ -360,6 +369,7 @@ async def summarize_incident_thread(
         message_ts=thread_ts,
         include_root=False,
         max_replies=50,
+        client=client,
     )
     return summarize_thread_for_sre(
         replies=output.thread.replies,
