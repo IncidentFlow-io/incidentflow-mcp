@@ -7,12 +7,12 @@ services:
       - INCIDENTFLOW_PAT=${INCIDENTFLOW_PAT:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - ENVIRONMENT=${ENVIRONMENT:-development}
-      - REDIS_URL=${REDIS_URL:-redis://:redis-dev-password@redis:6379/0}
+      - REDIS_URL=${REDIS_URL:-redis://host.docker.internal:6379/0}
+      - PLATFORM_API_BASE_URL=${MCP_PLATFORM_API_BASE_URL:-http://host.docker.internal:8000}
     env_file:
       - .env
-    depends_on:
-      redis:
-        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 30s
@@ -22,6 +22,8 @@ services:
     restart: unless-stopped
 
   redis:
+    profiles:
+      - local-deps
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD:-redis-dev-password}"]
     ports:
