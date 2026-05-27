@@ -72,6 +72,10 @@ class Settings(BaseSettings):
     )
     platform_api_internal_api_key: SecretStr | None = Field(
         default=None,
+        validation_alias=AliasChoices(
+            "PLATFORM_API_INTERNAL_TOKEN",
+            "PLATFORM_API_INTERNAL_API_KEY",
+        ),
         description="Optional service-to-service API key for MCP -> platform-api calls",
     )
     platform_api_ai_jobs_path: str = Field(
@@ -86,8 +90,15 @@ class Settings(BaseSettings):
     )
     mcp_default_workspace_id: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("MCP_DEFAULT_WORKSPACE_ID", "DEFAULT_WORKSPACE_ID"),
-        description="Optional default workspace_id used for async job orchestration when tool input omits workspace_id.",
+        validation_alias=AliasChoices(
+            "INCIDENTFLOW_WORKSPACE_ID",
+            "MCP_DEFAULT_WORKSPACE_ID",
+            "DEFAULT_WORKSPACE_ID",
+        ),
+        description=(
+            "Optional default workspace_id used for async job orchestration "
+            "when tool input omits workspace_id."
+        ),
     )
 
     # When True, tokens must carry all required scopes for the endpoint they
@@ -143,7 +154,9 @@ class Settings(BaseSettings):
     )
     mcp_oms_persist_enabled: bool = Field(
         default=False,
-        description="When true, external status tool requests trigger OMS persistence side-effects.",
+        description=(
+            "When true, external status tool requests trigger OMS persistence side-effects."
+        ),
     )
     slack_bot_token: SecretStr | None = Field(
         default=None,
@@ -181,12 +194,18 @@ class Settings(BaseSettings):
     )
     rate_limit_authenticated_per_min: int = Field(
         default=60,
-        validation_alias=AliasChoices("RATE_LIMIT_AUTHENTICATED_PER_MIN", "RATE_LIMIT_FREE_PER_MIN"),
+        validation_alias=AliasChoices(
+            "RATE_LIMIT_AUTHENTICATED_PER_MIN",
+            "RATE_LIMIT_FREE_PER_MIN",
+        ),
         description="Transport-level requests per minute for authenticated identities",
     )
     tool_limit_authenticated_per_min: int = Field(
         default=20,
-        validation_alias=AliasChoices("TOOL_LIMIT_AUTHENTICATED_PER_MIN", "TOOL_LIMIT_FREE_PER_MIN"),
+        validation_alias=AliasChoices(
+            "TOOL_LIMIT_AUTHENTICATED_PER_MIN",
+            "TOOL_LIMIT_FREE_PER_MIN",
+        ),
         description="MCP tools/call requests per minute for authenticated identities",
     )
     expensive_tool_limit_per_min: int = Field(
@@ -212,7 +231,9 @@ class Settings(BaseSettings):
     )
     rate_limit_auth_endpoints: str = Field(
         default="/authorize,/token,/register,/oauth/register",
-        description="Comma-separated auth endpoint prefixes to protect with transport-level rate limiting",
+        description=(
+            "Comma-separated auth endpoint prefixes to protect with transport-level rate limiting"
+        ),
     )
     rate_limit_authenticated_bucket_scope: str = Field(
         default="principal",

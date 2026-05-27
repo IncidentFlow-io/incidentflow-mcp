@@ -16,6 +16,7 @@ from incidentflow_mcp.auth.context import get_current_auth_context
 from incidentflow_mcp.config import Settings, get_settings
 from incidentflow_mcp.mcp.resources import register_resources
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
+from incidentflow_mcp.platform_api.slack_client import PlatformSlackClient
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -550,10 +551,17 @@ def create_mcp_server() -> FastMCP:
         include_threads: bool = False,
         thread_mode: str = "none",
         max_thread_replies: int = 20,
+        workspace_id: str | None = None,
     ) -> str:
         token = settings.slack_bot_token
+        platform_client = None
         if token is None:
-            raise ValueError("SLACK_BOT_TOKEN is required for slack_alerts_list")
+            resolved_workspace_id = _resolve_job_workspace_id(
+                workspace_id,
+                token_workspace_id=_current_token_workspace_id(),
+                default_workspace_id=settings.mcp_default_workspace_id,
+            )
+            platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
 
         selected_channel = (channel or settings.slack_alerts_channel).strip() or "alerts"
         selected_limit = limit or settings.slack_alerts_default_limit
@@ -564,13 +572,14 @@ def create_mcp_server() -> FastMCP:
             raise ValueError("max_thread_replies must be between 0 and 200")
 
         result = await fetch_slack_alerts(
-            token=token.get_secret_value(),
+            token=token.get_secret_value() if token is not None else None,
             channel=selected_channel,
             limit=selected_limit,
             include_raw=include_raw,
             include_threads=include_threads,
             thread_mode=selected_thread_mode,  # type: ignore[arg-type]
             max_thread_replies=max_thread_replies,
+            client=platform_client,
         )
         return result.model_dump_json(indent=2)
 
@@ -583,19 +592,27 @@ def create_mcp_server() -> FastMCP:
         message_ts: str,
         include_root: bool = True,
         max_replies: int = 50,
+        workspace_id: str | None = None,
     ) -> str:
         token = settings.slack_bot_token
+        platform_client = None
         if token is None:
-            raise ValueError("SLACK_BOT_TOKEN is required for slack_alert_thread_get")
+            resolved_workspace_id = _resolve_job_workspace_id(
+                workspace_id,
+                token_workspace_id=_current_token_workspace_id(),
+                default_workspace_id=settings.mcp_default_workspace_id,
+            )
+            platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
         if max_replies < 0 or max_replies > 200:
             raise ValueError("max_replies must be between 0 and 200")
 
         result = await fetch_slack_alert_thread(
-            token=token.get_secret_value(),
+            token=token.get_secret_value() if token is not None else None,
             channel_id=channel_id,
             message_ts=message_ts,
             include_root=include_root,
             max_replies=max_replies,
+            client=platform_client,
         )
         return result.model_dump_json(indent=2)
 
@@ -607,16 +624,24 @@ def create_mcp_server() -> FastMCP:
         channel_id: str,
         thread_ts: str,
         alert_context: dict[str, Any] | None = None,
+        workspace_id: str | None = None,
     ) -> str:
         token = settings.slack_bot_token
+        platform_client = None
         if token is None:
-            raise ValueError("SLACK_BOT_TOKEN is required for incident_thread_summary")
+            resolved_workspace_id = _resolve_job_workspace_id(
+                workspace_id,
+                token_workspace_id=_current_token_workspace_id(),
+                default_workspace_id=settings.mcp_default_workspace_id,
+            )
+            platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
 
         result = await summarize_incident_thread(
-            token=token.get_secret_value(),
+            token=token.get_secret_value() if token is not None else None,
             channel_id=channel_id,
             thread_ts=thread_ts,
             alert_context=alert_context,
+            client=platform_client,
         )
         return json.dumps(result, indent=2)
 
