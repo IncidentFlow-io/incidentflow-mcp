@@ -86,6 +86,46 @@ DNS note:
 The `/mcp` endpoint is implemented as a custom ASGI proxy route and supports Streamable HTTP behavior (including SSE paths) that OpenAPI cannot fully encode.  
 The OpenAPI document intentionally captures the stable HTTP + JSON-RPC contract and representative examples without inventing non-existent endpoints or transport behavior.
 
+## Kubernetes Agent Tools
+
+MCP Kubernetes tools resolve the connected cluster automatically through
+`platform-api`, so normal usage does not require copying a `cluster_id`.
+
+Examples users can ask:
+
+```text
+Show Kubernetes namespaces
+Show pods in production
+List pods in namespace incidentflow-agent
+Check failing pods in staging
+```
+
+Available read-only tools include:
+
+- `k8s_list_namespaces`
+- `k8s_list_pods`
+- `k8s_get_pod`
+- `k8s_get_pod_logs`
+- `k8s_list_events`
+- `k8s_list_deployments`
+- `k8s_list_services`
+- `k8s_get_rollout_status`
+- `k8s_show_namespaces`
+- `k8s_show_pods`
+- `k8s_show_unhealthy_pods`
+- `k8s_analyze_workload`
+
+Cluster selection behavior:
+
+- If one cluster is connected in the current workspace, MCP selects it automatically.
+- If multiple clusters are connected, pass `environment` (`production`, `staging`, or `dev`) or `cluster_name`.
+- `cluster_id` is still accepted for internal debugging and direct control-plane tests, but should be omitted in normal user-facing prompts.
+
+For local end-to-end testing, use OAuth/platform bearer auth for MCP so
+`platform-api` can resolve the workspace and authorize Kubernetes command
+dispatch. A static `INCIDENTFLOW_PAT` is useful for MCP-only auth smoke tests,
+but it may not carry enough platform context for Kubernetes command dispatch.
+
 ### CI automation (GitHub Actions)
 
 This repository includes a docs workflow at `.github/workflows/docs.yml`:

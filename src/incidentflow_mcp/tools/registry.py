@@ -22,6 +22,42 @@ class ToolSpec:
     annotations: dict[str, Any] = field(default_factory=dict)
 
 
+def _k8s_cluster_properties() -> dict[str, Any]:
+    return {
+        "environment": {
+            "type": "string",
+            "description": "Optional environment selector, e.g. production, staging, or dev.",
+        },
+        "cluster_name": {
+            "type": "string",
+            "description": "Optional cluster name or alias selector.",
+        },
+        "cluster_id": {
+            "type": "string",
+            "description": "Internal/debug override. Usually omit this.",
+        },
+    }
+
+
+def _timeout_property() -> dict[str, Any]:
+    return {"type": "integer", "default": 30, "minimum": 1, "maximum": 60}
+
+
+def _k8s_schema(
+    properties: dict[str, Any] | None = None,
+    required: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            **_k8s_cluster_properties(),
+            **(properties or {}),
+            "timeout_seconds": _timeout_property(),
+        },
+        "required": required or [],
+    }
+
+
 _TOOL_SPECS: list[ToolSpec] = [
     ToolSpec(
         name="incident_summary",
@@ -296,6 +332,143 @@ _TOOL_SPECS: list[ToolSpec] = [
             "idempotentHint": True,
             "openWorldHint": True,
         },
+    ),
+    ToolSpec(
+        name="k8s_agent_command",
+        description=(
+            "Dispatch a read-only Kubernetes inspection command to an online "
+            "IncidentFlow Kubernetes Agent through platform-api and agent-gateway."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                **_k8s_cluster_properties(),
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "k8s.list_namespaces",
+                        "k8s.list_pods",
+                        "k8s.get_pod",
+                        "k8s.get_pod_logs",
+                        "k8s.list_events",
+                        "k8s.list_deployments",
+                        "k8s.list_services",
+                        "k8s.get_rollout_status",
+                    ],
+                },
+                "params": {"type": "object", "default": {}},
+                "timeout_seconds": _timeout_property(),
+            },
+            "required": ["action"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    ),
+    ToolSpec(
+        name="k8s_list_namespaces",
+        description="List namespaces visible to an online IncidentFlow Kubernetes Agent.",
+        input_schema=_k8s_schema(),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_list_pods",
+        description="List pods in an allowed namespace through an online Kubernetes Agent.",
+        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_get_pod",
+        description="Get one pod in an allowed namespace through an online Kubernetes Agent.",
+        input_schema=_k8s_schema(
+            {"namespace": {"type": "string"}, "pod": {"type": "string"}},
+            required=["namespace", "pod"],
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_get_pod_logs",
+        description=(
+            "Read redacted pod logs in an allowed namespace through an online "
+            "Kubernetes Agent."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                **_k8s_cluster_properties(),
+                "namespace": {"type": "string"},
+                "pod": {"type": "string"},
+                "container": {"type": "string"},
+                "tail_lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 1000},
+                "timeout_seconds": _timeout_property(),
+            },
+            "required": ["namespace", "pod"],
+        },
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_list_events",
+        description=(
+            "List Kubernetes events in an allowed namespace through an online "
+            "Kubernetes Agent."
+        ),
+        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_list_deployments",
+        description="List deployments in an allowed namespace through an online Kubernetes Agent.",
+        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_list_services",
+        description="List services in an allowed namespace through an online Kubernetes Agent.",
+        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_get_rollout_status",
+        description="Get deployment rollout status through an online Kubernetes Agent.",
+        input_schema=_k8s_schema(
+            {"namespace": {"type": "string"}, "deployment": {"type": "string"}},
+            required=["namespace", "deployment"],
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_show_namespaces",
+        description="Show Kubernetes namespaces using automatic cluster resolution.",
+        input_schema=_k8s_schema(),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_show_pods",
+        description="Show Kubernetes pods using automatic cluster resolution.",
+        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_show_unhealthy_pods",
+        description="Show pods that are not running, not ready, or have restarts.",
+        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_analyze_workload",
+        description="Inspect a Kubernetes workload rollout and related pods.",
+        input_schema=_k8s_schema(
+            {
+                "namespace": {"type": "string"},
+                "workload": {"type": "string"},
+                "tail_lines": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000},
+            },
+            required=["namespace", "workload"],
+        ),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
     ),
 ]
 

@@ -10,9 +10,22 @@ from incidentflow_mcp.mcp.server import (
     _normalize_polled_external_status_job,
     _resolve_execution_mode,
     _resolve_job_workspace_id,
+    _resolve_k8s_cluster_id,
+    _select_workload_pod,
 )
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
 from incidentflow_mcp.tools.registry import get_tool_specs
+
+
+class FakeAgentClusterClient:
+    def __init__(self, clusters: list[dict]) -> None:
+        self.clusters = clusters
+        self.list_calls = 0
+
+    async def list_clusters(self, *, bearer_token: str) -> list[dict]:
+        assert bearer_token == "token"
+        self.list_calls += 1
+        return self.clusters
 
 
 def test_resolve_execution_mode_auto_sync_in_dev() -> None:
@@ -23,6 +36,12 @@ def test_resolve_execution_mode_auto_sync_in_dev() -> None:
 def test_resolve_execution_mode_auto_async_in_production() -> None:
     settings = Settings(_env_file=None, environment="production", mcp_async_tools_enabled=None)
     assert _resolve_execution_mode(settings, "auto") == "async"
+
+
+def test_select_workload_pod_prefers_exact_then_prefix() -> None:
+    pods = [{"name": "checkout-api-abc"}, {"name": "checkout-api"}]
+    assert _select_workload_pod(pods, "checkout-api") == "checkout-api"
+    assert _select_workload_pod([{"name": "checkout-api-abc"}], "checkout-api") == "checkout-api-abc"
 
 
 def test_external_status_check_schema_contains_response_mode_and_check_id_polling_hint() -> None:
@@ -69,6 +88,112 @@ def test_resolve_job_workspace_id_rejects_workspace_scope_mismatch() -> None:
             token_workspace_id="ws_from_token",
             default_workspace_id="ws_default",
         )
+
+
+@pytest.mark.asyncio
+async def test_resolve_k8s_cluster_auto_selects_single_connected_cluster() -> None:
+    client = FakeAgentClusterClient(
+        [{"cluster_id": "cluster_one", "name": "prod", "connected": True}]
+    )
+
+    cluster_id = await _resolve_k8s_cluster_id(client=client, bearer_token="token")
+
+    assert cluster_id == "cluster_one"
+
+
+@pytest.mark.asyncio
+async def test_resolve_k8s_cluster_rejects_ambiguous_connected_clusters() -> None:
+    client = FakeAgentClusterClient(
+        [
+            {"cluster_id": "cluster_prod", "name": "prod", "connected": True},
+            {"cluster_id": "cluster_stage", "name": "stage", "connected": True},
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Multiple Kubernetes clusters"):
+        await _resolve_k8s_cluster_id(client=client, bearer_token="token")
+
+
+@pytest.mark.asyncio
+async def test_resolve_k8s_cluster_environment_aliases() -> None:
+    client = FakeAgentClusterClient(
+        [
+            {
+                "cluster_id": "cluster_prod",
+                "name": "prod-us-east-1",
+                "environment": "production",
+                "connected": True,
+            },
+            {
+                "cluster_id": "cluster_stage",
+                "name": "staging-eu",
+                "environment": "staging",
+                "aliases": ["stage"],
+                "connected": True,
+            },
+        ]
+    )
+
+    assert (
+        await _resolve_k8s_cluster_id(
+            client=client,
+            bearer_token="token",
+            environment="prod",
+        )
+        == "cluster_prod"
+    )
+    assert (
+        await _resolve_k8s_cluster_id(
+            client=client,
+            bearer_token="token",
+            environment="stage",
+        )
+        == "cluster_stage"
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_k8s_cluster_name_matches_alias() -> None:
+    client = FakeAgentClusterClient(
+        [
+            {
+                "cluster_id": "cluster_prod",
+                "name": "prod-us-east-1",
+                "aliases": ["primary"],
+                "connected": True,
+            }
+        ]
+    )
+
+    cluster_id = await _resolve_k8s_cluster_id(
+        client=client,
+        bearer_token="token",
+        cluster_name="primary",
+    )
+
+    assert cluster_id == "cluster_prod"
+
+
+@pytest.mark.asyncio
+async def test_resolve_k8s_cluster_explicit_cluster_id_bypasses_lookup() -> None:
+    client = FakeAgentClusterClient([])
+
+    cluster_id = await _resolve_k8s_cluster_id(
+        client=client,
+        bearer_token="token",
+        cluster_id="cluster_debug",
+    )
+
+    assert cluster_id == "cluster_debug"
+    assert client.list_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_resolve_k8s_cluster_no_connected_clusters_is_helpful() -> None:
+    client = FakeAgentClusterClient([])
+
+    with pytest.raises(ValueError, match="No Kubernetes cluster is connected"):
+        await _resolve_k8s_cluster_id(client=client, bearer_token="token")
 
 
 @pytest.mark.asyncio
