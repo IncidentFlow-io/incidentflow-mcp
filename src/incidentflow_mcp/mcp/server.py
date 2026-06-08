@@ -18,7 +18,9 @@ from incidentflow_mcp.config import Settings, get_settings
 from incidentflow_mcp.mcp.resources import register_resources
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
+from incidentflow_mcp.platform_api.grafana_client import PlatformGrafanaClient
 from incidentflow_mcp.platform_api.slack_client import PlatformSlackClient
+from incidentflow_mcp.tools import grafana as _grafana_tools
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -1200,6 +1202,101 @@ def create_mcp_server() -> FastMCP:
             },
             indent=2,
         )
+
+    def _grafana_client(workspace_id: str | None) -> PlatformGrafanaClient:
+        resolved_workspace_id = _resolve_job_workspace_id(
+            workspace_id,
+            token_workspace_id=_current_token_workspace_id(),
+            default_workspace_id=settings.mcp_default_workspace_id,
+        )
+        return PlatformGrafanaClient(settings, workspace_id=resolved_workspace_id)
+
+    @mcp.tool(
+        name="grafana_list_dashboards",
+        description=_specs["grafana_list_dashboards"].description,
+    )
+    async def grafana_list_dashboards(workspace_id: str | None = None) -> str:
+        result = await _grafana_tools.grafana_list_dashboards(_grafana_client(workspace_id))
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(
+        name="grafana_get_dashboard",
+        description=_specs["grafana_get_dashboard"].description,
+    )
+    async def grafana_get_dashboard(dashboard_uid: str, workspace_id: str | None = None) -> str:
+        result = await _grafana_tools.grafana_get_dashboard(
+            _grafana_client(workspace_id), dashboard_uid=dashboard_uid
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(
+        name="grafana_extract_panel_queries",
+        description=_specs["grafana_extract_panel_queries"].description,
+    )
+    async def grafana_extract_panel_queries(
+        dashboard_uid: str, workspace_id: str | None = None
+    ) -> str:
+        result = await _grafana_tools.grafana_extract_panel_queries(
+            _grafana_client(workspace_id), dashboard_uid=dashboard_uid
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(
+        name="grafana_metrics_query",
+        description=_specs["grafana_metrics_query"].description,
+    )
+    async def grafana_metrics_query(
+        datasource_uid: str,
+        query: str,
+        time: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        result = await _grafana_tools.grafana_metrics_query(
+            _grafana_client(workspace_id), datasource_uid=datasource_uid, query=query, time=time
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(
+        name="grafana_metrics_query_range",
+        description=_specs["grafana_metrics_query_range"].description,
+    )
+    async def grafana_metrics_query_range(
+        datasource_uid: str,
+        query: str,
+        start: str,
+        end: str,
+        step: str,
+        workspace_id: str | None = None,
+    ) -> str:
+        result = await _grafana_tools.grafana_metrics_query_range(
+            _grafana_client(workspace_id),
+            datasource_uid=datasource_uid,
+            query=query,
+            start=start,
+            end=end,
+            step=step,
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(
+        name="analyze_dashboard_health",
+        description=_specs["analyze_dashboard_health"].description,
+    )
+    async def analyze_dashboard_health(
+        dashboard_uid: str,
+        start: str = "now-6h",
+        end: str = "now",
+        step: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        result = await _grafana_tools.analyze_dashboard_health(
+            _grafana_client(workspace_id),
+            dashboard_uid=dashboard_uid,
+            start=start,
+            end=end,
+            step=step,
+        )
+        return result.model_dump_json(indent=2)
 
     register_resources(mcp)
 
