@@ -646,6 +646,39 @@ _TOOL_SPECS: list[ToolSpec] = [
             "openWorldHint": True,
         },
     ),
+    ToolSpec(
+        name="analyze_dns_dashboard",
+        description=(
+            "Analyze an allow-listed Grafana dashboard over a time window with DNS-focused "
+            "summary hints. Reuses the generic dashboard health analysis, then highlights "
+            "DNS-related panels and returned NXDOMAIN/SERVFAIL response-code series."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "start": {
+                    "type": "string",
+                    "default": "now-6h",
+                    "description": "Window start (default now-6h).",
+                },
+                "end": {
+                    "type": "string",
+                    "default": "now",
+                    "description": "Window end (default now).",
+                },
+                "step": {"type": "string", "description": "Optional step; server picks a default."},
+                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+            },
+            "required": ["dashboard_uid"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
 ]
 
 
