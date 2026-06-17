@@ -15,6 +15,9 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+_DNS_EXPR_MARKERS = ("coredns_", "kube_dns", "dns")
+_DNS_ERROR_CODES = ("nxdomain", "servfail")
+
 
 class GrafanaReadClient(Protocol):
     """Subset of ``PlatformGrafanaClient`` the tools depend on."""
@@ -173,3 +176,86 @@ async def analyze_dashboard_health(
 ) -> AnalyzeOutput:
     payload = await client.analyze(dashboard_uid=dashboard_uid, start=start, end=end, step=step)
     return AnalyzeOutput.model_validate(payload)
+
+
+async def analyze_dns_dashboard(
+    client: GrafanaReadClient,
+    *,
+    dashboard_uid: str,
+    start: str = "now-6h",
+    end: str = "now",
+    step: str | None = None,
+) -> AnalyzeOutput:
+    analysis = await analyze_dashboard_health(
+        client, dashboard_uid=dashboard_uid, start=start, end=end, step=step
+    )
+    analysis.summary_hints = [
+        *analysis.summary_hints,
+        *_dns_summary_hints(analysis.panels),
+    ]
+    return analysis
+
+
+def _dns_summary_hints(panels: list[PanelAnalysis]) -> list[str]:
+    dns_panel_titles = _dns_panel_titles(panels)
+    hints: list[str] = []
+    if dns_panel_titles:
+        hints.append(f"DNS-focused panels detected: {_join_limited(dns_panel_titles)}")
+    else:
+        hints.append("No DNS-focused panels detected by expression markers")
+
+    error_code_panels = _dns_error_code_panels(panels)
+    if error_code_panels:
+        details = [
+            f"{code.upper()} ({_join_limited(titles)})"
+            for code, titles in error_code_panels.items()
+        ]
+        hints.append(f"DNS error response samples above zero: {'; '.join(details)}")
+    return hints
+
+
+def _dns_panel_titles(panels: list[PanelAnalysis]) -> list[str]:
+    return [
+        _panel_label(panel)
+        for panel in panels
+        if _contains_any(panel.expr, _DNS_EXPR_MARKERS)
+    ]
+
+
+def _dns_error_code_panels(panels: list[PanelAnalysis]) -> dict[str, list[str]]:
+    code_panels: dict[str, list[str]] = {}
+    for code in _DNS_ERROR_CODES:
+        titles: list[str] = []
+        for panel in panels:
+            if _panel_has_positive_code_sample(panel, code):
+                titles.append(_panel_label(panel))
+        if titles:
+            code_panels[code] = titles
+    return code_panels
+
+
+def _panel_has_positive_code_sample(panel: PanelAnalysis, code: str) -> bool:
+    for series in panel.series:
+        labels = [*series.metric.keys(), *series.metric.values()]
+        if not any(_contains_any(label, (code,)) for label in labels):
+            continue
+        if any(sample.value > 0 for sample in series.samples):
+            return True
+    return False
+
+
+def _contains_any(value: str, markers: tuple[str, ...]) -> bool:
+    normalized = value.lower()
+    return any(marker in normalized for marker in markers)
+
+
+def _panel_label(panel: PanelAnalysis) -> str:
+    return panel.panel_title.strip() or "untitled panel"
+
+
+def _join_limited(values: list[str], *, limit: int = 5) -> str:
+    unique_values = list(dict.fromkeys(values))
+    if len(unique_values) <= limit:
+        return ", ".join(unique_values)
+    remainder = len(unique_values) - limit
+    return f"{', '.join(unique_values[:limit])}, +{remainder} more"

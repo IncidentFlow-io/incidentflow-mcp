@@ -1298,6 +1298,26 @@ def create_mcp_server() -> FastMCP:
         )
         return result.model_dump_json(indent=2)
 
+    @mcp.tool(
+        name="analyze_dns_dashboard",
+        description=_specs["analyze_dns_dashboard"].description,
+    )
+    async def analyze_dns_dashboard(
+        dashboard_uid: str,
+        start: str = "now-6h",
+        end: str = "now",
+        step: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        result = await _grafana_tools.analyze_dns_dashboard(
+            _grafana_client(workspace_id),
+            dashboard_uid=dashboard_uid,
+            start=start,
+            end=end,
+            step=step,
+        )
+        return result.model_dump_json(indent=2)
+
     register_resources(mcp)
 
     return mcp

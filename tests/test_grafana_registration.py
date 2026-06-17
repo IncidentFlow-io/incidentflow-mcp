@@ -12,6 +12,7 @@ GRAFANA_TOOLS = {
     "grafana_metrics_query",
     "grafana_metrics_query_range",
     "analyze_dashboard_health",
+    "analyze_dns_dashboard",
 }
 
 
@@ -37,6 +38,7 @@ def test_required_inputs_declared() -> None:
         "step",
     ]
     assert specs["grafana_list_dashboards"].input_schema["required"] == []
+    assert specs["analyze_dns_dashboard"].input_schema["required"] == ["dashboard_uid"]
 
 
 async def test_server_registers_grafana_tools() -> None:

@@ -6,6 +6,7 @@ from typing import Any
 
 from incidentflow_mcp.tools.grafana import (
     analyze_dashboard_health,
+    analyze_dns_dashboard,
     grafana_extract_panel_queries,
     grafana_get_dashboard,
     grafana_list_dashboards,
@@ -198,3 +199,71 @@ class TestAnalyze:
         )
         # Tools serialize via model_dump_json in the server layer.
         assert '"dashboard_uid":"dns"' in out.model_dump_json()
+
+
+class TestAnalyzeDnsDashboard:
+    async def test_adds_dns_panel_and_error_hints(self) -> None:
+        client = FakeClient(
+            analyze={
+                "dashboard_uid": "dns",
+                "dashboard_title": "DNS",
+                "time_range": "now-6h..now",
+                "panels": [
+                    {
+                        "panel_title": "DNS Errors",
+                        "expr": "sum by (rcode) (rate(coredns_dns_responses_total[5m]))",
+                        "series": [
+                            {
+                                "metric": {"rcode": "SERVFAIL"},
+                                "samples": [{"timestamp": 1.0, "value": 2.0}],
+                            },
+                            {
+                                "metric": {"rcode": "NOERROR"},
+                                "samples": [{"timestamp": 1.0, "value": 10.0}],
+                            },
+                        ],
+                    },
+                    {
+                        "panel_title": "Other",
+                        "expr": "up",
+                        "series": [
+                            {
+                                "metric": {"rcode": "NXDOMAIN"},
+                                "samples": [{"timestamp": 1.0, "value": 0.0}],
+                            }
+                        ],
+                    },
+                ],
+                "summary_hints": ["2 panel queries analyzed"],
+            }
+        )
+
+        out = await analyze_dns_dashboard(client, dashboard_uid="dns")
+
+        assert out.summary_hints == [
+            "2 panel queries analyzed",
+            "DNS-focused panels detected: DNS Errors",
+            "DNS error response samples above zero: SERVFAIL (DNS Errors)",
+        ]
+        assert client.calls == [
+            (
+                "analyze",
+                {"dashboard_uid": "dns", "start": "now-6h", "end": "now", "step": None},
+            )
+        ]
+
+    async def test_reports_no_dns_panels(self) -> None:
+        out = await analyze_dns_dashboard(
+            FakeClient(
+                analyze={
+                    "dashboard_uid": "api",
+                    "panels": [{"panel_title": "API", "expr": "up", "series": []}],
+                    "summary_hints": [],
+                }
+            ),
+            dashboard_uid="api",
+            start="now-1h",
+            step="30s",
+        )
+
+        assert out.summary_hints == ["No DNS-focused panels detected by expression markers"]
