@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import (
     _execute_external_status_check,
+    _k8s_cluster_overview_payload,
+    _k8s_connection_health_payload,
+    _k8s_rbac_check_payload,
     _normalize_polled_external_status_job,
     _resolve_execution_mode,
     _resolve_job_workspace_id,
@@ -26,6 +30,50 @@ class FakeAgentClusterClient:
         assert bearer_token == "token"
         self.list_calls += 1
         return self.clusters
+
+
+class FakeK8sHealthClient(FakeAgentClusterClient):
+    def __init__(self, clusters: list[dict], responses: dict[tuple[str, str], dict]) -> None:
+        super().__init__(clusters)
+        self.responses = responses
+        self.dispatch_calls: list[tuple[str, dict]] = []
+
+    async def dispatch(
+        self,
+        *,
+        bearer_token: str,
+        cluster_id: str,
+        action: str,
+        params: dict,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        assert bearer_token == "token"
+        assert cluster_id == "cluster_prod"
+        _ = timeout_seconds
+        namespace = str(params.get("namespace") or "")
+        self.dispatch_calls.append((action, params))
+        return self.responses.get(
+            (action, namespace),
+            {
+                "command_id": "cmd",
+                "status": "failed",
+                "error": {"code": "missing_fixture", "message": f"No fixture for {action}"},
+            },
+        )
+
+
+class FailingK8sDispatchClient(FakeAgentClusterClient):
+    async def dispatch(
+        self,
+        *,
+        bearer_token: str,
+        cluster_id: str,
+        action: str,
+        params: dict,
+        timeout_seconds: int | None = None,
+    ) -> dict:
+        _ = bearer_token, cluster_id, action, params, timeout_seconds
+        raise httpx.ConnectError("agent gateway unavailable")
 
 
 def test_resolve_execution_mode_auto_sync_in_dev() -> None:
@@ -194,6 +242,194 @@ async def test_resolve_k8s_cluster_no_connected_clusters_is_helpful() -> None:
 
     with pytest.raises(ValueError, match="No Kubernetes cluster is connected"):
         await _resolve_k8s_cluster_id(client=client, bearer_token="token")
+
+
+@pytest.mark.asyncio
+async def test_k8s_connection_health_reports_connected_and_permissions() -> None:
+    client = FakeK8sHealthClient(
+        [
+            {
+                "cluster_id": "cluster_prod",
+                "name": "incidentflow-prod",
+                "connected": True,
+                "agent_version": "0.1.0",
+            }
+        ],
+        {
+            ("k8s.list_namespaces", ""): {
+                "status": "succeeded",
+                "data": {"namespaces": [{"name": "incidentflow-prod"}]},
+            },
+            ("k8s.list_pods", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {
+                    "pods": [
+                        {
+                            "name": "api-1",
+                            "namespace": "incidentflow-prod",
+                            "phase": "Running",
+                            "containers": [{"ready": True, "restart_count": 0}],
+                        }
+                    ]
+                },
+            },
+            ("k8s.list_events", "incidentflow-prod"): {"status": "succeeded", "data": {"events": []}},
+            ("k8s.list_deployments", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"deployments": []},
+            },
+            ("k8s.list_services", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"services": []},
+            },
+            ("k8s.get_pod_logs", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"logs": "ok"},
+            },
+        },
+    )
+
+    payload = await _k8s_connection_health_payload(client=client, bearer_token="token")
+
+    assert payload["status"] == "connected"
+    assert payload["agent_online"] is True
+    assert payload["agent_version"] == "0.1.0"
+    assert payload["namespaces"] == ["incidentflow-prod"]
+    assert payload["permissions"]["get_logs"] is True
+
+
+@pytest.mark.asyncio
+async def test_k8s_connection_health_leaves_logs_permission_unknown_without_pods() -> None:
+    client = FakeK8sHealthClient(
+        [{"cluster_id": "cluster_prod", "name": "prod", "connected": True}],
+        {
+            ("k8s.list_namespaces", ""): {
+                "status": "succeeded",
+                "data": {"namespaces": [{"name": "redis"}]},
+            },
+            ("k8s.list_pods", "redis"): {"status": "succeeded", "data": {"pods": []}},
+            ("k8s.list_events", "redis"): {"status": "succeeded", "data": {"events": []}},
+            ("k8s.list_deployments", "redis"): {
+                "status": "succeeded",
+                "data": {"deployments": []},
+            },
+            ("k8s.list_services", "redis"): {"status": "succeeded", "data": {"services": []}},
+        },
+    )
+
+    payload = await _k8s_connection_health_payload(client=client, bearer_token="token")
+
+    assert payload["permissions"]["get_logs"] is None
+
+
+@pytest.mark.asyncio
+async def test_k8s_connection_health_reports_degraded_when_dispatch_fails() -> None:
+    client = FailingK8sDispatchClient(
+        [{"cluster_id": "cluster_prod", "name": "prod", "connected": True}]
+    )
+
+    payload = await _k8s_connection_health_payload(client=client, bearer_token="token")
+
+    assert payload["status"] == "degraded"
+    assert payload["permissions"]["list_namespaces"] is False
+    assert payload["namespaces"] == []
+
+
+@pytest.mark.asyncio
+async def test_k8s_rbac_check_reports_denied_action() -> None:
+    client = FakeK8sHealthClient(
+        [{"cluster_id": "cluster_prod", "name": "prod", "connected": True}],
+        {
+            ("k8s.list_namespaces", ""): {
+                "status": "succeeded",
+                "data": {"namespaces": [{"name": "incidentflow-prod"}]},
+            },
+            ("k8s.list_pods", "incidentflow-prod"): {
+                "status": "failed",
+                "error": {"code": "RBAC_DENIED", "message": "denied"},
+            },
+            ("k8s.list_events", "incidentflow-prod"): {"status": "succeeded", "data": {"events": []}},
+            ("k8s.list_deployments", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"deployments": []},
+            },
+            ("k8s.list_services", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"services": []},
+            },
+        },
+    )
+
+    payload = await _k8s_rbac_check_payload(
+        client=client,
+        bearer_token="token",
+        cluster_id="cluster_prod",
+    )
+
+    assert payload["permissions"]["list_pods"]["allowed"] is False
+    assert payload["permissions"]["list_pods"]["error_code"] == "RBAC_DENIED"
+    assert payload["permissions"]["get_logs"]["allowed"] is None
+
+
+@pytest.mark.asyncio
+async def test_k8s_cluster_overview_aggregates_unhealthy_pods_and_restarts() -> None:
+    client = FakeK8sHealthClient(
+        [{"cluster_id": "cluster_prod", "name": "prod", "connected": True}],
+        {
+            ("k8s.list_namespaces", ""): {
+                "status": "succeeded",
+                "data": {"namespaces": [{"name": "incidentflow-prod"}]},
+            },
+            ("k8s.list_pods", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {
+                    "pods": [
+                        {
+                            "name": "api-1",
+                            "namespace": "incidentflow-prod",
+                            "phase": "Running",
+                            "containers": [{"ready": True, "restart_count": 0}],
+                        },
+                        {
+                            "name": "worker-1",
+                            "namespace": "incidentflow-prod",
+                            "phase": "Running",
+                            "containers": [{"ready": False, "restart_count": 5}],
+                        },
+                    ]
+                },
+            },
+            ("k8s.list_deployments", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"deployments": [{"name": "api"}]},
+            },
+            ("k8s.list_services", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"services": [{"name": "api"}]},
+            },
+            ("k8s.list_events", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {
+                    "events": [
+                        {"type": "Warning", "reason": "BackOff", "last_seen": "2026-06-21T00:00:00Z"}
+                    ]
+                },
+            },
+        },
+    )
+
+    payload = await _k8s_cluster_overview_payload(
+        client=client,
+        bearer_token="token",
+        cluster_id="cluster_prod",
+    )
+
+    assert payload["pods_total"] == 2
+    assert payload["pods_unhealthy"] == 1
+    assert payload["deployments"] == 1
+    assert payload["services"] == 1
+    assert payload["recent_warning_events"] == 1
+    assert payload["top_restarts"][0]["pod"] == "worker-1"
 
 
 @pytest.mark.asyncio
