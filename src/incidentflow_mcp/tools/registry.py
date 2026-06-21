@@ -390,6 +390,45 @@ _TOOL_SPECS: list[ToolSpec] = [
         },
     ),
     ToolSpec(
+        name="k8s_connection_health",
+        description=(
+            "Check whether the Kubernetes agent is online, the cluster is reachable, "
+            "and core read-only permissions work."
+        ),
+        input_schema=_k8s_schema(),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_cluster_overview",
+        description=(
+            "Return an SRE overview of visible namespaces, pods, deployments, "
+            "services, warning events, unhealthy pods, and restarts."
+        ),
+        input_schema=_k8s_schema(),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_namespace_overview",
+        description="Return an SRE overview scoped to one allowed Kubernetes namespace.",
+        input_schema=_k8s_schema({"namespace": {"type": "string"}}, required=["namespace"]),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_rbac_check",
+        description="Check read-only Kubernetes permissions available through the agent.",
+        input_schema=_k8s_schema(),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
+        name="k8s_agent_status",
+        description=(
+            "Return Kubernetes agent registry status, version, heartbeat, and selected "
+            "cluster identity without dispatching a Kubernetes command."
+        ),
+        input_schema=_k8s_schema(),
+        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    ),
+    ToolSpec(
         name="k8s_list_namespaces",
         description="List namespaces visible to an online IncidentFlow Kubernetes Agent.",
         input_schema=_k8s_schema(),
