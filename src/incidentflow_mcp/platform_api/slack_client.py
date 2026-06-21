@@ -61,6 +61,8 @@ class PlatformSlackClient:
     async def resolve_channel(self, channel: str) -> tuple[str, str | None]:
         normalized = normalize_channel_name(channel)
         channels = await self.allowed_channels(purpose="alerts")
+        if not channels:
+            raise RuntimeError("no_enabled_alert_channel_for_workspace")
         for item in channels:
             channel_id = str(item.get("id") or "")
             name = str(item.get("name") or "")

@@ -1255,12 +1255,16 @@ def create_mcp_server() -> FastMCP:
         max_thread_replies: int = 20,
         workspace_id: str | None = None,
     ) -> str:
+        token_workspace_id = _current_token_workspace_id()
+        if not token_workspace_id:
+            return json.dumps({"error": "mcp_token_workspace_not_configured. Set workspace_id in your MCP token."})
+            
         token = settings.slack_bot_token
         platform_client = None
         if token is None:
             resolved_workspace_id = _resolve_job_workspace_id(
                 workspace_id,
-                token_workspace_id=_current_token_workspace_id(),
+                token_workspace_id=token_workspace_id,
                 default_workspace_id=settings.mcp_default_workspace_id,
             )
             platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
@@ -1296,12 +1300,16 @@ def create_mcp_server() -> FastMCP:
         max_replies: int = 50,
         workspace_id: str | None = None,
     ) -> str:
+        token_workspace_id = _current_token_workspace_id()
+        if not token_workspace_id:
+            return json.dumps({"error": "mcp_token_workspace_not_configured. Set workspace_id in your MCP token."})
+            
         token = settings.slack_bot_token
         platform_client = None
         if token is None:
             resolved_workspace_id = _resolve_job_workspace_id(
                 workspace_id,
-                token_workspace_id=_current_token_workspace_id(),
+                token_workspace_id=token_workspace_id,
                 default_workspace_id=settings.mcp_default_workspace_id,
             )
             platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
@@ -1328,12 +1336,16 @@ def create_mcp_server() -> FastMCP:
         alert_context: dict[str, Any] | None = None,
         workspace_id: str | None = None,
     ) -> str:
+        token_workspace_id = _current_token_workspace_id()
+        if not token_workspace_id:
+            return json.dumps({"error": "mcp_token_workspace_not_configured. Set workspace_id in your MCP token."})
+
         token = settings.slack_bot_token
         platform_client = None
         if token is None:
             resolved_workspace_id = _resolve_job_workspace_id(
                 workspace_id,
-                token_workspace_id=_current_token_workspace_id(),
+                token_workspace_id=token_workspace_id,
                 default_workspace_id=settings.mcp_default_workspace_id,
             )
             platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
