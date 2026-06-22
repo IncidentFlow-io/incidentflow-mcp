@@ -259,7 +259,7 @@ def validate_local_pat(
         authenticated=True,
         bearer_token=token,
         client_id=token_id,
-        workspace_id=request.headers.get("x-workspace-id"),
+        workspace_id=record.workspace_id,
         user_id=request.headers.get("x-user-id"),
         plan=(request.headers.get("x-plan") or request.headers.get("x-plan-tier") or request.headers.get("x-tier")),
     )
