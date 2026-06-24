@@ -2,6 +2,11 @@ import httpx
 import pytest
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.server import (
+    _platform_slack_error_json,
+    _resolve_slack_tool_access,
+    _workspace_context_required_error,
+)
 from incidentflow_mcp.platform_api.slack_client import PlatformSlackAPIError, PlatformSlackClient
 
 
@@ -35,6 +40,61 @@ def test_platform_slack_error_preserves_platform_code() -> None:
 
     assert exc_info.value.code == "slack_not_connected_for_workspace"
     assert str(exc_info.value) == "slack_not_connected_for_workspace"
+
+
+def test_mcp_platform_slack_error_json_preserves_code() -> None:
+    payload = _platform_slack_error_json(
+        PlatformSlackAPIError(
+            "slack_bot_not_in_channel",
+            "Invite the IncidentFlow bot to this Slack channel.",
+        )
+    )
+
+    assert "slack_bot_not_in_channel" in payload
+    assert "Invite the IncidentFlow bot" in payload
+
+
+def test_workspace_context_required_error_is_structured() -> None:
+    payload = _workspace_context_required_error()
+
+    assert "mcp_workspace_context_required" in payload
+    assert "Authorize the MCP client through IncidentFlow OAuth" in payload
+
+
+def test_production_slack_access_requires_platform_mode() -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="production",
+        platform_api_base_url=None,
+        platform_api_internal_api_key=None,
+        slack_bot_token="xoxb-legacy",
+    )
+
+    with pytest.raises(ValueError, match="slack_platform_mode_required"):
+        _resolve_slack_tool_access(
+            settings,
+            workspace_id=None,
+            token_workspace_id="workspace-1",
+        )
+
+
+def test_production_slack_access_uses_platform_client_even_with_legacy_token() -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="production",
+        platform_api_base_url="https://platform.example",
+        platform_api_internal_api_key="internal-token",
+        slack_bot_token="xoxb-legacy",
+    )
+
+    token, platform_client = _resolve_slack_tool_access(
+        settings,
+        workspace_id=None,
+        token_workspace_id="workspace-1",
+    )
+
+    assert token is None
+    assert isinstance(platform_client, PlatformSlackClient)
 
 
 @pytest.mark.asyncio

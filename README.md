@@ -283,6 +283,18 @@ Fallback behavior:
 
 ## Thread-aware Slack analysis
 
+In SaaS/production, Slack tools are platform-backed. Users connect Slack in the
+IncidentFlow UI/CLI, choose enabled channels, and invite the IncidentFlow bot to
+those channels. MCP never receives the Slack bot token; it calls
+`platform-api` internal Slack endpoints using the authenticated workspace
+context from OAuth or managed token introspection. `SLACK_BOT_TOKEN` is a
+legacy local-development fallback only and is ignored by production Slack tools
+when platform mode is configured.
+
+If a direct MCP client has not completed IncidentFlow OAuth, the transport can
+return OAuth authorization required before a tool runs. If a tool runs without a
+workspace-scoped auth context, Slack tools return `mcp_workspace_context_required`.
+
 `slack_alerts_list` is thread-safe by default: it does not fetch Slack threads unless requested.
 Use metadata mode for lightweight thread counts, and full mode when you need parsed engineer replies.
 
