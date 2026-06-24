@@ -17,9 +17,45 @@ from typing import Any
 @dataclass
 class ToolSpec:
     name: str
+    title: str
     description: str
     input_schema: dict[str, Any]
     annotations: dict[str, Any] = field(default_factory=dict)
+
+
+_READ_ONLY_LOCAL_ANNOTATIONS = {
+    "readOnlyHint": True,
+    "openWorldHint": False,
+    "destructiveHint": False,
+    "idempotentHint": True,
+}
+
+
+_READ_ONLY_LOCAL_JUSTIFICATION = (
+    "This tool only retrieves or computes operational information. It does not create, "
+    "update, delete, restart, scale, patch, send messages, or perform irreversible actions."
+)
+
+_K8S_READ_ONLY_JUSTIFICATION = (
+    "This tool performs read-only inspection through the IncidentFlow Kubernetes Agent. "
+    "It may query Kubernetes API resources such as Pods, Events, Deployments, Services, "
+    "Namespaces, rollout status, or redacted logs, but it never modifies Kubernetes resources."
+)
+
+_SLACK_READ_ONLY_JUSTIFICATION = (
+    "This tool reads Slack alert messages or threads for incident analysis. It does not post "
+    "messages, update messages, delete messages, invite users, or change Slack workspace "
+    "configuration."
+)
+
+_STATUS_READ_ONLY_JUSTIFICATION = (
+    "This tool reads public provider status information and does not modify any external "
+    "provider state."
+)
+
+
+def _read_only_annotations() -> dict[str, Any]:
+    return dict(_READ_ONLY_LOCAL_ANNOTATIONS)
 
 
 def _k8s_cluster_properties() -> dict[str, Any]:
@@ -61,10 +97,11 @@ def _k8s_schema(
 _TOOL_SPECS: list[ToolSpec] = [
     ToolSpec(
         name="incident_summary",
+        title="Summarize Incident",
         description=(
-            "Return a structured summary for a given incident, including title, "
+            "Reads IncidentFlow incident data and returns a structured summary with title, "
             "severity, status, affected services, event timeline, and remediation "
-            "recommendations."
+            f"recommendations. {_READ_ONLY_LOCAL_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -87,28 +124,30 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "type": "string",
                     "enum": ["auto", "sync", "async"],
                     "default": "auto",
-                    "description": "Execution strategy. auto => async in production, sync elsewhere.",
+                    "description": (
+                        "Execution strategy. auto => async in production, sync elsewhere."
+                    ),
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Workspace scope for async orchestration. Optional when token has workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured.",
+                    "description": (
+                        "Workspace scope for async orchestration. Optional when token has "
+                        "workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured."
+                    ),
                 },
             },
             "required": ["incident_id"],
         },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-        },
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="correlate_alerts",
+        title="Correlate Alerts",
         description=(
-            "Group a list of incoming alerts into correlated clusters based on "
-            "shared service, label affinity, and time proximity. Returns cluster "
-            "assignments, dominant severity, likely root cause, and confidence score."
+            "Computes read-only alert correlation from the provided alert payload, grouping "
+            "alerts by shared service, label affinity, and time proximity. Returns cluster "
+            "assignments, dominant severity, likely root cause, and confidence score without "
+            f"modifying any source system. {_READ_ONLY_LOCAL_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -120,7 +159,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "window_minutes": {
                     "type": "integer",
                     "default": 60,
-                    "description": "Correlation time window in minutes (1–1440)",
+                    "description": "Correlation time window in minutes (1-1440)",
                 },
                 "min_cluster_size": {
                     "type": "integer",
@@ -131,30 +170,30 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "type": "string",
                     "enum": ["auto", "sync", "async"],
                     "default": "auto",
-                    "description": "Execution strategy. auto => async in production, sync elsewhere.",
+                    "description": (
+                        "Execution strategy. auto => async in production, sync elsewhere."
+                    ),
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Workspace scope for async orchestration. Optional when token has workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured.",
+                    "description": (
+                        "Workspace scope for async orchestration. Optional when token has "
+                        "workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured."
+                    ),
                 },
             },
             "required": ["alerts_json"],
         },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-        },
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="external_status_check",
+        title="Check External Service Status",
         description=(
-            "Fetch real-time and historical AWS/GitHub status via async jobs. "
-            "Default response_mode=compact returns a chat-safe summary. Use "
-            "response_mode=full for complete raw payload (including larger data such as "
-            "incident updates). Set wait_for_result=false to get an async job_id for "
-            "manual polling."
+            "Checks recent public service status for supported external providers such as "
+            "GitHub or AWS and returns current status, incidents, and historical summaries. "
+            "Default response_mode=compact returns a chat-safe summary; response_mode=full "
+            f"returns the complete provider payload. {_STATUS_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -175,7 +214,10 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "wait_for_result": {
                     "type": "boolean",
                     "default": True,
-                    "description": "If true (default), polls until the job completes. If false, returns job_id immediately for manual polling.",
+                    "description": (
+                        "If true (default), polls until the job completes. If false, returns "
+                        "job_id immediately for manual polling."
+                    ),
                 },
                 "execution_mode": {
                     "type": "string",
@@ -185,34 +227,39 @@ _TOOL_SPECS: list[ToolSpec] = [
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Workspace scope for async orchestration. Optional when token has workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured.",
+                    "description": (
+                        "Workspace scope for async orchestration. Optional when token has "
+                        "workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured."
+                    ),
                 },
                 "check_id": {
                     "type": "string",
-                    "description": "Existing async job_id for polling (when provided, MCP polls this job and does not create a new one)",
+                    "description": (
+                        "Existing async job_id for polling. When provided, MCP polls this "
+                        "job and does not create a new one."
+                    ),
                 },
                 "response_mode": {
                     "type": "string",
                     "enum": ["compact", "full"],
                     "default": "compact",
-                    "description": "compact returns chat-safe summary; full returns raw job result payload.",
+                    "description": (
+                        "compact returns chat-safe summary; full returns raw job result payload."
+                    ),
                 },
             },
             "required": [],
         },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True,
-        },
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="slack_alerts_list",
+        title="Review Slack Alerts",
         description=(
-            "Read recent alert messages from a Slack alert channel, parse Grafana/"
-            "Alertmanager-style payloads, and return a structured JSON list with "
-            "status, labels, summaries, timestamps, and Slack permalinks."
+            "Reads recent alert messages from a configured Slack alert channel and parses "
+            "Grafana or Alertmanager-style payloads into structured incident context with "
+            "status, labels, summaries, timestamps, and Slack permalinks. "
+            f"{_SLACK_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -243,7 +290,10 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "type": "string",
                     "enum": ["none", "metadata", "full"],
                     "default": "none",
-                    "description": "none returns alert messages only; metadata returns thread counts/users; full fetches replies and analysis.",
+                    "description": (
+                        "none returns alert messages only; metadata returns thread "
+                        "counts/users; full fetches replies and analysis."
+                    ),
                 },
                 "max_thread_replies": {
                     "type": "integer",
@@ -262,19 +312,15 @@ _TOOL_SPECS: list[ToolSpec] = [
             },
             "required": [],
         },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True,
-        },
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="slack_alert_thread_get",
+        title="Read Slack Alert Thread",
         description=(
-            "Read a Slack alert message thread by channel_id and message_ts/thread_ts "
-            "and return parsed engineer replies, commands, links, hypotheses, decisions, "
-            "and possible resolution signals."
+            "Reads a Slack alert message thread by channel_id and message_ts/thread_ts and "
+            "returns parsed engineer replies, commands, links, hypotheses, decisions, and "
+            f"possible resolution signals. {_SLACK_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -309,18 +355,15 @@ _TOOL_SPECS: list[ToolSpec] = [
             },
             "required": ["channel_id", "message_ts"],
         },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True,
-        },
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="incident_thread_summary",
+        title="Summarize Incident Thread",
         description=(
-            "Given Slack alert context, read the related Slack thread and produce an "
-            "SRE-focused human-context summary without executing any suggested command."
+            "Given Slack alert context, reads the related Slack thread and produces an "
+            "SRE-focused human-context summary without executing suggested commands or "
+            f"changing Slack data. {_SLACK_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -335,7 +378,10 @@ _TOOL_SPECS: list[ToolSpec] = [
                 },
                 "alert_context": {
                     "type": "object",
-                    "description": "Optional alert or incident context to shape the summary title/root-cause hints.",
+                    "description": (
+                        "Optional alert or incident context to shape the summary "
+                        "title/root-cause hints."
+                    ),
                 },
                 "workspace_id": {
                     "type": "string",
@@ -347,18 +393,15 @@ _TOOL_SPECS: list[ToolSpec] = [
             },
             "required": ["channel_id", "thread_ts"],
         },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": True,
-        },
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_agent_command",
+        title="Run Read-Only Kubernetes Inspection",
         description=(
-            "Dispatch a read-only Kubernetes inspection command to an online "
-            "IncidentFlow Kubernetes Agent through platform-api and agent-gateway."
+            "Dispatches one allowlisted read-only Kubernetes inspection command to an "
+            "online IncidentFlow Kubernetes Agent through platform-api and agent-gateway. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -382,78 +425,105 @@ _TOOL_SPECS: list[ToolSpec] = [
             },
             "required": ["action"],
         },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-        },
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_connection_health",
+        title="Check Kubernetes Connection",
         description=(
-            "Check whether the Kubernetes agent is online, the cluster is reachable, "
-            "and core read-only permissions work."
+            "Checks whether the IncidentFlow Kubernetes Agent is online, the cluster is "
+            "reachable, and core read-only permissions work. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_cluster_overview",
+        title="Inspect Kubernetes Cluster Health",
         description=(
-            "Return an SRE overview of visible namespaces, pods, deployments, "
-            "services, warning events, unhealthy pods, and restarts."
+            "Returns a read-only SRE overview of visible namespaces, pods, deployments, "
+            "services, warning events, unhealthy pods, and restarts through the "
+            f"IncidentFlow Kubernetes Agent. {_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_namespace_overview",
-        description="Return an SRE overview scoped to one allowed Kubernetes namespace.",
+        title="Inspect Kubernetes Namespace",
+        description=(
+            "Returns a read-only SRE overview scoped to one allowed Kubernetes namespace, "
+            "including Pods, Events, Deployments, Services, health signals, and restarts. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}, required=["namespace"]),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_rbac_check",
-        description="Check read-only Kubernetes permissions available through the agent.",
+        title="Check Kubernetes Read-Only Permissions",
+        description=(
+            "Checks the read-only Kubernetes permissions available through the IncidentFlow "
+            "Kubernetes Agent and returns allowed inspection capabilities. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema(),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_agent_status",
+        title="Check Kubernetes Agent Status",
         description=(
-            "Return Kubernetes agent registry status, version, heartbeat, and selected "
-            "cluster identity without dispatching a Kubernetes command."
+            "Returns Kubernetes agent registry status, version, heartbeat, and selected "
+            "cluster identity without dispatching a Kubernetes command or modifying "
+            f"cluster resources. {_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_list_namespaces",
-        description="List namespaces visible to an online IncidentFlow Kubernetes Agent.",
+        title="List Kubernetes Namespaces",
+        description=(
+            "Lists namespaces visible to an online IncidentFlow Kubernetes Agent using "
+            f"read-only Kubernetes API access. {_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema(),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_list_pods",
-        description="List pods in an allowed namespace through an online Kubernetes Agent.",
+        title="List Kubernetes Pods",
+        description=(
+            "Lists Pods in an allowed namespace through an online IncidentFlow Kubernetes "
+            f"Agent and returns current Pod status metadata. {_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_get_pod",
-        description="Get one pod in an allowed namespace through an online Kubernetes Agent.",
+        title="Inspect Kubernetes Pod",
+        description=(
+            "Reads details for one Pod in an allowed namespace through an online "
+            "IncidentFlow Kubernetes Agent and returns status, containers, and metadata. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema(
             {"namespace": {"type": "string"}, "pod": {"type": "string"}},
             required=["namespace", "pod"],
         ),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_get_pod_logs",
+        title="Read Kubernetes Pod Logs",
         description=(
-            "Read redacted pod logs in an allowed namespace through an online "
-            "Kubernetes Agent."
+            "Reads redacted logs from a selected Kubernetes Pod in an allowed namespace "
+            "through the IncidentFlow Kubernetes Agent. This tool is read-only and does "
+            "not modify Pods, containers, Deployments, or cluster configuration. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -467,59 +537,98 @@ _TOOL_SPECS: list[ToolSpec] = [
             },
             "required": ["namespace", "pod"],
         },
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_list_events",
+        title="List Kubernetes Events",
         description=(
-            "List Kubernetes events in an allowed namespace through an online "
-            "Kubernetes Agent."
+            "Lists Kubernetes Events in an allowed namespace through an online IncidentFlow "
+            "Kubernetes Agent and returns warning and normal event metadata. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_list_deployments",
-        description="List deployments in an allowed namespace through an online Kubernetes Agent.",
+        title="List Kubernetes Deployments",
+        description=(
+            "Lists Deployments in an allowed namespace through an online IncidentFlow "
+            "Kubernetes Agent and returns current rollout and availability metadata. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_list_services",
-        description="List services in an allowed namespace through an online Kubernetes Agent.",
+        title="List Kubernetes Services",
+        description=(
+            "Lists Services in an allowed namespace through an online IncidentFlow "
+            "Kubernetes Agent and returns service type, ports, selectors, and metadata. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_get_rollout_status",
-        description="Get deployment rollout status through an online Kubernetes Agent.",
+        title="Check Deployment Rollout",
+        description=(
+            "Reads Deployment rollout status through an online IncidentFlow Kubernetes "
+            "Agent and returns readiness, availability, and rollout progress. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema(
             {"namespace": {"type": "string"}, "deployment": {"type": "string"}},
             required=["namespace", "deployment"],
         ),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_show_namespaces",
-        description="Show Kubernetes namespaces using automatic cluster resolution.",
+        title="Show Kubernetes Namespaces",
+        description=(
+            "Shows Kubernetes namespaces using automatic cluster resolution through the "
+            f"IncidentFlow Kubernetes Agent. {_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema(),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_show_pods",
-        description="Show Kubernetes pods using automatic cluster resolution.",
+        title="Show Kubernetes Pods",
+        description=(
+            "Shows Kubernetes Pods using automatic cluster resolution through the "
+            "IncidentFlow Kubernetes Agent and returns current Pod status metadata. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_show_unhealthy_pods",
-        description="Show pods that are not running, not ready, or have restarts.",
+        title="Find Unhealthy Kubernetes Pods",
+        description=(
+            "Finds Kubernetes Pods that are not running, not ready, crash looping, "
+            "pending, failed, or have recent container restarts. This tool performs "
+            "read-only inspection through the IncidentFlow Kubernetes Agent and does not "
+            "create, update, delete, restart, scale, or patch any Kubernetes resources. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_analyze_workload",
-        description="Inspect a Kubernetes workload rollout and related pods.",
+        title="Analyze Kubernetes Workload",
+        description=(
+            "Inspects a Kubernetes workload rollout, related Pods, unhealthy status, and "
+            "redacted recent logs through the IncidentFlow Kubernetes Agent. This tool is "
+            "read-only and does not restart, scale, patch, delete, or update Kubernetes "
+            f"resources. {_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
         input_schema=_k8s_schema(
             {
                 "namespace": {"type": "string"},
@@ -528,7 +637,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             },
             required=["namespace", "workload"],
         ),
-        annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+        annotations=_read_only_annotations(),
     ),
 ]
 

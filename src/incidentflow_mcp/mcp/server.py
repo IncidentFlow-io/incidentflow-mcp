@@ -79,6 +79,15 @@ _SLACK_THREAD_MODE_ALIASES = {
 }
 
 
+def _tool_metadata(spec: Any) -> dict[str, Any]:
+    return {
+        "name": spec.name,
+        "title": spec.title,
+        "description": spec.description,
+        "annotations": spec.annotations,
+    }
+
+
 def _resolve_execution_mode(settings: Settings, requested_mode: str) -> str:
     mode = requested_mode.lower().strip()
     if mode not in _VALID_EXECUTION_MODES:
@@ -215,8 +224,7 @@ async def _resolve_k8s_cluster_id(
         matches = [
             item
             for item in matches
-            if _normalize_k8s_environment(str(item.get("environment") or ""))
-            == wanted_environment
+            if _normalize_k8s_environment(str(item.get("environment") or "")) == wanted_environment
             or wanted_environment in _cluster_search_values(item)
         ]
     if wanted_name:
@@ -368,9 +376,7 @@ def _pod_brief(pod: dict[str, Any]) -> dict[str, Any]:
 
 def _top_restarts(pods: list[Any], limit: int = 10) -> list[dict[str, Any]]:
     rows = [
-        _pod_brief(pod)
-        for pod in pods
-        if isinstance(pod, dict) and _pod_restart_count(pod) > 0
+        _pod_brief(pod) for pod in pods if isinstance(pod, dict) and _pod_restart_count(pod) > 0
     ]
     rows.sort(key=lambda item: int(item.get("restarts") or 0), reverse=True)
     return rows[:limit]
@@ -652,8 +658,7 @@ def _overview_payload(
             [
                 event
                 for event in events
-                if isinstance(event, dict)
-                and str(event.get("type") or "").lower() == "warning"
+                if isinstance(event, dict) and str(event.get("type") or "").lower() == "warning"
             ]
         ),
         "top_restarts": _top_restarts(pods),
@@ -1167,10 +1172,7 @@ def create_mcp_server() -> FastMCP:
 
     _specs = {s.name: s for s in get_tool_specs()}
 
-    @mcp.tool(
-        name="incident_summary",
-        description=_specs["incident_summary"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["incident_summary"]))
     async def incident_summary(
         incident_id: str,
         include_timeline: bool = True,
@@ -1218,10 +1220,7 @@ def create_mcp_server() -> FastMCP:
             poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
         )
 
-    @mcp.tool(
-        name="correlate_alerts",
-        description=_specs["correlate_alerts"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["correlate_alerts"]))
     async def correlate_alerts(
         alerts_json: str,
         window_minutes: int = 60,
@@ -1273,10 +1272,7 @@ def create_mcp_server() -> FastMCP:
             poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
         )
 
-    @mcp.tool(
-        name="external_status_check",
-        description=_specs["external_status_check"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["external_status_check"]))
     async def external_status_check(
         providers: list[str] | None = None,
         execution_mode: str = "async",
@@ -1302,10 +1298,7 @@ def create_mcp_server() -> FastMCP:
             response_mode=response_mode,
         )
 
-    @mcp.tool(
-        name="slack_alerts_list",
-        description=_specs["slack_alerts_list"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["slack_alerts_list"]))
     async def slack_alerts_list(
         channel: str | None = None,
         limit: int | None = None,
@@ -1348,10 +1341,7 @@ def create_mcp_server() -> FastMCP:
             return _platform_slack_error_json(exc)
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(
-        name="slack_alert_thread_get",
-        description=_specs["slack_alert_thread_get"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["slack_alert_thread_get"]))
     async def slack_alert_thread_get(
         channel_id: str,
         message_ts: str,
@@ -1384,10 +1374,7 @@ def create_mcp_server() -> FastMCP:
             return _platform_slack_error_json(exc)
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(
-        name="incident_thread_summary",
-        description=_specs["incident_thread_summary"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["incident_thread_summary"]))
     async def incident_thread_summary(
         channel_id: str,
         thread_ts: str,
@@ -1416,10 +1403,7 @@ def create_mcp_server() -> FastMCP:
             return _platform_slack_error_json(exc)
         return json.dumps(result, indent=2)
 
-    @mcp.tool(
-        name="k8s_agent_command",
-        description=_specs["k8s_agent_command"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_agent_command"]))
     async def k8s_agent_command(
         action: str,
         params: dict[str, Any] | None = None,
@@ -1438,10 +1422,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_connection_health",
-        description=_specs["k8s_connection_health"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_connection_health"]))
     async def k8s_connection_health(
         environment: str | None = None,
         cluster_name: str | None = None,
@@ -1460,10 +1441,7 @@ def create_mcp_server() -> FastMCP:
             )
         )
 
-    @mcp.tool(
-        name="k8s_cluster_overview",
-        description=_specs["k8s_cluster_overview"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_cluster_overview"]))
     async def k8s_cluster_overview(
         environment: str | None = None,
         cluster_name: str | None = None,
@@ -1504,10 +1482,7 @@ def create_mcp_server() -> FastMCP:
         )
         return _json(overview)
 
-    @mcp.tool(
-        name="k8s_namespace_overview",
-        description=_specs["k8s_namespace_overview"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_namespace_overview"]))
     async def k8s_namespace_overview(
         namespace: str,
         environment: str | None = None,
@@ -1536,10 +1511,7 @@ def create_mcp_server() -> FastMCP:
         overview.update({"status": "connected", "cluster_id": resolved_cluster_id})
         return _json(overview)
 
-    @mcp.tool(
-        name="k8s_rbac_check",
-        description=_specs["k8s_rbac_check"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_rbac_check"]))
     async def k8s_rbac_check(
         environment: str | None = None,
         cluster_name: str | None = None,
@@ -1564,10 +1536,7 @@ def create_mcp_server() -> FastMCP:
         payload["cluster_id"] = resolved_cluster_id
         return _json(payload)
 
-    @mcp.tool(
-        name="k8s_agent_status",
-        description=_specs["k8s_agent_status"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_agent_status"]))
     async def k8s_agent_status(
         environment: str | None = None,
         cluster_name: str | None = None,
@@ -1586,10 +1555,7 @@ def create_mcp_server() -> FastMCP:
             )
         )
 
-    @mcp.tool(
-        name="k8s_list_namespaces",
-        description=_specs["k8s_list_namespaces"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_list_namespaces"]))
     async def k8s_list_namespaces(
         environment: str | None = None,
         cluster_name: str | None = None,
@@ -1606,10 +1572,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_list_pods",
-        description=_specs["k8s_list_pods"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_list_pods"]))
     async def k8s_list_pods(
         namespace: str | None = None,
         environment: str | None = None,
@@ -1627,10 +1590,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_get_pod",
-        description=_specs["k8s_get_pod"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_get_pod"]))
     async def k8s_get_pod(
         namespace: str,
         pod: str,
@@ -1651,10 +1611,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_get_pod_logs",
-        description=_specs["k8s_get_pod_logs"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_get_pod_logs"]))
     async def k8s_get_pod_logs(
         namespace: str,
         pod: str,
@@ -1684,10 +1641,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_list_events",
-        description=_specs["k8s_list_events"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_list_events"]))
     async def k8s_list_events(
         namespace: str | None = None,
         environment: str | None = None,
@@ -1705,10 +1659,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_list_deployments",
-        description=_specs["k8s_list_deployments"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_list_deployments"]))
     async def k8s_list_deployments(
         namespace: str | None = None,
         environment: str | None = None,
@@ -1726,10 +1677,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_list_services",
-        description=_specs["k8s_list_services"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_list_services"]))
     async def k8s_list_services(
         namespace: str | None = None,
         environment: str | None = None,
@@ -1747,10 +1695,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_get_rollout_status",
-        description=_specs["k8s_get_rollout_status"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_get_rollout_status"]))
     async def k8s_get_rollout_status(
         namespace: str,
         deployment: str,
@@ -1771,10 +1716,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_show_namespaces",
-        description=_specs["k8s_show_namespaces"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_show_namespaces"]))
     async def k8s_show_namespaces(
         environment: str | None = None,
         cluster_name: str | None = None,
@@ -1788,10 +1730,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_show_pods",
-        description=_specs["k8s_show_pods"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_show_pods"]))
     async def k8s_show_pods(
         namespace: str | None = None,
         environment: str | None = None,
@@ -1807,10 +1746,7 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
 
-    @mcp.tool(
-        name="k8s_show_unhealthy_pods",
-        description=_specs["k8s_show_unhealthy_pods"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_show_unhealthy_pods"]))
     async def k8s_show_unhealthy_pods(
         namespace: str | None = None,
         environment: str | None = None,
@@ -1842,10 +1778,7 @@ def create_mcp_server() -> FastMCP:
             indent=2,
         )
 
-    @mcp.tool(
-        name="k8s_analyze_workload",
-        description=_specs["k8s_analyze_workload"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["k8s_analyze_workload"]))
     async def k8s_analyze_workload(
         workload: str | None = None,
         namespace: str | None = None,
