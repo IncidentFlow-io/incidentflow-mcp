@@ -27,8 +27,7 @@ class Settings(BaseSettings):
     allow_unprotected_in_production: bool = Field(
         default=False,
         description=(
-            "Allow startup in production without auth providers. "
-            "Default false (fail-closed)."
+            "Allow startup in production without auth providers. Default false (fail-closed)."
         ),
     )
 
@@ -157,6 +156,16 @@ class Settings(BaseSettings):
         description=(
             "When true, external status tool requests trigger OMS persistence side-effects."
         ),
+    )
+    openai_domain_verification_path: str | None = Field(
+        default=None,
+        description=(
+            "Optional absolute /.well-known path used by OpenAI Apps domain verification."
+        ),
+    )
+    openai_domain_verification_token: SecretStr | None = Field(
+        default=None,
+        description="Optional OpenAI Apps domain verification token returned as plain text.",
     )
     slack_bot_token: SecretStr | None = Field(
         default=None,
