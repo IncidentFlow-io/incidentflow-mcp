@@ -5,7 +5,7 @@ Usage:
     uv run incidentflow-mcp serve
     uv run incidentflow-mcp serve --host 127.0.0.1 --port 8000
     uv run incidentflow-mcp token create --name "local-dev"
-    uv run incidentflow-mcp token create --name "ci" --scopes mcp:read,mcp:tools:run --expires-in-days 30
+    uv run incidentflow-mcp token create --name "ci" --scopes mcp:read,mcp:tools:run
     uv run incidentflow-mcp token list
     uv run incidentflow-mcp token revoke <token_id>
     uv run incidentflow-mcp tools list
@@ -17,7 +17,7 @@ Usage:
 
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import click
 import uvicorn
@@ -101,7 +101,7 @@ def token_create(name: str, scopes: str, expires_in_days: int | None) -> None:
 
     plaintext, token_id, token_hash = generate_pat()
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + timedelta(days=expires_in_days) if expires_in_days else None
 
     record = TokenRecord(
@@ -144,7 +144,7 @@ def token_list() -> None:
     click.echo(f"\n{header}")
     click.echo("-" * len(header))
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for r in sorted(records, key=lambda x: x.created_at):
         if r.revoked_at:
             status = "revoked"
@@ -167,11 +167,11 @@ def token_revoke(token_id: str) -> None:
 
     repo = JsonTokenRepository()
     try:
-        repo.revoke(token_id, datetime.now(timezone.utc))
+        repo.revoke(token_id, datetime.now(UTC))
         click.echo(f"Token {token_id!r} has been revoked.")
-    except KeyError:
+    except KeyError as exc:
         click.echo(f"Error: token {token_id!r} not found.", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -185,8 +185,18 @@ def tools_group() -> None:
 
 
 @tools_group.command("list")
-@click.option("--verbose", is_flag=True, default=False, help="Show full input schema and annotations")
-@click.option("--json-output", is_flag=True, default=False, help="Print raw JSON (machine-readable)")
+@click.option(
+    "--verbose",
+    is_flag=True,
+    default=False,
+    help="Show full input schema and annotations",
+)
+@click.option(
+    "--json-output",
+    is_flag=True,
+    default=False,
+    help="Print raw JSON (machine-readable)",
+)
 def tools_list(verbose: bool, json_output: bool) -> None:
     """List all registered MCP tools."""
     from incidentflow_mcp.tools.registry import get_tool_specs
@@ -203,6 +213,7 @@ def tools_list(verbose: bool, json_output: bool) -> None:
                 [
                     {
                         "name": t.name,
+                        "title": t.title,
                         "description": t.description,
                         "input_schema": t.input_schema,
                         "annotations": t.annotations,
@@ -217,14 +228,17 @@ def tools_list(verbose: bool, json_output: bool) -> None:
 
     if not verbose:
         click.echo("\nRegistered MCP tools\n")
-        header = f"{'NAME':<24}  DESCRIPTION"
+        header = f"{'NAME':<24}  {'TITLE':<40}  DESCRIPTION"
         click.echo(header)
-        click.echo("-" * 80)
+        click.echo("-" * 112)
         for t in tools:
             desc = t.description.strip().replace("\n", " ")
             if len(desc) > 56:
                 desc = desc[:53] + "..."
-            click.echo(f"{t.name:<24}  {desc}")
+            title = t.title.strip()
+            if len(title) > 40:
+                title = title[:37] + "..."
+            click.echo(f"{t.name:<24}  {title:<40}  {desc}")
         click.echo()
         click.echo("Descriptions are truncated. Use --verbose for full details.")
         click.echo(f"{len(tools)} tool{'s' if len(tools) != 1 else ''} registered.")
@@ -233,6 +247,7 @@ def tools_list(verbose: bool, json_output: bool) -> None:
 
     for t in tools:
         click.echo(f"\n{t.name}")
+        click.echo(f"  Title: {t.title}")
         click.echo(f"  Description: {t.description}")
 
         props = t.input_schema.get("properties", {})
@@ -270,6 +285,7 @@ def tools_show(tool_name: str) -> None:
         raise SystemExit(1)
 
     click.echo(f"\n{t.name}")
+    click.echo(f"  Title: {t.title}")
     click.echo(f"  Description: {t.description}")
 
     props = t.input_schema.get("properties", {})
@@ -290,4 +306,3 @@ def tools_show(tool_name: str) -> None:
         for k, v in t.annotations.items():
             click.echo(f"    - {k}: {v}")
     click.echo()
-
