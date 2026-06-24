@@ -20,7 +20,7 @@ from incidentflow_mcp.config import Settings, get_settings
 from incidentflow_mcp.mcp.resources import register_resources
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
-from incidentflow_mcp.platform_api.slack_client import PlatformSlackClient
+from incidentflow_mcp.platform_api.slack_client import PlatformSlackAPIError, PlatformSlackClient
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -60,7 +60,9 @@ _MULTIPLE_CLUSTERS_MESSAGE = (
     "Multiple Kubernetes clusters are connected. Please specify environment, "
     "for example production, staging, or dev."
 )
-_UNAUTHORIZED_CLUSTER_MESSAGE = "You are not authorized to access this Kubernetes cluster or namespace."
+_UNAUTHORIZED_CLUSTER_MESSAGE = (
+    "You are not authorized to access this Kubernetes cluster or namespace."
+)
 _MISSING_NAMESPACE_MESSAGE = "Please specify a namespace, or use list_namespaces first."
 _K8S_RBAC_ACTIONS = {
     "list_namespaces": ("k8s.list_namespaces", {}),
@@ -131,6 +133,27 @@ def _current_bearer_token() -> str:
     if not token:
         raise ValueError("Bearer token is required for Kubernetes agent tools")
     return token
+
+
+def _tool_error_json(code: str, message: str, **details: object) -> str:
+    payload: dict[str, object] = {"error": code, "code": code, "message": message}
+    if details:
+        payload["details"] = details
+    return json.dumps(payload, indent=2)
+
+
+def _workspace_context_required_error() -> str:
+    return _tool_error_json(
+        "mcp_workspace_context_required",
+        (
+            "MCP Slack tools require an OAuth or workspace token with workspace_id. "
+            "Authorize the MCP client through IncidentFlow OAuth and retry."
+        ),
+    )
+
+
+def _platform_slack_error_json(exc: PlatformSlackAPIError) -> str:
+    return _tool_error_json(exc.code, exc.message)
 
 
 def _normalize_k8s_environment(environment: str | None) -> str | None:
@@ -359,7 +382,10 @@ def _warning_events(events: list[Any], limit: int = 10) -> list[dict[str, Any]]:
         for event in events
         if isinstance(event, dict) and str(event.get("type") or "").lower() == "warning"
     ]
-    warnings.sort(key=lambda item: str(item.get("last_seen") or item.get("lastSeen") or ""), reverse=True)
+    warnings.sort(
+        key=lambda item: str(item.get("last_seen") or item.get("lastSeen") or ""),
+        reverse=True,
+    )
     return warnings[:limit]
 
 
@@ -1291,39 +1317,35 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         token_workspace_id = _current_token_workspace_id()
         if not token_workspace_id:
-            return json.dumps(
-                {
-                    "error": (
-                        "mcp_token_workspace_not_configured. "
-                        "Set workspace_id in your MCP token."
-                    )
-                }
+            return _workspace_context_required_error()
+
+        try:
+            token, platform_client = _resolve_slack_tool_access(
+                settings,
+                workspace_id=workspace_id,
+                token_workspace_id=token_workspace_id,
             )
 
-        token, platform_client = _resolve_slack_tool_access(
-            settings,
-            workspace_id=workspace_id,
-            token_workspace_id=token_workspace_id,
-        )
+            selected_channel = (channel or settings.slack_alerts_channel).strip() or "alerts"
+            selected_limit = limit or settings.slack_alerts_default_limit
+            if selected_limit < 1 or selected_limit > 200:
+                raise ValueError("limit must be between 1 and 200")
+            selected_thread_mode = _normalize_slack_thread_mode(thread_mode)
+            if max_thread_replies < 0 or max_thread_replies > 200:
+                raise ValueError("max_thread_replies must be between 0 and 200")
 
-        selected_channel = (channel or settings.slack_alerts_channel).strip() or "alerts"
-        selected_limit = limit or settings.slack_alerts_default_limit
-        if selected_limit < 1 or selected_limit > 200:
-            raise ValueError("limit must be between 1 and 200")
-        selected_thread_mode = _normalize_slack_thread_mode(thread_mode)
-        if max_thread_replies < 0 or max_thread_replies > 200:
-            raise ValueError("max_thread_replies must be between 0 and 200")
-
-        result = await fetch_slack_alerts(
-            token=token,
-            channel=selected_channel,
-            limit=selected_limit,
-            include_raw=include_raw,
-            include_threads=include_threads,
-            thread_mode=selected_thread_mode,  # type: ignore[arg-type]
-            max_thread_replies=max_thread_replies,
-            client=platform_client,
-        )
+            result = await fetch_slack_alerts(
+                token=token,
+                channel=selected_channel,
+                limit=selected_limit,
+                include_raw=include_raw,
+                include_threads=include_threads,
+                thread_mode=selected_thread_mode,  # type: ignore[arg-type]
+                max_thread_replies=max_thread_replies,
+                client=platform_client,
+            )
+        except PlatformSlackAPIError as exc:
+            return _platform_slack_error_json(exc)
         return result.model_dump_json(indent=2)
 
     @mcp.tool(
@@ -1339,31 +1361,27 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         token_workspace_id = _current_token_workspace_id()
         if not token_workspace_id:
-            return json.dumps(
-                {
-                    "error": (
-                        "mcp_token_workspace_not_configured. "
-                        "Set workspace_id in your MCP token."
-                    )
-                }
+            return _workspace_context_required_error()
+
+        try:
+            token, platform_client = _resolve_slack_tool_access(
+                settings,
+                workspace_id=workspace_id,
+                token_workspace_id=token_workspace_id,
             )
+            if max_replies < 0 or max_replies > 200:
+                raise ValueError("max_replies must be between 0 and 200")
 
-        token, platform_client = _resolve_slack_tool_access(
-            settings,
-            workspace_id=workspace_id,
-            token_workspace_id=token_workspace_id,
-        )
-        if max_replies < 0 or max_replies > 200:
-            raise ValueError("max_replies must be between 0 and 200")
-
-        result = await fetch_slack_alert_thread(
-            token=token,
-            channel_id=channel_id,
-            message_ts=message_ts,
-            include_root=include_root,
-            max_replies=max_replies,
-            client=platform_client,
-        )
+            result = await fetch_slack_alert_thread(
+                token=token,
+                channel_id=channel_id,
+                message_ts=message_ts,
+                include_root=include_root,
+                max_replies=max_replies,
+                client=platform_client,
+            )
+        except PlatformSlackAPIError as exc:
+            return _platform_slack_error_json(exc)
         return result.model_dump_json(indent=2)
 
     @mcp.tool(
@@ -1378,28 +1396,24 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         token_workspace_id = _current_token_workspace_id()
         if not token_workspace_id:
-            return json.dumps(
-                {
-                    "error": (
-                        "mcp_token_workspace_not_configured. "
-                        "Set workspace_id in your MCP token."
-                    )
-                }
+            return _workspace_context_required_error()
+
+        try:
+            token, platform_client = _resolve_slack_tool_access(
+                settings,
+                workspace_id=workspace_id,
+                token_workspace_id=token_workspace_id,
             )
 
-        token, platform_client = _resolve_slack_tool_access(
-            settings,
-            workspace_id=workspace_id,
-            token_workspace_id=token_workspace_id,
-        )
-
-        result = await summarize_incident_thread(
-            token=token,
-            channel_id=channel_id,
-            thread_ts=thread_ts,
-            alert_context=alert_context,
-            client=platform_client,
-        )
+            result = await summarize_incident_thread(
+                token=token,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                alert_context=alert_context,
+                client=platform_client,
+            )
+        except PlatformSlackAPIError as exc:
+            return _platform_slack_error_json(exc)
         return json.dumps(result, indent=2)
 
     @mcp.tool(
@@ -1865,7 +1879,10 @@ def create_mcp_server() -> FastMCP:
         )
         pods_data = pods.get("data") if isinstance(pods, dict) else None
         pod_items = pods_data.get("pods") if isinstance(pods_data, dict) else []
-        selected_pod = _select_workload_pod(pod_items if isinstance(pod_items, list) else [], workload)
+        selected_pod = _select_workload_pod(
+            pod_items if isinstance(pod_items, list) else [],
+            workload,
+        )
         logs_data = None
         if selected_pod:
             logs = await _dispatch_k8s_agent_command(
