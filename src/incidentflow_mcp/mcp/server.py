@@ -825,6 +825,40 @@ def _resolve_job_workspace_id(
     )
 
 
+def _platform_slack_mode_enabled(settings: Settings) -> bool:
+    return bool(settings.platform_api_base_url and settings.platform_api_internal_api_key)
+
+
+def _resolve_slack_tool_access(
+    settings: Settings,
+    *,
+    workspace_id: str | None,
+    token_workspace_id: str,
+) -> tuple[str | None, PlatformSlackClient | None]:
+    resolved_workspace_id = _resolve_job_workspace_id(
+        workspace_id,
+        token_workspace_id=token_workspace_id,
+        default_workspace_id=settings.mcp_default_workspace_id,
+    )
+
+    if _platform_slack_mode_enabled(settings):
+        return None, PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
+
+    if settings.environment == "production":
+        raise ValueError(
+            "slack_platform_mode_required: configure PLATFORM_API_BASE_URL and "
+            "PLATFORM_API_INTERNAL_TOKEN for Slack MCP tools in production"
+        )
+
+    token = settings.slack_bot_token
+    if token is None:
+        raise ValueError(
+            "slack_token_missing: configure platform Slack mode or local SLACK_BOT_TOKEN"
+        )
+
+    return token.get_secret_value(), None
+
+
 def _normalize_providers(providers: list[str] | None) -> list[str]:
     if not providers:
         return ["aws", "github"]
@@ -1257,17 +1291,20 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         token_workspace_id = _current_token_workspace_id()
         if not token_workspace_id:
-            return json.dumps({"error": "mcp_token_workspace_not_configured. Set workspace_id in your MCP token."})
-            
-        token = settings.slack_bot_token
-        platform_client = None
-        if token is None:
-            resolved_workspace_id = _resolve_job_workspace_id(
-                workspace_id,
-                token_workspace_id=token_workspace_id,
-                default_workspace_id=settings.mcp_default_workspace_id,
+            return json.dumps(
+                {
+                    "error": (
+                        "mcp_token_workspace_not_configured. "
+                        "Set workspace_id in your MCP token."
+                    )
+                }
             )
-            platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
+
+        token, platform_client = _resolve_slack_tool_access(
+            settings,
+            workspace_id=workspace_id,
+            token_workspace_id=token_workspace_id,
+        )
 
         selected_channel = (channel or settings.slack_alerts_channel).strip() or "alerts"
         selected_limit = limit or settings.slack_alerts_default_limit
@@ -1278,7 +1315,7 @@ def create_mcp_server() -> FastMCP:
             raise ValueError("max_thread_replies must be between 0 and 200")
 
         result = await fetch_slack_alerts(
-            token=token.get_secret_value() if token is not None else None,
+            token=token,
             channel=selected_channel,
             limit=selected_limit,
             include_raw=include_raw,
@@ -1302,22 +1339,25 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         token_workspace_id = _current_token_workspace_id()
         if not token_workspace_id:
-            return json.dumps({"error": "mcp_token_workspace_not_configured. Set workspace_id in your MCP token."})
-            
-        token = settings.slack_bot_token
-        platform_client = None
-        if token is None:
-            resolved_workspace_id = _resolve_job_workspace_id(
-                workspace_id,
-                token_workspace_id=token_workspace_id,
-                default_workspace_id=settings.mcp_default_workspace_id,
+            return json.dumps(
+                {
+                    "error": (
+                        "mcp_token_workspace_not_configured. "
+                        "Set workspace_id in your MCP token."
+                    )
+                }
             )
-            platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
+
+        token, platform_client = _resolve_slack_tool_access(
+            settings,
+            workspace_id=workspace_id,
+            token_workspace_id=token_workspace_id,
+        )
         if max_replies < 0 or max_replies > 200:
             raise ValueError("max_replies must be between 0 and 200")
 
         result = await fetch_slack_alert_thread(
-            token=token.get_secret_value() if token is not None else None,
+            token=token,
             channel_id=channel_id,
             message_ts=message_ts,
             include_root=include_root,
@@ -1338,20 +1378,23 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         token_workspace_id = _current_token_workspace_id()
         if not token_workspace_id:
-            return json.dumps({"error": "mcp_token_workspace_not_configured. Set workspace_id in your MCP token."})
-
-        token = settings.slack_bot_token
-        platform_client = None
-        if token is None:
-            resolved_workspace_id = _resolve_job_workspace_id(
-                workspace_id,
-                token_workspace_id=token_workspace_id,
-                default_workspace_id=settings.mcp_default_workspace_id,
+            return json.dumps(
+                {
+                    "error": (
+                        "mcp_token_workspace_not_configured. "
+                        "Set workspace_id in your MCP token."
+                    )
+                }
             )
-            platform_client = PlatformSlackClient(settings, workspace_id=resolved_workspace_id)
+
+        token, platform_client = _resolve_slack_tool_access(
+            settings,
+            workspace_id=workspace_id,
+            token_workspace_id=token_workspace_id,
+        )
 
         result = await summarize_incident_thread(
-            token=token.get_secret_value() if token is not None else None,
+            token=token,
             channel_id=channel_id,
             thread_ts=thread_ts,
             alert_context=alert_context,
