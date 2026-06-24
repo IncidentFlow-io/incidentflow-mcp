@@ -15,6 +15,7 @@ from incidentflow_mcp.mcp.server import (
     _resolve_execution_mode,
     _resolve_job_workspace_id,
     _resolve_k8s_cluster_id,
+    _resolve_slack_tool_access,
     _select_workload_pod,
 )
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
@@ -135,6 +136,65 @@ def test_resolve_job_workspace_id_rejects_workspace_scope_mismatch() -> None:
             "ws_explicit",
             token_workspace_id="ws_from_token",
             default_workspace_id="ws_default",
+        )
+
+
+def test_slack_tool_access_prefers_platform_mode_over_legacy_token() -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="production",
+        platform_api_base_url="https://platform.example",
+        platform_api_internal_api_key="internal-token",
+        slack_bot_token="xoxb-legacy",
+    )
+
+    token, client = _resolve_slack_tool_access(
+        settings,
+        workspace_id=None,
+        token_workspace_id="ws_from_token",
+    )
+
+    assert token is None
+    assert client is not None
+    assert client._workspace_id == "ws_from_token"
+
+
+def test_slack_tool_access_rejects_direct_token_in_production() -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="production",
+        slack_bot_token="xoxb-legacy",
+    )
+
+    with pytest.raises(ValueError, match="slack_platform_mode_required"):
+        _resolve_slack_tool_access(
+            settings,
+            workspace_id=None,
+            token_workspace_id="ws_from_token",
+        )
+
+
+def test_slack_tool_access_allows_local_legacy_token_with_workspace_scope() -> None:
+    settings = Settings(
+        _env_file=None,
+        environment="development",
+        slack_bot_token="xoxb-local",
+    )
+
+    token, client = _resolve_slack_tool_access(
+        settings,
+        workspace_id="ws_from_token",
+        token_workspace_id="ws_from_token",
+    )
+
+    assert token == "xoxb-local"
+    assert client is None
+
+    with pytest.raises(ValueError, match="workspace_scope_mismatch"):
+        _resolve_slack_tool_access(
+            settings,
+            workspace_id="ws_other",
+            token_workspace_id="ws_from_token",
         )
 
 
