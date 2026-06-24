@@ -60,7 +60,9 @@ _MULTIPLE_CLUSTERS_MESSAGE = (
     "Multiple Kubernetes clusters are connected. Please specify environment, "
     "for example production, staging, or dev."
 )
-_UNAUTHORIZED_CLUSTER_MESSAGE = "You are not authorized to access this Kubernetes cluster or namespace."
+_UNAUTHORIZED_CLUSTER_MESSAGE = (
+    "You are not authorized to access this Kubernetes cluster or namespace."
+)
 _MISSING_NAMESPACE_MESSAGE = "Please specify a namespace, or use list_namespaces first."
 _K8S_RBAC_ACTIONS = {
     "list_namespaces": ("k8s.list_namespaces", {}),
@@ -380,7 +382,10 @@ def _warning_events(events: list[Any], limit: int = 10) -> list[dict[str, Any]]:
         for event in events
         if isinstance(event, dict) and str(event.get("type") or "").lower() == "warning"
     ]
-    warnings.sort(key=lambda item: str(item.get("last_seen") or item.get("lastSeen") or ""), reverse=True)
+    warnings.sort(
+        key=lambda item: str(item.get("last_seen") or item.get("lastSeen") or ""),
+        reverse=True,
+    )
     return warnings[:limit]
 
 
@@ -1874,7 +1879,10 @@ def create_mcp_server() -> FastMCP:
         )
         pods_data = pods.get("data") if isinstance(pods, dict) else None
         pod_items = pods_data.get("pods") if isinstance(pods_data, dict) else []
-        selected_pod = _select_workload_pod(pod_items if isinstance(pod_items, list) else [], workload)
+        selected_pod = _select_workload_pod(
+            pod_items if isinstance(pod_items, list) else [],
+            workload,
+        )
         logs_data = None
         if selected_pod:
             logs = await _dispatch_k8s_agent_command(
