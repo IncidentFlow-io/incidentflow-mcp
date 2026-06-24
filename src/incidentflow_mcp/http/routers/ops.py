@@ -5,7 +5,7 @@ Use create_ops_router(settings) to get a fully configured APIRouter that can
 be included into the FastAPI app via app.include_router(...).
 """
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from incidentflow_mcp.config import Settings
@@ -52,7 +52,10 @@ def create_ops_router(settings: Settings) -> APIRouter:
         payload = render_prometheus_metrics()
         return Response(content=payload, media_type=METRICS_CONTENT_TYPE)
 
-    @router.get("/.well-known/oauth-protected-resource", summary="OAuth protected resource metadata")
+    @router.get(
+        "/.well-known/oauth-protected-resource",
+        summary="OAuth protected resource metadata",
+    )
     async def oauth_protected_resource(request: Request) -> JSONResponse:
         _ = request
         auth_server = (
@@ -85,6 +88,26 @@ def create_ops_router(settings: Settings) -> APIRouter:
                 "authorization_servers": [auth_server],
                 "scopes_supported": ["mcp:read", "mcp:tools:run", "admin"],
             }
+        )
+
+    @router.get("/.well-known/{challenge_path:path}", summary="OpenAI domain verification")
+    async def openai_domain_verification(challenge_path: str) -> Response:
+        """Return the configured OpenAI Apps domain-verification token."""
+        configured_path = settings.openai_domain_verification_path
+        token = settings.openai_domain_verification_token
+        request_path = f"/.well-known/{challenge_path}"
+        if (
+            not configured_path
+            or not token
+            or not configured_path.startswith("/.well-known/")
+            or request_path != configured_path
+        ):
+            raise HTTPException(status_code=404, detail="Not found")
+
+        return Response(
+            content=token.get_secret_value(),
+            media_type="text/plain; charset=utf-8",
+            headers={"Cache-Control": "no-store"},
         )
 
     return router
