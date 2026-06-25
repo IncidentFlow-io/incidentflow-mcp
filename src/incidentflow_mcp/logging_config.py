@@ -8,14 +8,38 @@ Call `configure_logging()` once at startup. All other modules should use:
 """
 
 import logging
+import re
 import sys
 
 _NOISY_LOGGERS = (
     "httpcore",
     "httpx",
+    "mcp.server.lowlevel.server",
+    "mcp.server.streamable_http",
+    "mcp.server.streamable_http_manager",
     "slack_sdk",
     "sse_starlette",
 )
+
+
+def _redact_sensitive_text(value: str) -> str:
+    redacted = re.sub(r"(redis://)([^:@\s]+:)?([^@\s]+)@", r"\1***@", value)
+    return re.sub(
+        r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)=([^\s,;]+)",
+        r"\1=***",
+        redacted,
+    )
+
+
+class _RedactionFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.msg = _redact_sensitive_text(str(record.msg))
+        if record.args:
+            record.args = tuple(
+                _redact_sensitive_text(item) if isinstance(item, str) else item
+                for item in record.args
+            )
+        return True
 
 
 def configure_logging(level: str = "info", library_level: str = "warning") -> None:
@@ -30,6 +54,7 @@ def configure_logging(level: str = "info", library_level: str = "warning") -> No
 
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(numeric_level)
+    handler.addFilter(_RedactionFilter())
 
     fmt = logging.Formatter(
         fmt="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",

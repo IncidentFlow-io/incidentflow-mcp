@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
@@ -14,7 +15,9 @@ from incidentflow_mcp.mcp.server import (
     _k8s_cluster_overview_payload,
     _k8s_connection_health_payload,
     _k8s_rbac_check_payload,
+    _normalize_correlation_alerts,
     _normalize_polled_external_status_job,
+    _overview_payload,
     _resolve_correlation_mode,
     _resolve_execution_mode,
     _resolve_job_workspace_id,
@@ -96,6 +99,37 @@ def test_correlate_alerts_auto_stays_sync_and_async_is_rejected() -> None:
     assert _resolve_correlation_mode("sync") == "sync"
     with pytest.raises(ValueError, match=r"alert\.correlation\.generate"):
         _resolve_correlation_mode("async")
+
+
+def _sample_alert_payload() -> dict:
+    return {
+        "alert_id": "slack-1779307031.278049",
+        "name": "InstanceDown",
+        "severity": "critical",
+        "fired_at": "2026-05-20T19:57:11.278049+00:00",
+        "status": "firing",
+        "service": "kubernetes-pods-annotated",
+        "labels": {
+            "cluster": "minikube",
+            "namespace": "cert-manager",
+            "pod": "cert-manager-cainjector-5d5f946fd-8jp45",
+        },
+    }
+
+
+def test_correlate_alerts_accepts_alerts_and_legacy_alerts_json() -> None:
+    payload = _sample_alert_payload()
+
+    direct = _normalize_correlation_alerts([payload], None)
+    legacy = _normalize_correlation_alerts(None, json.dumps([payload]))
+
+    assert direct[0].name == "InstanceDown"
+    assert legacy[0].alert_id == "slack-1779307031.278049"
+
+
+def test_correlate_alerts_rejects_invalid_payload_cleanly() -> None:
+    with pytest.raises(ValueError, match="alerts must be a list"):
+        _normalize_correlation_alerts({"name": "InstanceDown"}, None)  # type: ignore[arg-type]
 
 
 def test_select_workload_pod_prefers_exact_then_prefix() -> None:
@@ -567,6 +601,36 @@ def test_filter_workload_pods_uses_deployment_selector() -> None:
     assert [pod["name"] for pod in _filter_workload_pods(pods, deployments, "api")] == ["api-abc"]
 
 
+def test_overview_downgrades_stale_warning_for_ready_pod() -> None:
+    last_seen = (datetime.now(UTC) - timedelta(minutes=20)).isoformat()
+    payload = _overview_payload(
+        namespaces=["incidentflow-dev"],
+        pods=[
+            {
+                "name": "incidentflow-mcp-abc",
+                "namespace": "incidentflow-dev",
+                "phase": "Running",
+                "containers": [{"ready": True, "restart_count": 0}],
+            }
+        ],
+        deployments=[],
+        services=[],
+        events=[
+            {
+                "type": "Warning",
+                "reason": "Unhealthy",
+                "object": "pod/incidentflow-mcp-abc",
+                "last_seen": last_seen,
+            }
+        ],
+        namespace="incidentflow-dev",
+    )
+
+    assert payload["pods_unhealthy"] == 0
+    assert payload["warning_event_summary"]["active_warning_events"] == 0
+    assert payload["warning_event_summary"]["stale_rollout_warning_events"] == 1
+
+
 def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
     payload = {
         "status": "succeeded",
@@ -593,6 +657,27 @@ def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
     assert compact["data"]["highlighted"] == ["ERROR timeout talking to db"]
 
 
+def test_compact_log_payload_redacts_secrets() -> None:
+    payload = {
+        "status": "succeeded",
+        "data": {
+            "logs": "INFO redis_url=redis://:super-secret@redis-master:6379/0 token=abc123"
+        },
+    }
+
+    compact = _compact_log_payload(
+        payload,
+        level=None,
+        contains=None,
+        exclude=None,
+        compact=True,
+    )
+
+    assert compact["data"]["lines"] == [
+        "INFO redis_url=redis://***@redis-master:6379/0 token=***"
+    ]
+
+
 def test_compact_external_status_includes_failed_provider_entries() -> None:
     result = _compact_external_status_result(
         {
@@ -612,6 +697,8 @@ def test_compact_external_status_includes_failed_provider_entries() -> None:
                     "provider": "aws",
                     "message": "AWS status fetch failed",
                     "error_type": "RuntimeError",
+                    "source_url": "https://status.aws.amazon.com/rss/all.rss",
+                    "status_code": 503,
                 }
             ],
         }
@@ -620,6 +707,40 @@ def test_compact_external_status_includes_failed_provider_entries() -> None:
     assert result["status"] == "partial"
     assert result["providers"][1]["provider"] == "aws"
     assert result["providers"][1]["status"] == "error"
+    assert result["providers"][1]["source_url"] == "https://status.aws.amazon.com/rss/all.rss"
+
+
+def test_compact_external_status_limits_historical_incidents() -> None:
+    incidents = [
+        {
+            "name": f"incident-{index}",
+            "status": "resolved",
+            "created_at": f"2026-06-{index + 1:02d}T00:00:00Z",
+        }
+        for index in range(8)
+    ]
+
+    result = _compact_external_status_result(
+        {
+            "status": "success",
+            "external_status": [
+                {
+                    "provider": "github",
+                    "indicator": "none",
+                    "description": "ok",
+                    "incidents": incidents,
+                    "degraded_components": [],
+                    "fetched_at": "2026-06-25T10:00:00Z",
+                }
+            ],
+            "errors": [],
+        }
+    )
+
+    provider = result["providers"][0]
+    assert len(provider["historical_incidents"]) == 5
+    assert provider["historical_incidents_total"] == 8
+    assert provider["truncated"] is True
 
 
 @pytest.mark.asyncio

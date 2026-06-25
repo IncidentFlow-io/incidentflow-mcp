@@ -39,6 +39,8 @@ class SlackThreadContext(BaseModel):
 class SlackAlertMessage(BaseModel):
     alert_id: str | None = None
     name: str | None = None
+    display_name: str | None = None
+    alertmanager_url: str | None = None
     fired_at: str | None = None
     ts: str
     datetime_utc: str | None = None
@@ -150,6 +152,31 @@ def _infer_severity(text: str) -> str | None:
     return None
 
 
+def _extract_alertmanager_url(text: str) -> str | None:
+    match = re.search(r"<(https?://[^>|]+)(?:\|[^>]+)?>", text)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"https?://\S*alert\S*", text, flags=re.IGNORECASE)
+    return match.group(0).rstrip(">)].,") if match else None
+
+
+def _clean_alert_title(value: str | None) -> tuple[str | None, str | None, str | None]:
+    cleaned = _clean_field(value)
+    if not cleaned:
+        return None, None, None
+
+    alertmanager_url = _extract_alertmanager_url(cleaned)
+    without_url = re.sub(r"<https?://[^>]+>", "", cleaned)
+    without_url = re.sub(r"https?://\S+", "", without_url)
+    without_url = re.sub(r"\s*[|-]\s*$", "", without_url.strip())
+    display_name = _clean_field(without_url)
+    if not display_name:
+        return None, None, alertmanager_url
+
+    canonical = display_name.split()[0]
+    return canonical, display_name, alertmanager_url
+
+
 def _thread_ts(message: dict[str, Any]) -> str:
     return str(message.get("thread_ts") or message.get("ts") or "")
 
@@ -225,7 +252,7 @@ def _parse_alert_message(
         )
         alert_name = title_line.strip(" *") or None
     alert_name = alert_name or _first_match([r"^Alert:\s*(.+)$", r"alertname\s*=\s*([^\n]+)"], text)
-    alert_name = _clean_field(alert_name)
+    alert_name, display_name, alertmanager_url = _clean_alert_title(alert_name)
     if status_match is None and alert_name is None:
         return None
 
@@ -251,6 +278,10 @@ def _parse_alert_message(
         pass
 
     service = _clean_field(_first_match([r"^Service:\s*(.+)$", r"\bjob:\s*([^\n]+)"], text))
+    if not service and display_name:
+        parts = display_name.split()
+        if len(parts) >= 2:
+            service = _clean_field(parts[1])
     cluster = _clean_field(_first_match([r"Cluster:\s*([^,\n]+)", r"\bcluster:\s*([^\n]+)"], text))
     namespace = _clean_field(
         _first_match([r"Namespace:\s*([^,\n]+)", r"\bnamespace:\s*([^\n]+)"], text)
@@ -270,6 +301,8 @@ def _parse_alert_message(
     return SlackAlertMessage(
         alert_id=f"slack-{ts}" if ts else None,
         name=alert_name,
+        display_name=display_name,
+        alertmanager_url=alertmanager_url,
         fired_at=datetime_utc,
         ts=ts,
         datetime_utc=datetime_utc,

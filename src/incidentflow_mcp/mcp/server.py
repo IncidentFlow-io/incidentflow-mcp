@@ -8,6 +8,7 @@ All tools are registered here and wired to their implementation modules.
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -176,6 +177,25 @@ def _resolve_correlation_mode(requested_mode: str) -> str:
             "alert.correlation.generate runner exists; use execution_mode=sync or auto"
         )
     return "sync"
+
+
+def _normalize_correlation_alerts(
+    alerts: list[Alert] | list[dict[str, Any]] | None,
+    alerts_json: str | None,
+) -> list[Alert]:
+    payload: Any = alerts
+    if payload is None and alerts_json:
+        try:
+            payload = json.loads(alerts_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"alerts_json must be valid JSON: {exc.msg}") from exc
+
+    if payload is None:
+        raise ValueError("Either alerts or legacy alerts_json must be provided")
+    if not isinstance(payload, list):
+        raise ValueError("alerts must be a list of alert objects")
+
+    return [item if isinstance(item, Alert) else Alert.model_validate(item) for item in payload]
 
 
 def _resolve_response_mode(requested_mode: str) -> str:
@@ -468,6 +488,109 @@ def _warning_events(events: list[Any], limit: int = 10) -> list[dict[str, Any]]:
     return warnings[:limit]
 
 
+def _parse_k8s_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _is_ready_pod(pod: dict[str, Any]) -> bool:
+    if _is_completed_pod(pod):
+        return False
+    if str(pod.get("phase") or "").lower() != "running":
+        return False
+    containers = pod.get("containers")
+    if not isinstance(containers, list) or not containers:
+        return False
+    return all(
+        bool(container.get("ready"))
+        for container in containers
+        if isinstance(container, dict)
+    )
+
+
+def _event_pod_name(event: dict[str, Any]) -> str | None:
+    involved = event.get("involved_object") or event.get("involvedObject") or event.get("object")
+    if isinstance(involved, dict):
+        kind = str(involved.get("kind") or "").lower()
+        name = str(involved.get("name") or "").strip()
+        if kind == "pod" and name:
+            return name
+    value = event.get("object") or event.get("involved_object_name") or event.get("name")
+    if isinstance(value, str):
+        match = re.search(r"\bpod/([^\s]+)", value)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _classify_warning_event(
+    event: dict[str, Any],
+    *,
+    pods_by_name: dict[str, dict[str, Any]],
+    now: datetime,
+    stale_after_minutes: int = 15,
+) -> dict[str, Any]:
+    last_seen = (
+        event.get("last_seen")
+        or event.get("lastSeen")
+        or event.get("lastTimestamp")
+        or event.get("eventTime")
+    )
+    parsed_last_seen = _parse_k8s_timestamp(last_seen)
+    age_minutes = (
+        round((now - parsed_last_seen).total_seconds() / 60, 1)
+        if parsed_last_seen is not None
+        else None
+    )
+    pod_name = _event_pod_name(event)
+    pod = pods_by_name.get(pod_name or "")
+    pod_ready = _is_ready_pod(pod) if pod is not None else False
+    stale = age_minutes is not None and age_minutes >= stale_after_minutes
+    classification = "stale_rollout_warning" if stale and pod_ready else "active_warning"
+
+    return {
+        **event,
+        "pod": pod_name,
+        "pod_ready": pod_ready,
+        "age_minutes": age_minutes,
+        "classification": classification,
+    }
+
+
+def _warning_event_summary(events: list[Any], pods: list[Any]) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    pods_by_name = {
+        str(pod.get("name")): pod
+        for pod in pods
+        if isinstance(pod, dict) and pod.get("name")
+    }
+    classified = [
+        _classify_warning_event(event, pods_by_name=pods_by_name, now=now)
+        for event in _warning_events(events, limit=50)
+        if isinstance(event, dict)
+    ]
+    active = [event for event in classified if event["classification"] == "active_warning"]
+    stale = [
+        event
+        for event in classified
+        if event["classification"] == "stale_rollout_warning"
+    ]
+    return {
+        "active_warning_events": len(active),
+        "stale_rollout_warning_events": len(stale),
+        "active_examples": active[:5],
+        "stale_examples": stale[:5],
+    }
+
+
 def _cluster_matches(
     cluster: dict[str, Any],
     *,
@@ -724,6 +847,7 @@ def _overview_payload(
         if isinstance(pod, dict) and not _is_completed_pod(pod) and _is_unhealthy_pod(pod)
     ]
     warnings = _warning_events(events)
+    warning_summary = _warning_event_summary(events, pods)
     return {
         "namespace": namespace,
         "namespaces": len(namespaces),
@@ -743,6 +867,7 @@ def _overview_payload(
         "unhealthy_pods": [_pod_brief(pod) for pod in unhealthy[:20]],
         "completed_jobs": [_pod_brief(pod) for pod in completed[:20]],
         "warning_events": warnings,
+        "warning_event_summary": warning_summary,
         "checked_at": _checked_at(),
     }
 
@@ -988,6 +1113,16 @@ def _log_lines_from_payload(payload: dict[str, Any]) -> list[str]:
     return []
 
 
+def _redact_sensitive_text(value: str) -> str:
+    redacted = re.sub(r"(redis://)([^:@\s]+:)?([^@\s]+)@", r"\1***@", value)
+    redacted = re.sub(
+        r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)=([^\s,;]+)",
+        r"\1=***",
+        redacted,
+    )
+    return redacted
+
+
 def _compact_log_payload(
     payload: dict[str, Any],
     *,
@@ -1006,7 +1141,16 @@ def _compact_log_payload(
     include_pattern = contains.lower().strip() if contains else ""
     exclude_pattern = exclude.lower().strip() if exclude else ""
     level_pattern = level.lower().strip() if level else ""
-    noisy_patterns = ("httpcore.", "httpx", "sse_starlette.sse", "raw response")
+    noisy_patterns = (
+        "debug",
+        "httpcore.",
+        "httpx",
+        "mcp.server.lowlevel.server",
+        "mcp.server.streamable_http",
+        "mcp.server.streamable_http_manager",
+        "sse_starlette.sse",
+        "raw response",
+    )
     important_patterns = (
         "error",
         "warning",
@@ -1021,7 +1165,8 @@ def _compact_log_payload(
     selected: list[str] = []
     skipped_debug = 0
     for line in lines:
-        lowered = line.lower()
+        redacted_line = _redact_sensitive_text(line)
+        lowered = redacted_line.lower()
         if include_pattern and include_pattern not in lowered:
             continue
         if exclude_pattern and exclude_pattern in lowered:
@@ -1033,7 +1178,7 @@ def _compact_log_payload(
         ):
             skipped_debug += 1
             continue
-        selected.append(line)
+        selected.append(redacted_line)
 
     highlighted = [
         line for line in selected if any(pattern in line.lower() for pattern in important_patterns)
@@ -1198,9 +1343,12 @@ def _compact_provider_status(provider_status: dict[str, Any]) -> dict[str, Any]:
     active_incidents = [
         incident for incident in compact_incidents if _incident_is_active(incident)
     ]
-    historical_incidents = [
+    all_historical_incidents = [
         incident for incident in compact_incidents if not _incident_is_active(incident)
     ]
+    max_historical_incidents = 5
+    historical_incidents = all_historical_incidents[:max_historical_incidents]
+    historical_total = max(0, len(incidents_list) - len(active_incidents))
 
     degraded_raw = provider_status.get("degraded_components")
     degraded_list = degraded_raw if isinstance(degraded_raw, list) else []
@@ -1213,9 +1361,10 @@ def _compact_provider_status(provider_status: dict[str, Any]) -> dict[str, Any]:
         "description": provider_status.get("description"),
         "active_incidents": active_incidents,
         "historical_incidents": historical_incidents,
+        "historical_incidents_total": historical_total,
         "degraded_components": compact_degraded,
         "fetched_at": provider_status.get("fetched_at"),
-        "truncated": len(incidents_list) > 20,
+        "truncated": len(incidents_list) > len(active_incidents) + len(historical_incidents),
     }
 
     if "regional_status" in provider_status:
@@ -1273,8 +1422,11 @@ def _compact_external_status_result(result: Any) -> Any:
                 "status": "error",
                 "error": error.get("message") or error.get("error") or "provider failed",
                 "error_type": error.get("error_type"),
+                "source_url": error.get("source_url"),
+                "status_code": error.get("status_code"),
                 "active_incidents": [],
                 "historical_incidents": [],
+                "historical_incidents_total": 0,
                 "degraded_components": [],
             }
         )
@@ -1513,24 +1665,34 @@ def create_mcp_server() -> FastMCP:
     @mcp.tool(**_tool_metadata(_specs["correlate_alerts"]))
     async def correlate_alerts(
         alerts: Annotated[
-            list[Alert],
+            list[Alert] | None,
             Field(
-                min_length=1,
-                max_length=500,
+                default=None,
                 description=(
                     "Alert objects to correlate. Each alert requires alert_id, name, service, "
                     "severity, status, and fired_at; labels may include env, namespace, "
                     "pod, deployment, or other routing context."
                 ),
             ),
-        ],
+        ] = None,
+        alerts_json: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description=(
+                    "Legacy JSON string containing the same alert object array as alerts. "
+                    "Prefer alerts for new calls."
+                ),
+            ),
+        ] = None,
         window_minutes: int = 60,
         min_cluster_size: int = 2,
         execution_mode: str = "auto",
         workspace_id: str | None = None,
     ) -> str:
+        normalized_alerts = _normalize_correlation_alerts(alerts, alerts_json)
         input_data = CorrelateAlertsInput(
-            alerts=alerts,
+            alerts=normalized_alerts,
             window_minutes=window_minutes,
             min_cluster_size=min_cluster_size,
         )

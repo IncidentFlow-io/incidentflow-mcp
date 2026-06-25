@@ -105,6 +105,23 @@ class SystemMessageFakeSlackClient(FakeSlackClient):
         return [system, dirty_alert]
 
 
+class VerboseAlertNameFakeSlackClient(FakeSlackClient):
+    async def conversation_history(self, *, channel_id: str, limit: int) -> list[dict[str, Any]]:
+        _ = channel_id, limit
+        return [
+            {
+                "ts": "1779307031.278049",
+                "text": (
+                    "[FIRING:1] InstanceDown kubernetes-pods-annotated critical | "
+                    "<http://prometheus-alertmanager-0:9093/#/alerts?receiver=slack-notifications>\n"
+                    "Cluster: minikube\n"
+                    "Namespace: cert-manager\n"
+                    "Description: critical - pod unreachable"
+                ),
+            }
+        ]
+
+
 class ErrorFakeSlackClient(FakeSlackClient):
     async def thread_replies(
         self,
@@ -225,6 +242,28 @@ async def test_slack_alerts_list_filters_system_messages_and_normalizes_fields(
     assert alert.service == "kubernetes-pods-annotated"
     assert alert.cluster == "minikube"
     assert alert.namespace == "cert-manager"
+    assert alert.severity == "critical"
+
+
+@pytest.mark.asyncio
+async def test_slack_alerts_list_returns_clean_name_and_alertmanager_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", VerboseAlertNameFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alerts(
+        token="x",
+        channel="#alerts",
+        limit=10,
+    )
+
+    alert = result.alerts[0]
+    assert alert.name == "InstanceDown"
+    assert alert.display_name == "InstanceDown kubernetes-pods-annotated critical"
+    assert alert.alertmanager_url == (
+        "http://prometheus-alertmanager-0:9093/#/alerts?receiver=slack-notifications"
+    )
+    assert alert.service == "kubernetes-pods-annotated"
     assert alert.severity == "critical"
 
 
