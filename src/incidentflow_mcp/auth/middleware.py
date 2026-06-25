@@ -165,14 +165,18 @@ async def _attempt_oauth_validation(
     if not settings.oauth_validation_enabled():
         return None
 
-    result = await validate_oauth_access_token(
-        token=token,
-        jwks_url=str(settings.oauth_jwks_url),
-        issuer=str(settings.oauth_expected_issuer),
-        audience=settings.mcp_canonical_resource,
-        required_scope=required_scope,
-        timeout_seconds=settings.platform_api_timeout_seconds,
-    )
+    try:
+        result = await validate_oauth_access_token(
+            token=token,
+            jwks_url=str(settings.oauth_jwks_url),
+            issuer=str(settings.oauth_expected_issuer),
+            audience=settings.mcp_canonical_resource,
+            required_scope=required_scope,
+            timeout_seconds=settings.platform_api_timeout_seconds,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("auth: oauth jwks validation failed: %s", str(exc))
+        return _service_unavailable("Token verification service unavailable")
 
     if result.ok:
         claims = result.claims or {}

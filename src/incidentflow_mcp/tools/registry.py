@@ -206,14 +206,14 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "enum": ["auto", "sync", "async"],
                     "default": "auto",
                     "description": (
-                        "Execution strategy. auto => async in production, sync elsewhere."
+                        "Execution strategy. auto and sync run the read-only correlator inline; "
+                        "async is reserved for a future persisted correlation runner."
                     ),
                 },
                 "workspace_id": {
                     "type": "string",
                     "description": (
-                        "Workspace scope for async orchestration. Optional when token has "
-                        "workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured."
+                        "Reserved for future async orchestration. Ignored for sync correlation."
                     ),
                 },
             },
@@ -243,6 +243,13 @@ _TOOL_SPECS: list[ToolSpec] = [
                         "service, severity, status, and fired_at."
                     ),
                 },
+                "alerts_json": {
+                    "type": "string",
+                    "description": (
+                        "Legacy JSON string containing the same array accepted by alerts. "
+                        "Prefer alerts for new calls."
+                    ),
+                },
                 "window_minutes": {
                     "type": "integer",
                     "default": 60,
@@ -258,18 +265,17 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "enum": ["auto", "sync", "async"],
                     "default": "auto",
                     "description": (
-                        "Execution strategy. auto => async in production, sync elsewhere."
+                        "Execution strategy. auto and sync run inline. async is reserved "
+                        "for a future dedicated correlation runner."
                     ),
                 },
                 "workspace_id": {
                     "type": "string",
                     "description": (
-                        "Workspace scope for async orchestration. Optional when token has "
-                        "workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured."
+                        "Reserved for future async orchestration; ignored for inline correlation."
                     ),
                 },
             },
-            "required": ["alerts"],
         },
         annotations=_read_only_annotations(),
     ),
@@ -388,6 +394,11 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "minimum": 0,
                     "maximum": 200,
                     "description": "Maximum thread replies to fetch when thread_mode=full.",
+                },
+                "include_system_messages": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Include Slack channel join/leave and other system messages.",
                 },
                 "workspace_id": {
                     "type": "string",
@@ -620,6 +631,29 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "pod": {"type": "string"},
                 "container": {"type": "string"},
                 "tail_lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 1000},
+                "level": {
+                    "type": "string",
+                    "description": "Optional case-insensitive level filter.",
+                },
+                "contains": {
+                    "type": "string",
+                    "description": "Only return log lines containing this text.",
+                },
+                "exclude": {
+                    "type": "string",
+                    "description": "Drop log lines containing this text.",
+                },
+                "since_minutes": {"type": "integer", "minimum": 1},
+                "compact": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Return compact highlighted logs instead of raw logs.",
+                },
+                "json_parse": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Ask the agent to parse JSON log lines when supported.",
+                },
                 "timeout_seconds": _timeout_property(),
             },
             "required": ["namespace", "pod"],

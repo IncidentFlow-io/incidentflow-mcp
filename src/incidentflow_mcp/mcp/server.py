@@ -8,6 +8,7 @@ All tools are registered here and wired to their implementation modules.
 import asyncio
 import json
 import logging
+import re
 import time
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
@@ -164,6 +165,37 @@ def _resolve_external_status_mode(requested_mode: str) -> str:
         raise ValueError(f"Unsupported execution_mode: {requested_mode}")
     # This tool is runner-backed by design; keep behavior deterministic in local dev.
     return "async"
+
+
+def _resolve_correlation_mode(requested_mode: str) -> str:
+    mode = requested_mode.lower().strip()
+    if mode not in _VALID_EXECUTION_MODES:
+        raise ValueError(f"Unsupported execution_mode: {requested_mode}")
+    if mode == "async":
+        raise ValueError(
+            "correlate_alerts async mode is disabled until a dedicated "
+            "alert.correlation.generate runner exists; use execution_mode=sync or auto"
+        )
+    return "sync"
+
+
+def _normalize_correlation_alerts(
+    alerts: list[Alert] | list[dict[str, Any]] | None,
+    alerts_json: str | None,
+) -> list[Alert]:
+    payload: Any = alerts
+    if payload is None and alerts_json:
+        try:
+            payload = json.loads(alerts_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"alerts_json must be valid JSON: {exc.msg}") from exc
+
+    if payload is None:
+        raise ValueError("Either alerts or legacy alerts_json must be provided")
+    if not isinstance(payload, list):
+        raise ValueError("alerts must be a list of alert objects")
+
+    return [item if isinstance(item, Alert) else Alert.model_validate(item) for item in payload]
 
 
 def _resolve_response_mode(requested_mode: str) -> str:
@@ -456,6 +488,109 @@ def _warning_events(events: list[Any], limit: int = 10) -> list[dict[str, Any]]:
     return warnings[:limit]
 
 
+def _parse_k8s_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _is_ready_pod(pod: dict[str, Any]) -> bool:
+    if _is_completed_pod(pod):
+        return False
+    if str(pod.get("phase") or "").lower() != "running":
+        return False
+    containers = pod.get("containers")
+    if not isinstance(containers, list) or not containers:
+        return False
+    return all(
+        bool(container.get("ready"))
+        for container in containers
+        if isinstance(container, dict)
+    )
+
+
+def _event_pod_name(event: dict[str, Any]) -> str | None:
+    involved = event.get("involved_object") or event.get("involvedObject") or event.get("object")
+    if isinstance(involved, dict):
+        kind = str(involved.get("kind") or "").lower()
+        name = str(involved.get("name") or "").strip()
+        if kind == "pod" and name:
+            return name
+    value = event.get("object") or event.get("involved_object_name") or event.get("name")
+    if isinstance(value, str):
+        match = re.search(r"\bpod/([^\s]+)", value)
+        if match:
+            return match.group(1)
+    return None
+
+
+def _classify_warning_event(
+    event: dict[str, Any],
+    *,
+    pods_by_name: dict[str, dict[str, Any]],
+    now: datetime,
+    stale_after_minutes: int = 15,
+) -> dict[str, Any]:
+    last_seen = (
+        event.get("last_seen")
+        or event.get("lastSeen")
+        or event.get("lastTimestamp")
+        or event.get("eventTime")
+    )
+    parsed_last_seen = _parse_k8s_timestamp(last_seen)
+    age_minutes = (
+        round((now - parsed_last_seen).total_seconds() / 60, 1)
+        if parsed_last_seen is not None
+        else None
+    )
+    pod_name = _event_pod_name(event)
+    pod = pods_by_name.get(pod_name or "")
+    pod_ready = _is_ready_pod(pod) if pod is not None else False
+    stale = age_minutes is not None and age_minutes >= stale_after_minutes
+    classification = "stale_rollout_warning" if stale and pod_ready else "active_warning"
+
+    return {
+        **event,
+        "pod": pod_name,
+        "pod_ready": pod_ready,
+        "age_minutes": age_minutes,
+        "classification": classification,
+    }
+
+
+def _warning_event_summary(events: list[Any], pods: list[Any]) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    pods_by_name = {
+        str(pod.get("name")): pod
+        for pod in pods
+        if isinstance(pod, dict) and pod.get("name")
+    }
+    classified = [
+        _classify_warning_event(event, pods_by_name=pods_by_name, now=now)
+        for event in _warning_events(events, limit=50)
+        if isinstance(event, dict)
+    ]
+    active = [event for event in classified if event["classification"] == "active_warning"]
+    stale = [
+        event
+        for event in classified
+        if event["classification"] == "stale_rollout_warning"
+    ]
+    return {
+        "active_warning_events": len(active),
+        "stale_rollout_warning_events": len(stale),
+        "active_examples": active[:5],
+        "stale_examples": stale[:5],
+    }
+
+
 def _cluster_matches(
     cluster: dict[str, Any],
     *,
@@ -705,8 +840,14 @@ def _overview_payload(
         for pod in pods
         if isinstance(pod, dict) and str(pod.get("phase") or "").lower() == "running"
     ]
-    unhealthy = [pod for pod in pods if isinstance(pod, dict) and _is_unhealthy_pod(pod)]
+    completed = [pod for pod in pods if isinstance(pod, dict) and _is_completed_pod(pod)]
+    unhealthy = [
+        pod
+        for pod in pods
+        if isinstance(pod, dict) and not _is_completed_pod(pod) and _is_unhealthy_pod(pod)
+    ]
     warnings = _warning_events(events)
+    warning_summary = _warning_event_summary(events, pods)
     return {
         "namespace": namespace,
         "namespaces": len(namespaces),
@@ -724,7 +865,9 @@ def _overview_payload(
         ),
         "top_restarts": _top_restarts(pods),
         "unhealthy_pods": [_pod_brief(pod) for pod in unhealthy[:20]],
+        "completed_jobs": [_pod_brief(pod) for pod in completed[:20]],
         "warning_events": warnings,
+        "warning_event_summary": warning_summary,
         "checked_at": _checked_at(),
     }
 
@@ -853,7 +996,10 @@ async def _k8s_rbac_check_payload(
 
 
 def _is_unhealthy_pod(pod: dict[str, Any]) -> bool:
-    if str(pod.get("phase") or "").lower() not in {"running", "succeeded"}:
+    phase = str(pod.get("phase") or "").lower()
+    if phase == "succeeded":
+        return False
+    if phase != "running":
         return True
     containers = pod.get("containers")
     if not isinstance(containers, list):
@@ -871,19 +1017,184 @@ def _is_unhealthy_pod(pod: dict[str, Any]) -> bool:
     return False
 
 
-def _select_workload_pod(pods: list[Any], workload: str) -> str | None:
+def _is_completed_pod(pod: dict[str, Any]) -> bool:
+    return str(pod.get("phase") or "").lower() == "succeeded"
+
+
+def _labels_match_selector(labels: Any, selector: Any) -> bool:
+    if not isinstance(labels, dict) or not isinstance(selector, dict) or not selector:
+        return False
+    return all(str(labels.get(key)) == str(value) for key, value in selector.items())
+
+
+def _deployment_selector(deployment: dict[str, Any]) -> dict[str, Any]:
+    for key in ("selector", "match_labels", "matchLabels"):
+        value = deployment.get(key)
+        if isinstance(value, dict):
+            return {str(k): str(v) for k, v in value.items()}
+    spec = deployment.get("spec")
+    if isinstance(spec, dict):
+        selector = spec.get("selector")
+        if isinstance(selector, dict):
+            match_labels = selector.get("matchLabels") or selector.get("match_labels")
+            if isinstance(match_labels, dict):
+                return {str(k): str(v) for k, v in match_labels.items()}
+    return {}
+
+
+def _pod_labels(pod: dict[str, Any]) -> dict[str, Any]:
+    for key in ("labels", "metadata_labels"):
+        value = pod.get(key)
+        if isinstance(value, dict):
+            return value
+    metadata = pod.get("metadata")
+    if isinstance(metadata, dict) and isinstance(metadata.get("labels"), dict):
+        return metadata["labels"]
+    return {}
+
+
+def _filter_workload_pods(
+    pods: list[Any],
+    deployments: list[Any],
+    workload: str,
+) -> list[dict[str, Any]]:
     workload = workload.strip()
-    if not workload:
-        return None
     candidates = [pod for pod in pods if isinstance(pod, dict)]
-    for pod in candidates:
-        if pod.get("name") == workload:
-            return str(pod["name"])
-    for pod in candidates:
-        name = str(pod.get("name") or "")
-        if name.startswith(f"{workload}-"):
-            return name
-    return None
+    if not workload:
+        return []
+
+    exact_pod = [pod for pod in candidates if str(pod.get("name") or "") == workload]
+    if exact_pod:
+        return exact_pod
+
+    deployment = next(
+        (
+            item
+            for item in deployments
+            if isinstance(item, dict) and str(item.get("name") or "") == workload
+        ),
+        None,
+    )
+    if deployment is not None:
+        selector = _deployment_selector(deployment)
+        matched = [
+            pod for pod in candidates if _labels_match_selector(_pod_labels(pod), selector)
+        ]
+        if matched:
+            return matched
+
+    return [pod for pod in candidates if str(pod.get("name") or "").startswith(f"{workload}-")]
+
+
+def _select_workload_pod(pods: list[Any], workload: str) -> str | None:
+    matched = _filter_workload_pods(pods, [], workload)
+    return str(matched[0]["name"]) if matched and matched[0].get("name") else None
+
+
+def _select_workload_pod_from_deployments(
+    pods: list[Any],
+    deployments: list[Any],
+    workload: str,
+) -> str | None:
+    matched = _filter_workload_pods(pods, deployments, workload)
+    return str(matched[0]["name"]) if matched and matched[0].get("name") else None
+
+
+def _log_lines_from_payload(payload: dict[str, Any]) -> list[str]:
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return []
+    for key in ("logs", "log", "text", "output"):
+        value = data.get(key)
+        if isinstance(value, str):
+            return value.splitlines()
+        if isinstance(value, list):
+            return [str(item) for item in value]
+    return []
+
+
+def _redact_sensitive_text(value: str) -> str:
+    redacted = re.sub(r"(redis://)([^:@\s]+:)?([^@\s]+)@", r"\1***@", value)
+    redacted = re.sub(
+        r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)=([^\s,;]+)",
+        r"\1=***",
+        redacted,
+    )
+    return redacted
+
+
+def _compact_log_payload(
+    payload: dict[str, Any],
+    *,
+    level: str | None,
+    contains: str | None,
+    exclude: str | None,
+    compact: bool,
+) -> dict[str, Any]:
+    if not compact:
+        return payload
+
+    lines = _log_lines_from_payload(payload)
+    if not lines:
+        return payload
+
+    include_pattern = contains.lower().strip() if contains else ""
+    exclude_pattern = exclude.lower().strip() if exclude else ""
+    level_pattern = level.lower().strip() if level else ""
+    noisy_patterns = (
+        "debug",
+        "httpcore.",
+        "httpx",
+        "mcp.server.lowlevel.server",
+        "mcp.server.streamable_http",
+        "mcp.server.streamable_http_manager",
+        "sse_starlette.sse",
+        "raw response",
+    )
+    important_patterns = (
+        "error",
+        "warning",
+        "traceback",
+        "exception",
+        "timeout",
+        "failed",
+        " 4",
+        " 5",
+    )
+
+    selected: list[str] = []
+    skipped_debug = 0
+    for line in lines:
+        redacted_line = _redact_sensitive_text(line)
+        lowered = redacted_line.lower()
+        if include_pattern and include_pattern not in lowered:
+            continue
+        if exclude_pattern and exclude_pattern in lowered:
+            continue
+        if level_pattern and level_pattern not in lowered:
+            continue
+        if any(pattern in lowered for pattern in noisy_patterns) and not any(
+            pattern in lowered for pattern in important_patterns
+        ):
+            skipped_debug += 1
+            continue
+        selected.append(redacted_line)
+
+    highlighted = [
+        line for line in selected if any(pattern in line.lower() for pattern in important_patterns)
+    ]
+    compact_data = dict(payload.get("data") if isinstance(payload.get("data"), dict) else {})
+    compact_data.update(
+        {
+            "lines": selected[-120:],
+            "highlighted": highlighted[-40:],
+            "line_count": len(lines),
+            "returned_line_count": min(len(selected), 120),
+            "skipped_debug_lines": skipped_debug,
+            "compact": True,
+        }
+    )
+    return {**payload, "data": compact_data}
 
 
 def _resolve_job_workspace_id(
@@ -1020,6 +1331,50 @@ def _compact_degraded_component(component: Any) -> dict[str, Any]:
     }
 
 
+def _incident_is_active(incident: dict[str, Any]) -> bool:
+    status = str(incident.get("status") or "").lower()
+    return status not in {"resolved", "completed", "postmortem", "closed"}
+
+
+def _compact_provider_status(provider_status: dict[str, Any]) -> dict[str, Any]:
+    incidents_raw = provider_status.get("incidents")
+    incidents_list = incidents_raw if isinstance(incidents_raw, list) else []
+    compact_incidents = [_compact_incident(item) for item in incidents_list[:20]]
+    active_incidents = [
+        incident for incident in compact_incidents if _incident_is_active(incident)
+    ]
+    all_historical_incidents = [
+        incident for incident in compact_incidents if not _incident_is_active(incident)
+    ]
+    max_historical_incidents = 5
+    historical_incidents = all_historical_incidents[:max_historical_incidents]
+    historical_total = max(0, len(incidents_list) - len(active_incidents))
+
+    degraded_raw = provider_status.get("degraded_components")
+    degraded_list = degraded_raw if isinstance(degraded_raw, list) else []
+    compact_degraded = [_compact_degraded_component(item) for item in degraded_list[:20]]
+
+    compact: dict[str, Any] = {
+        "provider": provider_status.get("provider"),
+        "status": "ok",
+        "indicator": provider_status.get("indicator"),
+        "description": provider_status.get("description"),
+        "active_incidents": active_incidents,
+        "historical_incidents": historical_incidents,
+        "historical_incidents_total": historical_total,
+        "degraded_components": compact_degraded,
+        "fetched_at": provider_status.get("fetched_at"),
+        "truncated": len(incidents_list) > len(active_incidents) + len(historical_incidents),
+    }
+
+    if "regional_status" in provider_status:
+        compact["regional_status"] = provider_status.get("regional_status") or {}
+    if "regional_status_errors" in provider_status:
+        compact["regional_status_errors"] = provider_status.get("regional_status_errors") or {}
+
+    return compact
+
+
 def _compact_external_status_result(result: Any) -> Any:
     if not isinstance(result, dict):
         return result
@@ -1032,34 +1387,58 @@ def _compact_external_status_result(result: Any) -> Any:
     for provider_status in external_status:
         if not isinstance(provider_status, dict):
             continue
+        compact_statuses.append(_compact_provider_status(provider_status))
 
-        incidents_raw = provider_status.get("incidents")
-        incidents_list = incidents_raw if isinstance(incidents_raw, list) else []
-        compact_incidents = [_compact_incident(item) for item in incidents_list[:20]]
+    errors = result.get("errors")
+    errors_list = errors if isinstance(errors, list) else []
+    checked_at = None
+    for provider_status in compact_statuses:
+        fetched_at = provider_status.get("fetched_at")
+        if isinstance(fetched_at, str) and (checked_at is None or fetched_at > checked_at):
+            checked_at = fetched_at
 
-        degraded_raw = provider_status.get("degraded_components")
-        degraded_list = degraded_raw if isinstance(degraded_raw, list) else []
-        compact_degraded = [_compact_degraded_component(item) for item in degraded_list[:20]]
+    status = "ok"
+    if errors_list and compact_statuses:
+        status = "partial"
+    elif errors_list and not compact_statuses:
+        status = "error"
+    elif str(result.get("status") or "").lower() not in {"success", "ok"}:
+        status = str(result.get("status") or "unknown")
 
+    provider_names = {
+        str(provider_status.get("provider") or "").lower()
+        for provider_status in compact_statuses
+        if provider_status.get("provider")
+    }
+    for error in errors_list:
+        if not isinstance(error, dict):
+            continue
+        provider = str(error.get("provider") or "").lower()
+        if not provider or provider in provider_names:
+            continue
         compact_statuses.append(
             {
-                "provider": provider_status.get("provider"),
-                "indicator": provider_status.get("indicator"),
-                "description": provider_status.get("description"),
-                "incidents_total": len(incidents_list),
-                "incidents": compact_incidents,
-                "degraded_components": compact_degraded,
-                "fetched_at": provider_status.get("fetched_at"),
-                "truncated": len(incidents_list) > 20,
+                "provider": provider,
+                "status": "error",
+                "error": error.get("message") or error.get("error") or "provider failed",
+                "error_type": error.get("error_type"),
+                "source_url": error.get("source_url"),
+                "status_code": error.get("status_code"),
+                "active_incidents": [],
+                "historical_incidents": [],
+                "historical_incidents_total": 0,
+                "degraded_components": [],
             }
         )
+        provider_names.add(provider)
 
     compact_result = {
-        "status": result.get("status"),
-        "action": result.get("action"),
-        "providers_succeeded": result.get("providers_succeeded"),
-        "external_status": compact_statuses,
+        "status": status,
+        "checked_at": checked_at,
+        "providers": compact_statuses,
     }
+    if errors_list:
+        compact_result["errors"] = errors_list
     if "persistence" in result:
         compact_result["persistence"] = result.get("persistence")
     if "provenance" in result:
@@ -1089,6 +1468,8 @@ def _normalize_polled_external_status_job(
             if response_mode == "compact"
             else job.get("result")
         )
+        if response_mode == "compact" and status == "succeeded":
+            return json.dumps(normalized_result, indent=2)
         payload: dict[str, Any] = {
             "mode": "completed",
             "job_id": job_id,
@@ -1284,64 +1665,41 @@ def create_mcp_server() -> FastMCP:
     @mcp.tool(**_tool_metadata(_specs["correlate_alerts"]))
     async def correlate_alerts(
         alerts: Annotated[
-            list[Alert],
+            list[Alert] | None,
             Field(
-                min_length=1,
-                max_length=500,
+                default=None,
                 description=(
                     "Alert objects to correlate. Each alert requires alert_id, name, service, "
                     "severity, status, and fired_at; labels may include env, namespace, "
                     "pod, deployment, or other routing context."
                 ),
             ),
-        ],
+        ] = None,
+        alerts_json: Annotated[
+            str | None,
+            Field(
+                default=None,
+                description=(
+                    "Legacy JSON string containing the same alert object array as alerts. "
+                    "Prefer alerts for new calls."
+                ),
+            ),
+        ] = None,
         window_minutes: int = 60,
         min_cluster_size: int = 2,
         execution_mode: str = "auto",
         workspace_id: str | None = None,
     ) -> str:
+        normalized_alerts = _normalize_correlation_alerts(alerts, alerts_json)
         input_data = CorrelateAlertsInput(
-            alerts=alerts,
+            alerts=normalized_alerts,
             window_minutes=window_minutes,
             min_cluster_size=min_cluster_size,
         )
-        mode = _resolve_execution_mode(settings, execution_mode)
-        resolved_workspace_id = _resolve_job_workspace_id(
-            workspace_id,
-            token_workspace_id=_current_token_workspace_id(),
-            default_workspace_id=settings.mcp_default_workspace_id,
-        )
-
-        if mode == "sync":
-            result: CorrelateAlertsOutput = _correlate_alerts_impl(input_data)
-            return result.model_dump_json(indent=2)
-
-        client = PlatformAPIJobsClient(settings)
-        submitted = await client.submit_job(
-            {
-                "job_type": "incident.graph.build",
-                "runner_mode": "graph",
-                "task_profile": "graph.standard",
-                "workspace_id": resolved_workspace_id,
-                "payload": {
-                    "alerts": [a.model_dump(mode="json") for a in input_data.alerts],
-                    "window_minutes": window_minutes,
-                    "min_cluster_size": min_cluster_size,
-                },
-                "artifact_refs": [],
-                "evidence_refs": [],
-            }
-        )
-        logger.info(
-            "mcp_async_job_submitted tool=correlate_alerts job_id=%s workspace_id=%s",
-            submitted["job_id"],
-            resolved_workspace_id,
-        )
-        return _build_async_result(
-            job_id=submitted["job_id"],
-            status=submitted.get("status", "queued"),
-            poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
-        )
+        _resolve_correlation_mode(execution_mode)
+        _ = workspace_id
+        result: CorrelateAlertsOutput = _correlate_alerts_impl(input_data)
+        return result.model_dump_json(indent=2)
 
     @mcp.tool(**_tool_metadata(_specs["external_status_check"]))
     async def external_status_check(
@@ -1377,6 +1735,7 @@ def create_mcp_server() -> FastMCP:
         include_threads: bool = False,
         thread_mode: str = "none",
         max_thread_replies: int = 20,
+        include_system_messages: bool = False,
         workspace_id: str | None = None,
     ) -> str:
         token_workspace_id = _current_token_workspace_id()
@@ -1406,6 +1765,7 @@ def create_mcp_server() -> FastMCP:
                 include_threads=include_threads,
                 thread_mode=selected_thread_mode,  # type: ignore[arg-type]
                 max_thread_replies=max_thread_replies,
+                include_system_messages=include_system_messages,
                 client=platform_client,
             )
         except PlatformSlackAPIError as exc:
@@ -1690,6 +2050,12 @@ def create_mcp_server() -> FastMCP:
         pod: str,
         container: str | None = None,
         tail_lines: int = 200,
+        level: str | None = None,
+        contains: str | None = None,
+        exclude: str | None = None,
+        since_minutes: int | None = None,
+        compact: bool = True,
+        json_parse: bool = False,
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
@@ -1704,7 +2070,11 @@ def create_mcp_server() -> FastMCP:
         }
         if container:
             params["container"] = container
-        return await _dispatch_k8s_agent_command(
+        if since_minutes is not None:
+            params["since_minutes"] = since_minutes
+        if json_parse:
+            params["json_parse"] = json_parse
+        raw = await _dispatch_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -1712,6 +2082,17 @@ def create_mcp_server() -> FastMCP:
             action="k8s.get_pod_logs",
             params=params,
             timeout_seconds=timeout_seconds,
+        )
+        payload = json.loads(raw)
+        return json.dumps(
+            _compact_log_payload(
+                payload,
+                level=level,
+                contains=contains,
+                exclude=exclude,
+                compact=compact,
+            ),
+            indent=2,
         )
 
     @mcp.tool(**_tool_metadata(_specs["k8s_list_events"]))
@@ -1839,12 +2220,15 @@ def create_mcp_server() -> FastMCP:
         pods = data.get("pods") if isinstance(data, dict) else []
         pods = pods if isinstance(pods, list) else []
         unhealthy = [pod for pod in pods if isinstance(pod, dict) and _is_unhealthy_pod(pod)]
+        completed = [pod for pod in pods if isinstance(pod, dict) and _is_completed_pod(pod)]
         return json.dumps(
             {
                 "status": "success",
                 "data": {
                     "pods": unhealthy,
                     "count": len(unhealthy),
+                    "completed_jobs": completed,
+                    "completed_count": len(completed),
                 },
                 "error": None,
             },
@@ -1897,8 +2281,27 @@ def create_mcp_server() -> FastMCP:
         )
         pods_data = pods.get("data") if isinstance(pods, dict) else None
         pod_items = pods_data.get("pods") if isinstance(pods_data, dict) else []
-        selected_pod = _select_workload_pod(
+        deployments = await _dispatch_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.list_deployments",
+            params={"namespace": namespace},
+            timeout_seconds=timeout_seconds,
+        )
+        deployments_data = json.loads(deployments).get("data")
+        deployment_items = (
+            deployments_data.get("deployments") if isinstance(deployments_data, dict) else []
+        )
+        selected_pod = _select_workload_pod_from_deployments(
             pod_items if isinstance(pod_items, list) else [],
+            deployment_items if isinstance(deployment_items, list) else [],
+            workload,
+        )
+        related_pods = _filter_workload_pods(
+            pod_items if isinstance(pod_items, list) else [],
+            deployment_items if isinstance(deployment_items, list) else [],
             workload,
         )
         logs_data = None
@@ -1922,7 +2325,8 @@ def create_mcp_server() -> FastMCP:
                 "status": "success",
                 "data": {
                     "rollout_status": json.loads(rollout).get("data"),
-                    "pods": pods.get("data"),
+                    "pods": related_pods,
+                    "pods_total": len(related_pods),
                     "logs": logs_data,
                     "selected_pod": selected_pod,
                     "hint": (

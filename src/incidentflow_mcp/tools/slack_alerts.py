@@ -37,6 +37,11 @@ class SlackThreadContext(BaseModel):
 
 
 class SlackAlertMessage(BaseModel):
+    alert_id: str | None = None
+    name: str | None = None
+    display_name: str | None = None
+    alertmanager_url: str | None = None
+    fired_at: str | None = None
     ts: str
     datetime_utc: str | None = None
     channel_id: str
@@ -50,6 +55,7 @@ class SlackAlertMessage(BaseModel):
     namespace: str | None = None
     pod: str | None = None
     severity: str | None = None
+    labels: dict[str, str] = Field(default_factory=dict)
     summary: str
     raw_text: str | None = None
     slack: SlackAlertContext | None = None
@@ -111,6 +117,64 @@ def _first_match(patterns: list[str], text: str) -> str | None:
         if match:
             return match.group(1).strip()
     return None
+
+
+def _clean_field(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = re.sub(r"^[\s*•`_-]+", "", value.strip())
+    cleaned = re.sub(r"[\s*`]+$", "", cleaned)
+    return cleaned or None
+
+
+def _is_system_message(message: dict[str, Any]) -> bool:
+    subtype = str(message.get("subtype") or "").strip().lower()
+    if subtype in {"channel_join", "channel_leave", "bot_add", "bot_remove"}:
+        return True
+    text = str(message.get("text") or "").strip().lower()
+    return " has joined the channel" in text or " has left the channel" in text
+
+
+def _infer_severity(text: str) -> str | None:
+    explicit = _first_match(
+        [r"Description:\s*`?([a-z]+)`?\s*-", r"\bseverity:\s*([^\n]+)"],
+        text,
+    )
+    explicit = _clean_field(explicit)
+    if explicit:
+        normalized = explicit.lower()
+        if normalized in {"critical", "high", "medium", "low", "info"}:
+            return normalized
+    haystack = text.lower()
+    for severity in ("critical", "high", "medium", "low", "info"):
+        if re.search(rf"\b{severity}\b", haystack):
+            return severity
+    return None
+
+
+def _extract_alertmanager_url(text: str) -> str | None:
+    match = re.search(r"<(https?://[^>|]+)(?:\|[^>]+)?>", text)
+    if match:
+        return match.group(1).strip()
+    match = re.search(r"https?://\S*alert\S*", text, flags=re.IGNORECASE)
+    return match.group(0).rstrip(">)].,") if match else None
+
+
+def _clean_alert_title(value: str | None) -> tuple[str | None, str | None, str | None]:
+    cleaned = _clean_field(value)
+    if not cleaned:
+        return None, None, None
+
+    alertmanager_url = _extract_alertmanager_url(cleaned)
+    without_url = re.sub(r"<https?://[^>]+>", "", cleaned)
+    without_url = re.sub(r"https?://\S+", "", without_url)
+    without_url = re.sub(r"\s*[|-]\s*$", "", without_url.strip())
+    display_name = _clean_field(without_url)
+    if not display_name:
+        return None, None, alertmanager_url
+
+    canonical = display_name.split()[0]
+    return canonical, display_name, alertmanager_url
 
 
 def _thread_ts(message: dict[str, Any]) -> str:
@@ -188,6 +252,9 @@ def _parse_alert_message(
         )
         alert_name = title_line.strip(" *") or None
     alert_name = alert_name or _first_match([r"^Alert:\s*(.+)$", r"alertname\s*=\s*([^\n]+)"], text)
+    alert_name, display_name, alertmanager_url = _clean_alert_title(alert_name)
+    if status_match is None and alert_name is None:
+        return None
 
     summary = _first_match(
         [
@@ -210,7 +277,33 @@ def _parse_alert_message(
     except (TypeError, ValueError):
         pass
 
+    service = _clean_field(_first_match([r"^Service:\s*(.+)$", r"\bjob:\s*([^\n]+)"], text))
+    if not service and display_name:
+        parts = display_name.split()
+        if len(parts) >= 2:
+            service = _clean_field(parts[1])
+    cluster = _clean_field(_first_match([r"Cluster:\s*([^,\n]+)", r"\bcluster:\s*([^\n]+)"], text))
+    namespace = _clean_field(
+        _first_match([r"Namespace:\s*([^,\n]+)", r"\bnamespace:\s*([^\n]+)"], text)
+    )
+    pod = _clean_field(_first_match([r"^Pod:\s*(.+)$", r"\bpod:\s*([^\n]+)"], text))
+    severity = _infer_severity(text)
+    labels = {
+        key: value
+        for key, value in {
+            "cluster": cluster,
+            "namespace": namespace,
+            "pod": pod,
+        }.items()
+        if value
+    }
+
     return SlackAlertMessage(
+        alert_id=f"slack-{ts}" if ts else None,
+        name=alert_name,
+        display_name=display_name,
+        alertmanager_url=alertmanager_url,
+        fired_at=datetime_utc,
         ts=ts,
         datetime_utc=datetime_utc,
         channel_id=channel_id,
@@ -219,14 +312,12 @@ def _parse_alert_message(
         status=status,
         alert_count=alert_count,
         alert_name=alert_name,
-        service=_first_match([r"^Service:\s*(.+)$", r"\bjob:\s*([^\n]+)"], text),
-        cluster=_first_match([r"Cluster:\s*([^,\n]+)", r"\bcluster:\s*([^\n]+)"], text),
-        namespace=_first_match([r"Namespace:\s*([^,\n]+)", r"\bnamespace:\s*([^\n]+)"], text),
-        pod=_first_match([r"^Pod:\s*(.+)$", r"\bpod:\s*([^\n]+)"], text),
-        severity=_first_match(
-            [r"Description:\s*`?([a-z]+)`?\s*-", r"\bseverity:\s*([^\n]+)"],
-            text,
-        ),
+        service=service,
+        cluster=cluster,
+        namespace=namespace,
+        pod=pod,
+        severity=severity,
+        labels=labels,
         summary=summary,
         raw_text=text if include_raw else None,
         slack=SlackAlertContext(
@@ -249,6 +340,7 @@ async def fetch_slack_alerts(
     include_threads: bool = False,
     thread_mode: ThreadMode = "none",
     max_thread_replies: int = 20,
+    include_system_messages: bool = False,
     client: Any | None = None,
 ) -> SlackAlertsOutput:
     if client is None:
@@ -262,6 +354,8 @@ async def fetch_slack_alerts(
     selected_mode = thread_mode if include_threads else "none"
     alerts: list[SlackAlertMessage] = []
     for message in messages:
+        if not include_system_messages and _is_system_message(message):
+            continue
         ts = str(message.get("ts") or "")
         permalink = await client.permalink(channel_id=channel_id, message_ts=ts) if ts else None
         thread_ts = _thread_ts(message)

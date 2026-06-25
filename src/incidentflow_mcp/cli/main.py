@@ -56,7 +56,7 @@ def serve(
     _port = port or settings.port
     _level = log_level or settings.log_level
 
-    configure_logging(_level)
+    configure_logging(_level, settings.library_log_level)
     logger.info("launching server on %s:%d", _host, _port)
 
     uvicorn.run(

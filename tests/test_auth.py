@@ -2,8 +2,9 @@
 Tests for the Bearer PAT authentication middleware.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -79,6 +80,43 @@ class TestAuthInvalid:
             "/mcp", headers={"Authorization": "BEARER test-secret-token"}
         )
         assert resp.status_code != 401
+
+    def test_oauth_jwks_timeout_returns_503_not_500(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        settings = Settings(
+            _env_file=None,
+            environment="production",
+            oauth_expected_issuer="https://app.incidentflow.io",
+            oauth_jwks_url="https://app.incidentflow.io/.well-known/jwks.json",
+            platform_api_base_url=None,
+            log_level="warning",
+        )
+        monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
+        monkeypatch.setattr("incidentflow_mcp.auth.repository._repo", InMemoryTokenRepository())
+
+        async def raise_timeout(**kwargs: object) -> object:
+            _ = kwargs
+            raise httpx.ConnectTimeout("jwks timeout")
+
+        monkeypatch.setattr(
+            "incidentflow_mcp.auth.middleware.validate_oauth_access_token",
+            raise_timeout,
+        )
+
+        app = FastAPI()
+        app.add_middleware(BearerAuthMiddleware)
+
+        @app.get("/private")
+        async def private() -> dict[str, bool]:
+            return {"ok": True}
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/private", headers={"Authorization": "Bearer oauth.jwt.token"})
+
+        assert resp.status_code == 503
+        assert resp.json()["detail"] == "Token verification service unavailable"
 
 
 class TestAuthSuccess:
@@ -193,7 +231,7 @@ class TestRepoAuth:
 
         repo = InMemoryTokenRepository()
         plaintext, token_id, token_hash = generate_pat()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         repo.save(
             TokenRecord(
                 token_id=token_id,
@@ -226,7 +264,7 @@ class TestRepoAuth:
 
         repo = InMemoryTokenRepository()
         plaintext, token_id, token_hash = generate_pat()
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         repo.save(
             TokenRecord(
                 token_id=token_id,
@@ -274,7 +312,7 @@ class TestRepoAuth:
                 token_hash=token_hash,
                 name="workspace-token",
                 scopes=["mcp:read", "mcp:tools:run"],
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
                 workspace_id="test-workspace-id",
             )
         )
@@ -328,7 +366,7 @@ class TestScopeEnforcement:
                 token_hash=token_hash,
                 name="scope-test-token",
                 scopes=scopes,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         monkeypatch.setattr("incidentflow_mcp.auth.repository._repo", repo)
