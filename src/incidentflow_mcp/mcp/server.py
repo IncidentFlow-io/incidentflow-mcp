@@ -1020,6 +1020,45 @@ def _compact_degraded_component(component: Any) -> dict[str, Any]:
     }
 
 
+def _incident_is_active(incident: dict[str, Any]) -> bool:
+    status = str(incident.get("status") or "").lower()
+    return status not in {"resolved", "completed", "postmortem", "closed"}
+
+
+def _compact_provider_status(provider_status: dict[str, Any]) -> dict[str, Any]:
+    incidents_raw = provider_status.get("incidents")
+    incidents_list = incidents_raw if isinstance(incidents_raw, list) else []
+    compact_incidents = [_compact_incident(item) for item in incidents_list[:20]]
+    active_incidents = [
+        incident for incident in compact_incidents if _incident_is_active(incident)
+    ]
+    historical_incidents = [
+        incident for incident in compact_incidents if not _incident_is_active(incident)
+    ]
+
+    degraded_raw = provider_status.get("degraded_components")
+    degraded_list = degraded_raw if isinstance(degraded_raw, list) else []
+    compact_degraded = [_compact_degraded_component(item) for item in degraded_list[:20]]
+
+    compact: dict[str, Any] = {
+        "provider": provider_status.get("provider"),
+        "indicator": provider_status.get("indicator"),
+        "description": provider_status.get("description"),
+        "active_incidents": active_incidents,
+        "historical_incidents": historical_incidents,
+        "degraded_components": compact_degraded,
+        "fetched_at": provider_status.get("fetched_at"),
+        "truncated": len(incidents_list) > 20,
+    }
+
+    if "regional_status" in provider_status:
+        compact["regional_status"] = provider_status.get("regional_status") or {}
+    if "regional_status_errors" in provider_status:
+        compact["regional_status_errors"] = provider_status.get("regional_status_errors") or {}
+
+    return compact
+
+
 def _compact_external_status_result(result: Any) -> Any:
     if not isinstance(result, dict):
         return result
@@ -1032,34 +1071,31 @@ def _compact_external_status_result(result: Any) -> Any:
     for provider_status in external_status:
         if not isinstance(provider_status, dict):
             continue
+        compact_statuses.append(_compact_provider_status(provider_status))
 
-        incidents_raw = provider_status.get("incidents")
-        incidents_list = incidents_raw if isinstance(incidents_raw, list) else []
-        compact_incidents = [_compact_incident(item) for item in incidents_list[:20]]
+    errors = result.get("errors")
+    errors_list = errors if isinstance(errors, list) else []
+    checked_at = None
+    for provider_status in compact_statuses:
+        fetched_at = provider_status.get("fetched_at")
+        if isinstance(fetched_at, str) and (checked_at is None or fetched_at > checked_at):
+            checked_at = fetched_at
 
-        degraded_raw = provider_status.get("degraded_components")
-        degraded_list = degraded_raw if isinstance(degraded_raw, list) else []
-        compact_degraded = [_compact_degraded_component(item) for item in degraded_list[:20]]
-
-        compact_statuses.append(
-            {
-                "provider": provider_status.get("provider"),
-                "indicator": provider_status.get("indicator"),
-                "description": provider_status.get("description"),
-                "incidents_total": len(incidents_list),
-                "incidents": compact_incidents,
-                "degraded_components": compact_degraded,
-                "fetched_at": provider_status.get("fetched_at"),
-                "truncated": len(incidents_list) > 20,
-            }
-        )
+    status = "ok"
+    if errors_list and compact_statuses:
+        status = "partial"
+    elif errors_list and not compact_statuses:
+        status = "error"
+    elif str(result.get("status") or "").lower() not in {"success", "ok"}:
+        status = str(result.get("status") or "unknown")
 
     compact_result = {
-        "status": result.get("status"),
-        "action": result.get("action"),
-        "providers_succeeded": result.get("providers_succeeded"),
-        "external_status": compact_statuses,
+        "status": status,
+        "checked_at": checked_at,
+        "providers": compact_statuses,
     }
+    if errors_list:
+        compact_result["errors"] = errors_list
     if "persistence" in result:
         compact_result["persistence"] = result.get("persistence")
     if "provenance" in result:
@@ -1089,6 +1125,8 @@ def _normalize_polled_external_status_job(
             if response_mode == "compact"
             else job.get("result")
         )
+        if response_mode == "compact" and status == "succeeded":
+            return json.dumps(normalized_result, indent=2)
         payload: dict[str, Any] = {
             "mode": "completed",
             "job_id": job_id,

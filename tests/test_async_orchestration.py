@@ -569,6 +569,7 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
                         "provider": "github",
                         "indicator": "minor",
                         "description": "Degraded",
+                        "fetched_at": "2026-03-17T18:00:00Z",
                         "incidents": [
                             {
                                 "id": "inc_1",
@@ -582,6 +583,7 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
                             }
                         ],
                         "degraded_components": [{"name": "Actions", "status": "degraded_performance"}],
+                        "regional_status_errors": {"eu": "404 Not Found"},
                     }
                 ],
             },
@@ -594,13 +596,13 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
     )
     payload = json.loads(output)
 
-    assert payload["mode"] == "completed"
-    assert payload["status"] == "succeeded"
-    compact_incident = payload["result"]["external_status"][0]["incidents"][0]
+    assert payload["status"] == "ok"
+    assert payload["checked_at"] == "2026-03-17T18:00:00Z"
+    provider = payload["providers"][0]
+    compact_incident = provider["active_incidents"][0]
     assert compact_incident["id"] == "inc_1"
     assert "incident_updates" not in compact_incident
-    assert payload["artifact_refs"] == ["artifact_1"]
-    assert payload["response_mode"] == "compact"
+    assert provider["regional_status_errors"] == {"eu": "404 Not Found"}
 
 
 def test_normalize_polled_external_status_job_terminal_returns_full_payload() -> None:
