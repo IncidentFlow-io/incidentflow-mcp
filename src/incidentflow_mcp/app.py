@@ -6,8 +6,8 @@ ASGI proxy route.  Implementation details live in the http/ subpackage.
 """
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from starlette.types import ASGIApp
@@ -59,11 +59,15 @@ def create_app() -> FastAPI:
     rate_limit_store = RedisRateLimitStore(settings.redis_url)
     rate_limit_policy = DefaultPolicyResolver(settings)
     rate_limit_bucket_keys = BucketKeyResolver()
-    app_tool_guard = ToolInvocationGuard(rate_limit_store, rate_limit_policy, rate_limit_bucket_keys)
+    app_tool_guard = ToolInvocationGuard(
+        rate_limit_store,
+        rate_limit_policy,
+        rate_limit_bucket_keys,
+    )
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-        configure_logging(settings.log_level)
+        configure_logging(settings.log_level, settings.library_log_level)
 
         try:
             if settings.oauth_validation_enabled():

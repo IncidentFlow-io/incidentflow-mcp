@@ -7,11 +7,15 @@ import pytest
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import (
+    _compact_external_status_result,
+    _compact_log_payload,
     _execute_external_status_check,
+    _filter_workload_pods,
     _k8s_cluster_overview_payload,
     _k8s_connection_health_payload,
     _k8s_rbac_check_payload,
     _normalize_polled_external_status_job,
+    _resolve_correlation_mode,
     _resolve_execution_mode,
     _resolve_job_workspace_id,
     _resolve_k8s_cluster_id,
@@ -87,10 +91,20 @@ def test_resolve_execution_mode_auto_async_in_production() -> None:
     assert _resolve_execution_mode(settings, "auto") == "async"
 
 
+def test_correlate_alerts_auto_stays_sync_and_async_is_rejected() -> None:
+    assert _resolve_correlation_mode("auto") == "sync"
+    assert _resolve_correlation_mode("sync") == "sync"
+    with pytest.raises(ValueError, match=r"alert\.correlation\.generate"):
+        _resolve_correlation_mode("async")
+
+
 def test_select_workload_pod_prefers_exact_then_prefix() -> None:
     pods = [{"name": "checkout-api-abc"}, {"name": "checkout-api"}]
     assert _select_workload_pod(pods, "checkout-api") == "checkout-api"
-    assert _select_workload_pod([{"name": "checkout-api-abc"}], "checkout-api") == "checkout-api-abc"
+    assert (
+        _select_workload_pod([{"name": "checkout-api-abc"}], "checkout-api")
+        == "checkout-api-abc"
+    )
 
 
 def test_external_status_check_schema_contains_response_mode_and_check_id_polling_hint() -> None:
@@ -333,7 +347,10 @@ async def test_k8s_connection_health_reports_connected_and_permissions() -> None
                     ]
                 },
             },
-            ("k8s.list_events", "incidentflow-prod"): {"status": "succeeded", "data": {"events": []}},
+            ("k8s.list_events", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"events": []},
+            },
             ("k8s.list_deployments", "incidentflow-prod"): {
                 "status": "succeeded",
                 "data": {"deployments": []},
@@ -408,7 +425,10 @@ async def test_k8s_rbac_check_reports_denied_action() -> None:
                 "status": "failed",
                 "error": {"code": "RBAC_DENIED", "message": "denied"},
             },
-            ("k8s.list_events", "incidentflow-prod"): {"status": "succeeded", "data": {"events": []}},
+            ("k8s.list_events", "incidentflow-prod"): {
+                "status": "succeeded",
+                "data": {"events": []},
+            },
             ("k8s.list_deployments", "incidentflow-prod"): {
                 "status": "succeeded",
                 "data": {"deployments": []},
@@ -471,7 +491,11 @@ async def test_k8s_cluster_overview_aggregates_unhealthy_pods_and_restarts() -> 
                 "status": "succeeded",
                 "data": {
                     "events": [
-                        {"type": "Warning", "reason": "BackOff", "last_seen": "2026-06-21T00:00:00Z"}
+                        {
+                            "type": "Warning",
+                            "reason": "BackOff",
+                            "last_seen": "2026-06-21T00:00:00Z",
+                        }
                     ]
                 },
             },
@@ -493,7 +517,115 @@ async def test_k8s_cluster_overview_aggregates_unhealthy_pods_and_restarts() -> 
 
 
 @pytest.mark.asyncio
-async def test_platform_api_jobs_client_submit_includes_internal_key(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_k8s_cluster_overview_excludes_succeeded_pods_from_unhealthy() -> None:
+    client = FakeK8sHealthClient(
+        [{"cluster_id": "cluster_prod", "name": "prod", "connected": True}],
+        {
+            ("k8s.list_namespaces", ""): {
+                "status": "succeeded",
+                "data": {"namespaces": [{"name": "jobs"}]},
+            },
+            ("k8s.list_pods", "jobs"): {
+                "status": "succeeded",
+                "data": {
+                    "pods": [
+                        {
+                            "name": "migration-job",
+                            "namespace": "jobs",
+                            "phase": "Succeeded",
+                            "containers": [{"name": "main", "ready": False}],
+                        }
+                    ]
+                },
+            },
+            ("k8s.list_deployments", "jobs"): {
+                "status": "succeeded",
+                "data": {"deployments": []},
+            },
+            ("k8s.list_services", "jobs"): {"status": "succeeded", "data": {"services": []}},
+            ("k8s.list_events", "jobs"): {"status": "succeeded", "data": {"events": []}},
+        },
+    )
+
+    payload = await _k8s_cluster_overview_payload(
+        client=client,
+        bearer_token="token",
+        cluster_id="cluster_prod",
+    )
+
+    assert payload["pods_unhealthy"] == 0
+    assert payload["completed_jobs"][0]["pod"] == "migration-job"
+
+
+def test_filter_workload_pods_uses_deployment_selector() -> None:
+    pods = [
+        {"name": "api-abc", "labels": {"app": "api", "pod-template-hash": "abc"}},
+        {"name": "worker-abc", "labels": {"app": "worker"}},
+    ]
+    deployments = [{"name": "api", "selector": {"app": "api"}}]
+
+    assert [pod["name"] for pod in _filter_workload_pods(pods, deployments, "api")] == ["api-abc"]
+
+
+def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
+    payload = {
+        "status": "succeeded",
+        "data": {
+            "logs": "\n".join(
+                [
+                    "DEBUG httpcore.connection noise",
+                    "INFO started",
+                    "ERROR timeout talking to db",
+                ]
+            )
+        },
+    }
+
+    compact = _compact_log_payload(
+        payload,
+        level=None,
+        contains=None,
+        exclude=None,
+        compact=True,
+    )
+
+    assert compact["data"]["skipped_debug_lines"] == 1
+    assert compact["data"]["highlighted"] == ["ERROR timeout talking to db"]
+
+
+def test_compact_external_status_includes_failed_provider_entries() -> None:
+    result = _compact_external_status_result(
+        {
+            "status": "partial",
+            "external_status": [
+                {
+                    "provider": "github",
+                    "indicator": "none",
+                    "description": "All Systems Operational",
+                    "incidents": [],
+                    "degraded_components": [],
+                    "fetched_at": "2026-06-25T10:00:00Z",
+                }
+            ],
+            "errors": [
+                {
+                    "provider": "aws",
+                    "message": "AWS status fetch failed",
+                    "error_type": "RuntimeError",
+                }
+            ],
+        }
+    )
+
+    assert result["status"] == "partial"
+    assert result["providers"][1]["provider"] == "aws"
+    assert result["providers"][1]["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_platform_api_jobs_client_submit_includes_internal_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, str] = {}
 
     class FakeResponse:
@@ -520,9 +652,18 @@ async def test_platform_api_jobs_client_submit_includes_internal_key(monkeypatch
             captured["url"] = url
             captured["key"] = headers.get("X-Internal-Api-Key", "")
             captured["job_type"] = json["job_type"]
-            return FakeResponse({"job_id": "job_123", "status": "queued", "created_at": "2026-01-01T00:00:00Z"})
+            return FakeResponse(
+                {
+                    "job_id": "job_123",
+                    "status": "queued",
+                    "created_at": "2026-01-01T00:00:00Z",
+                }
+            )
 
-    monkeypatch.setattr("incidentflow_mcp.platform_api.ai_jobs_client.httpx.AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        "incidentflow_mcp.platform_api.ai_jobs_client.httpx.AsyncClient",
+        FakeAsyncClient,
+    )
 
     settings = Settings(
         _env_file=None,
@@ -582,7 +723,9 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
                                 "incident_updates": [{"body": "very large payload"}],
                             }
                         ],
-                        "degraded_components": [{"name": "Actions", "status": "degraded_performance"}],
+                        "degraded_components": [
+                            {"name": "Actions", "status": "degraded_performance"}
+                        ],
                         "regional_status_errors": {"eu": "404 Not Found"},
                     }
                 ],
@@ -726,7 +869,9 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
 @pytest.mark.asyncio
 async def test_external_status_check_rejects_missing_workspace_scope() -> None:
     class FakeClient:
-        async def submit_job(self, payload: dict) -> dict:  # pragma: no cover - should not be called
+        async def submit_job(
+            self, payload: dict
+        ) -> dict:  # pragma: no cover - should not be called
             return {"job_id": "unused", "status": "queued"}
 
         async def get_job(self, job_id: str) -> dict:  # pragma: no cover - should not be called
@@ -828,7 +973,9 @@ async def test_external_status_check_uses_token_workspace_when_omitted() -> None
 @pytest.mark.asyncio
 async def test_external_status_check_rejects_explicit_workspace_scope_mismatch() -> None:
     class FakeClient:
-        async def submit_job(self, payload: dict) -> dict:  # pragma: no cover - should not be called
+        async def submit_job(
+            self, payload: dict
+        ) -> dict:  # pragma: no cover - should not be called
             return {"job_id": "unused", "status": "queued"}
 
         async def get_job(self, job_id: str) -> dict:  # pragma: no cover - should not be called
