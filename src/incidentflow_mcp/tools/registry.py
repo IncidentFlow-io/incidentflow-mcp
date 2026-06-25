@@ -79,6 +79,87 @@ def _timeout_property() -> dict[str, Any]:
     return {"type": "integer", "default": 30, "minimum": 1, "maximum": 60}
 
 
+def _alert_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "alert_id": {"type": "string", "description": "Stable alert identifier."},
+            "name": {"type": "string", "description": "Alert name, for example InstanceDown."},
+            "service": {"type": "string", "description": "Affected service name."},
+            "severity": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low", "info"],
+            },
+            "status": {"type": "string", "enum": ["firing", "resolved", "pending"]},
+            "fired_at": {
+                "type": "string",
+                "format": "date-time",
+                "description": "Time the alert fired, as an ISO 8601 timestamp.",
+            },
+            "labels": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": "Optional alert labels such as env, namespace, pod, or deployment.",
+            },
+            "slack": {
+                "type": "object",
+                "description": "Optional Slack message metadata for the alert.",
+            },
+            "thread": {
+                "type": "object",
+                "description": "Optional Slack thread metadata for the alert.",
+            },
+        },
+        "required": ["alert_id", "name", "service", "severity", "status", "fired_at"],
+    }
+
+
+def _alert_context_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "alert_name": {
+                "type": "string",
+                "description": "Alert name from the root Slack alert.",
+            },
+            "name": {"type": "string", "description": "Alternative alert name field."},
+            "summary": {"type": "string", "description": "Short alert or incident summary."},
+            "service": {"type": "string", "description": "Affected service name."},
+            "severity": {"type": "string", "description": "Alert severity."},
+            "status": {"type": "string", "description": "Alert status."},
+            "labels": {
+                "type": "object",
+                "additionalProperties": {"type": "string"},
+                "description": "Alert labels copied from Grafana, Alertmanager, or IncidentFlow.",
+            },
+        },
+    }
+
+
+def _k8s_agent_params_schema() -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "namespace": {
+                "type": "string",
+                "description": "Namespace for namespaced Kubernetes inspection actions.",
+            },
+            "pod": {"type": "string", "description": "Pod name for get_pod or get_pod_logs."},
+            "container": {"type": "string", "description": "Optional container for pod logs."},
+            "deployment": {
+                "type": "string",
+                "description": "Deployment name for get_rollout_status.",
+            },
+            "tail_lines": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1000,
+                "description": "Maximum recent log lines for get_pod_logs.",
+            },
+        },
+    }
+
+
 def _k8s_schema(
     properties: dict[str, Any] | None = None,
     required: list[str] | None = None,
@@ -152,9 +233,15 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "alerts_json": {
-                    "type": "string",
-                    "description": "JSON array of Alert objects to correlate",
+                "alerts": {
+                    "type": "array",
+                    "items": _alert_schema(),
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "description": (
+                        "Alert objects to correlate. Each alert requires alert_id, name, "
+                        "service, severity, status, and fired_at."
+                    ),
                 },
                 "window_minutes": {
                     "type": "integer",
@@ -182,7 +269,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                     ),
                 },
             },
-            "required": ["alerts_json"],
+            "required": ["alerts"],
         },
         annotations=_read_only_annotations(),
     ),
@@ -377,7 +464,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "description": "Slack thread timestamp.",
                 },
                 "alert_context": {
-                    "type": "object",
+                    **_alert_context_schema(),
                     "description": (
                         "Optional alert or incident context to shape the summary "
                         "title/root-cause hints."
@@ -420,7 +507,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                         "k8s.get_rollout_status",
                     ],
                 },
-                "params": {"type": "object", "default": {}},
+                "params": {**_k8s_agent_params_schema(), "default": {}},
                 "timeout_seconds": _timeout_property(),
             },
             "required": ["action"],
@@ -632,7 +719,13 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema=_k8s_schema(
             {
                 "namespace": {"type": "string"},
-                "workload": {"type": "string"},
+                "workload": {
+                    "type": "string",
+                    "description": (
+                        "Deployment or Pod name to inspect, for example checkout-api or "
+                        "checkout-api-7f9c6d7d8b-abcde. Do not include kind/ prefixes."
+                    ),
+                },
                 "tail_lines": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000},
             },
             required=["namespace", "workload"],
