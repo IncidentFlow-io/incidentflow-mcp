@@ -10,10 +10,11 @@ import json
 import logging
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from pydantic import BaseModel, Field
 
 from incidentflow_mcp.auth.context import get_current_auth_context
 from incidentflow_mcp.config import Settings, get_settings
@@ -25,6 +26,7 @@ from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correla
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
 from incidentflow_mcp.tools.registry import get_tool_specs
 from incidentflow_mcp.tools.schemas import (
+    Alert,
     CorrelateAlertsInput,
     CorrelateAlertsOutput,
     IncidentSummaryInput,
@@ -37,6 +39,65 @@ from incidentflow_mcp.tools.slack_alerts import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class IncidentThreadAlertContext(BaseModel):
+    alert_name: str | None = Field(
+        default=None,
+        description="Alert name from the root Slack alert, for example InstanceDown.",
+    )
+    name: str | None = Field(default=None, description="Alternative alert name field.")
+    summary: str | None = Field(default=None, description="Short alert or incident summary.")
+    service: str | None = Field(default=None, description="Affected service name.")
+    severity: str | None = Field(
+        default=None,
+        description="Alert severity such as critical or warning.",
+    )
+    status: str | None = Field(default=None, description="Alert status such as firing or resolved.")
+    labels: dict[str, str] | None = Field(
+        default=None,
+        description="Alert labels copied from Grafana, Alertmanager, or IncidentFlow.",
+    )
+
+
+class K8sAgentCommandParams(BaseModel):
+    namespace: str | None = Field(
+        default=None,
+        description=(
+            "Kubernetes namespace for namespaced actions such as list_pods, get_pod, "
+            "get_pod_logs, list_events, list_deployments, list_services, or get_rollout_status."
+        ),
+    )
+    pod: str | None = Field(
+        default=None,
+        description="Pod name for k8s.get_pod or k8s.get_pod_logs.",
+    )
+    container: str | None = Field(
+        default=None,
+        description="Optional container name for k8s.get_pod_logs.",
+    )
+    deployment: str | None = Field(
+        default=None,
+        description="Deployment name for k8s.get_rollout_status.",
+    )
+    tail_lines: int | None = Field(
+        default=None,
+        ge=1,
+        le=1000,
+        description="Maximum recent log lines for k8s.get_pod_logs.",
+    )
+
+
+K8sReadOnlyAction = Literal[
+    "k8s.list_namespaces",
+    "k8s.list_pods",
+    "k8s.get_pod",
+    "k8s.get_pod_logs",
+    "k8s.list_events",
+    "k8s.list_deployments",
+    "k8s.list_services",
+    "k8s.get_rollout_status",
+]
 
 _VALID_EXECUTION_MODES = {"auto", "sync", "async"}
 _TERMINAL_JOB_STATUSES = {"succeeded", "failed", "cancelled", "canceled"}
@@ -1222,15 +1283,25 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool(**_tool_metadata(_specs["correlate_alerts"]))
     async def correlate_alerts(
-        alerts_json: str,
+        alerts: Annotated[
+            list[Alert],
+            Field(
+                min_length=1,
+                max_length=500,
+                description=(
+                    "Alert objects to correlate. Each alert requires alert_id, name, service, "
+                    "severity, status, and fired_at; labels may include env, namespace, "
+                    "pod, deployment, or other routing context."
+                ),
+            ),
+        ],
         window_minutes: int = 60,
         min_cluster_size: int = 2,
         execution_mode: str = "auto",
         workspace_id: str | None = None,
     ) -> str:
-        raw = json.loads(alerts_json)
         input_data = CorrelateAlertsInput(
-            alerts=raw if isinstance(raw, list) else raw["alerts"],
+            alerts=alerts,
             window_minutes=window_minutes,
             min_cluster_size=min_cluster_size,
         )
@@ -1378,7 +1449,7 @@ def create_mcp_server() -> FastMCP:
     async def incident_thread_summary(
         channel_id: str,
         thread_ts: str,
-        alert_context: dict[str, Any] | None = None,
+        alert_context: IncidentThreadAlertContext | None = None,
         workspace_id: str | None = None,
     ) -> str:
         token_workspace_id = _current_token_workspace_id()
@@ -1396,7 +1467,9 @@ def create_mcp_server() -> FastMCP:
                 token=token,
                 channel_id=channel_id,
                 thread_ts=thread_ts,
-                alert_context=alert_context,
+                alert_context=alert_context.model_dump(exclude_none=True)
+                if alert_context
+                else None,
                 client=platform_client,
             )
         except PlatformSlackAPIError as exc:
@@ -1405,8 +1478,8 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool(**_tool_metadata(_specs["k8s_agent_command"]))
     async def k8s_agent_command(
-        action: str,
-        params: dict[str, Any] | None = None,
+        action: K8sReadOnlyAction,
+        params: K8sAgentCommandParams | None = None,
         cluster_id: str | None = None,
         environment: str | None = None,
         cluster_name: str | None = None,
@@ -1418,7 +1491,7 @@ def create_mcp_server() -> FastMCP:
             environment=environment,
             cluster_name=cluster_name,
             action=action,
-            params=params,
+            params=params.model_dump(exclude_none=True) if params else None,
             timeout_seconds=timeout_seconds,
         )
 
@@ -1780,8 +1853,20 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool(**_tool_metadata(_specs["k8s_analyze_workload"]))
     async def k8s_analyze_workload(
-        workload: str | None = None,
-        namespace: str | None = None,
+        workload: Annotated[
+            str,
+            Field(
+                min_length=1,
+                description=(
+                    "Deployment or Pod name to inspect, for example checkout-api or "
+                    "checkout-api-7f9c6d7d8b-abcde. Do not include kind/ prefixes."
+                ),
+            ),
+        ],
+        namespace: Annotated[
+            str,
+            Field(min_length=1, description="Kubernetes namespace containing the workload."),
+        ],
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,

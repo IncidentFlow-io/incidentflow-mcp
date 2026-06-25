@@ -78,3 +78,38 @@ async def test_fastmcp_tools_publish_submission_metadata() -> None:
         assert tool.annotations.readOnlyHint is True
         assert tool.annotations.openWorldHint is False
         assert tool.annotations.destructiveHint is False
+
+
+@pytest.mark.asyncio
+async def test_submission_risky_tool_inputs_are_structured() -> None:
+    mcp = create_mcp_server()
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+
+    correlate_schema = tools["correlate_alerts"].inputSchema
+    assert "alerts_json" not in correlate_schema["properties"]
+    assert correlate_schema["properties"]["alerts"]["type"] == "array"
+    assert correlate_schema["properties"]["alerts"]["items"]["$ref"] == "#/$defs/Alert"
+    assert "alerts" in correlate_schema["required"]
+
+    thread_schema = tools["incident_thread_summary"].inputSchema
+    alert_context = thread_schema["properties"]["alert_context"]["anyOf"][0]
+    assert alert_context["$ref"] == "#/$defs/IncidentThreadAlertContext"
+
+    command_schema = tools["k8s_agent_command"].inputSchema
+    assert command_schema["properties"]["action"]["enum"] == [
+        "k8s.list_namespaces",
+        "k8s.list_pods",
+        "k8s.get_pod",
+        "k8s.get_pod_logs",
+        "k8s.list_events",
+        "k8s.list_deployments",
+        "k8s.list_services",
+        "k8s.get_rollout_status",
+    ]
+    params = command_schema["properties"]["params"]["anyOf"][0]
+    assert params["$ref"] == "#/$defs/K8sAgentCommandParams"
+
+    workload_schema = tools["k8s_analyze_workload"].inputSchema
+    assert workload_schema["properties"]["workload"]["type"] == "string"
+    assert workload_schema["properties"]["namespace"]["type"] == "string"
+    assert workload_schema["required"] == ["workload", "namespace"]
