@@ -2421,7 +2421,7 @@ def create_mcp_server() -> FastMCP:
     )
 
     def _workspace(workspace_id: str | None) -> str:
-        wid = workspace_id or settings.mcp_default_workspace_id
+        wid = workspace_id or _current_token_workspace_id() or settings.mcp_default_workspace_id
         if not wid:
             raise ValueError(
                 "workspace_id is required. Pass it explicitly or set INCIDENTFLOW_WORKSPACE_ID."

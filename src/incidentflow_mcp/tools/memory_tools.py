@@ -45,10 +45,13 @@ class PlatformAPIMemoryClient:
         query: str,
         service: str | None = None,
         limit: int = 5,
+        score_threshold: float | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"workspace_id": workspace_id, "query": query, "limit": limit}
         if service:
             body["service"] = service
+        if score_threshold is not None:
+            body["score_threshold"] = score_threshold
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(
                 f"{self._base}/internal/memory/search",
@@ -129,6 +132,7 @@ async def memory_get_service_context(
             query=effective_query,
             service=service,
             limit=limit,
+            score_threshold=0.3,
         )
         matches = result.get("matches", [])
         return {
