@@ -769,6 +769,202 @@ _TOOL_SPECS: list[ToolSpec] = [
 ]
 
 
+_MEMORY_READ_ONLY_JUSTIFICATION = (
+    "This tool queries IncidentFlow's semantic memory layer (Qdrant vector database). "
+    "It reads past incident embeddings and does not create, update, delete, restart, "
+    "scale, patch, send messages, or perform any irreversible actions."
+)
+
+_MEMORY_WRITE_JUSTIFICATION = (
+    "This tool writes an incident summary into IncidentFlow's semantic memory layer "
+    "(Qdrant vector database) so that future similar incidents can reference it. "
+    "It does not modify Kubernetes resources, Slack messages, or any external system."
+)
+
+_TOOL_SPECS.extend([
+    ToolSpec(
+        name="memory_search_similar_incidents",
+        title="Search Similar Past Incidents",
+        description=(
+            "Searches IncidentFlow's semantic memory for past incidents similar to the "
+            "provided query. Returns ranked matches with incident IDs, similarity scores, "
+            "service context, severity, resolution summaries, and source metadata. "
+            "Use this to surface past RCA patterns and proven remediation steps for "
+            f"the current incident. {_MEMORY_READ_ONLY_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Free-text description of the current incident or alert, e.g. "
+                        "'readiness probe failed after deployment istio-proxy backoff'."
+                    ),
+                },
+                "service": {
+                    "type": "string",
+                    "description": "Optional service name to narrow the search scope.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "Maximum number of similar incidents to return.",
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": (
+                        "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is configured."
+                    ),
+                },
+            },
+            "required": ["query"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="memory_get_service_context",
+        title="Get Service Incident History",
+        description=(
+            "Returns recent semantic memory entries for a specific service — past incident "
+            "summaries, Slack thread context, and RCA patterns stored in IncidentFlow memory. "
+            "Use to understand a service's historical failure patterns before investigating "
+            f"a new incident. {_MEMORY_READ_ONLY_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "service": {
+                    "type": "string",
+                    "description": "Service name to retrieve memory context for.",
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Optional free-text context to refine results, e.g. 'OOM probe failure'."
+                    ),
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",
+                },
+            },
+            "required": ["service"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="memory_upsert_incident_summary",
+        title="Save Incident Summary to Memory",
+        description=(
+            "Persists an incident summary, Slack thread summary, or RCA into IncidentFlow's "
+            "semantic memory so future incidents can find it via similarity search. "
+            f"{_MEMORY_WRITE_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "incident_id": {
+                    "type": "string",
+                    "description": "Incident identifier, e.g. INC-001.",
+                },
+                "source": {
+                    "type": "string",
+                    "enum": [
+                        "incident_summary",
+                        "slack_thread",
+                        "rca",
+                        "runbook",
+                        "alert_pattern",
+                    ],
+                    "description": "Type of document being stored.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": (
+                        "Free-text summary to embed. Should be concise and factual, "
+                        "e.g. the RCA or resolution steps."
+                    ),
+                },
+                "service": {"type": "string", "description": "Affected service name."},
+                "severity": {
+                    "type": "string",
+                    "enum": ["critical", "high", "medium", "low", "info"],
+                },
+                "status": {
+                    "type": "string",
+                    "enum": ["open", "investigating", "mitigating", "resolved"],
+                },
+                "cluster": {"type": "string", "description": "Kubernetes cluster name."},
+                "namespace": {"type": "string", "description": "Kubernetes namespace."},
+                "started_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Incident start time as ISO 8601.",
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",
+                },
+            },
+            "required": ["incident_id", "source", "text"],
+        },
+        annotations={
+            "readOnlyHint": False,
+            "openWorldHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+        },
+    ),
+    ToolSpec(
+        name="memory_find_runbook",
+        title="Find Runbook from Memory",
+        description=(
+            "Searches IncidentFlow's semantic memory for stored runbook steps that match "
+            "the current incident pattern. Returns the most relevant runbook entries with "
+            "similarity scores and step descriptions. "
+            f"{_MEMORY_READ_ONLY_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Describe the problem to find matching runbooks for, e.g. "
+                        "'istio sidecar startup delay causes readiness probe failure'."
+                    ),
+                },
+                "service": {
+                    "type": "string",
+                    "description": "Optional service name to filter runbooks.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 3,
+                    "minimum": 1,
+                    "maximum": 10,
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",
+                },
+            },
+            "required": ["query"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+])
+
+
 def get_tool_specs() -> list[ToolSpec]:
     """Return all registered tool specifications."""
     return list(_TOOL_SPECS)

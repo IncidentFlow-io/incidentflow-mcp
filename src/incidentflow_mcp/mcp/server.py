@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import time
+import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
@@ -1805,6 +1806,61 @@ def create_mcp_server() -> FastMCP:
             return _platform_slack_error_json(exc)
         return result.model_dump_json(indent=2)
 
+    async def _auto_upsert_thread_summary(
+        *,
+        workspace_id: str,
+        channel_id: str,
+        thread_ts: str,
+        result: dict[str, Any],
+        alert_context: IncidentThreadAlertContext | None,
+    ) -> None:
+        """Fire-and-forget: embed slack thread summary into Qdrant memory."""
+        try:
+            from incidentflow_mcp.tools.memory_tools import PlatformAPIMemoryClient
+
+            # Build rich embedding text from all available summary fields
+            parts: list[str] = []
+            if title := result.get("title"):
+                parts.append(str(title))
+            if summary := result.get("summary"):
+                parts.append(str(summary))
+            if rca := result.get("probable_root_cause"):
+                parts.append(f"Root cause: {rca}")
+            if actions := result.get("actions_taken"):
+                if isinstance(actions, list) and actions:
+                    parts.append(f"Actions: {', '.join(str(a) for a in actions[:5])}")
+
+            text = ". ".join(filter(None, parts)).strip()
+            if not text:
+                return
+
+            # Stable deterministic incident_id from channel + thread_ts
+            incident_id = f"slack:{channel_id}:{thread_ts}"
+
+            service = alert_context.service if alert_context else None
+            severity = alert_context.severity if alert_context else None
+            status = result.get("status")
+
+            mem = PlatformAPIMemoryClient(settings)
+            await mem.upsert(
+                workspace_id=workspace_id,
+                incident_id=incident_id,
+                source="slack_thread",
+                text=text,
+                service=service,
+                severity=severity,
+                status=status,
+            )
+            logger.info(
+                "memory: auto-upserted slack thread workspace=%s incident=%s service=%s",
+                workspace_id,
+                incident_id,
+                service,
+            )
+        except Exception:
+            # Never block the main response — log and move on
+            logger.warning("memory: failed to auto-upsert thread summary", exc_info=True)
+
     @mcp.tool(**_tool_metadata(_specs["incident_thread_summary"]))
     async def incident_thread_summary(
         channel_id: str,
@@ -1834,6 +1890,18 @@ def create_mcp_server() -> FastMCP:
             )
         except PlatformSlackAPIError as exc:
             return _platform_slack_error_json(exc)
+
+        # Auto-persist to semantic memory — non-blocking, never delays the response
+        asyncio.create_task(
+            _auto_upsert_thread_summary(
+                workspace_id=token_workspace_id,
+                channel_id=channel_id,
+                thread_ts=thread_ts,
+                result=result,
+                alert_context=alert_context,
+            )
+        )
+
         return json.dumps(result, indent=2)
 
     @mcp.tool(**_tool_metadata(_specs["k8s_agent_command"]))
@@ -2340,6 +2408,113 @@ def create_mcp_server() -> FastMCP:
             },
             indent=2,
         )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Memory tools — semantic incident memory via Qdrant
+    # ──────────────────────────────────────────────────────────────────────────
+    from incidentflow_mcp.tools.memory_tools import (
+        MemoryAPIError,
+        memory_find_runbook,
+        memory_get_service_context,
+        memory_search_similar_incidents,
+        memory_upsert_incident_summary,
+    )
+
+    def _workspace(workspace_id: str | None) -> str:
+        wid = workspace_id or settings.mcp_default_workspace_id
+        if not wid:
+            raise ValueError(
+                "workspace_id is required. Pass it explicitly or set INCIDENTFLOW_WORKSPACE_ID."
+            )
+        return wid
+
+    @mcp.tool(**_tool_metadata(_specs["memory_search_similar_incidents"]))
+    async def memory_search_similar_incidents_tool(
+        query: str,
+        service: str | None = None,
+        limit: int = 5,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_search_similar_incidents(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                query=query,
+                service=service,
+                limit=limit,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["memory_get_service_context"]))
+    async def memory_get_service_context_tool(
+        service: str,
+        query: str | None = None,
+        limit: int = 5,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_get_service_context(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                service=service,
+                query=query,
+                limit=limit,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["memory_upsert_incident_summary"]))
+    async def memory_upsert_incident_summary_tool(
+        incident_id: str,
+        source: str,
+        text: str,
+        service: str | None = None,
+        severity: str | None = None,
+        status: str | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        started_at: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_upsert_incident_summary(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                incident_id=incident_id,
+                source=source,
+                text=text,
+                service=service,
+                severity=severity,
+                status=status,
+                cluster=cluster,
+                namespace=namespace,
+                started_at=started_at,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["memory_find_runbook"]))
+    async def memory_find_runbook_tool(
+        query: str,
+        service: str | None = None,
+        limit: int = 3,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_find_runbook(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                query=query,
+                service=service,
+                limit=limit,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
 
     register_resources(mcp)
 
