@@ -37,9 +37,10 @@ _READ_ONLY_LOCAL_JUSTIFICATION = (
 )
 
 _K8S_READ_ONLY_JUSTIFICATION = (
-    "This tool performs read-only inspection through the IncidentFlow Kubernetes Agent. "
-    "It may query Kubernetes API resources such as Pods, Events, Deployments, Services, "
-    "Namespaces, rollout status, or redacted logs, but it never modifies Kubernetes resources."
+    "Read-only monitoring tool — equivalent to running kubectl get/describe/logs with "
+    "no write access. It does not exec into containers, run shell commands, modify "
+    "Kubernetes resources, change configuration, restart workloads, or escalate privileges. "
+    "It queries the Kubernetes API for observability data only."
 )
 
 _SLACK_READ_ONLY_JUSTIFICATION = (
@@ -508,9 +509,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="k8s_cluster_overview",
         title="Inspect Kubernetes Cluster Health",
         description=(
-            "Returns a read-only SRE overview of visible namespaces, pods, deployments, "
-            "services, warning events, unhealthy pods, and restarts through the "
-            f"IncidentFlow Kubernetes Agent. {_K8S_READ_ONLY_JUSTIFICATION}"
+            "Returns a read-only SRE overview of the cluster: pod health, unhealthy pods, "
+            "deployment counts, warning events, and top restarts. Includes an automatic "
+            "health assessment with findings and recommendations — Healthy, Degraded, or "
+            f"Unknown. {_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(),
         annotations=_read_only_annotations(),
@@ -560,35 +562,89 @@ _TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="k8s_list_pods",
-        title="List Kubernetes Pods",
+        title="Show Pod Health Status",
         description=(
-            "Lists Pods in an allowed namespace through an online IncidentFlow Kubernetes "
-            f"Agent and returns current Pod status metadata. {_K8S_READ_ONLY_JUSTIFICATION}"
+            "Returns health and readiness status for running workload pods in a Kubernetes "
+            "namespace — name, phase, container readiness, restart count, and age. "
+            "Use during incident triage to check whether pods are Running, Pending, or "
+            f"CrashLooping. {_K8S_READ_ONLY_JUSTIFICATION}"
         ),
-        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        input_schema=_k8s_schema({
+            "namespace": {"type": "string"},
+            "include_labels": {
+                "type": "boolean",
+                "default": False,
+                "description": "Include Kubernetes labels in the response. Off by default.",
+            },
+            "include_images": {
+                "type": "boolean",
+                "default": True,
+                "description": "Include container image name:tag in the response.",
+            },
+            "include_node": {
+                "type": "boolean",
+                "default": True,
+                "description": "Include the node name the pod is scheduled on.",
+            },
+            "limit": {
+                "type": "integer",
+                "default": 50,
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of pods to return. Defaults to 50.",
+            },
+        }),
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_get_pod",
-        title="Inspect Kubernetes Pod",
+        title="Inspect Pod Status",
         description=(
-            "Reads details for one Pod in an allowed namespace through an online "
-            "IncidentFlow Kubernetes Agent and returns status, containers, and metadata. "
+            "Returns health status for a specific pod — container readiness, restart "
+            "count, node assignment, and phase. Use when you know the pod name and need "
+            "a quick health check. For full investigation use k8s_describe_pod. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(
-            {"namespace": {"type": "string"}, "pod": {"type": "string"}},
+            {
+                "namespace": {"type": "string"},
+                "pod": {"type": "string"},
+                "detail_level": {
+                    "type": "string",
+                    "enum": ["summary", "standard", "debug"],
+                    "default": "summary",
+                    "description": (
+                        "summary=health basics only; standard=with events for this pod; "
+                        "debug=standard plus raw agent response structure"
+                    ),
+                },
+                "include_labels": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Include Kubernetes labels in the response.",
+                },
+                "include_images": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include container image name:tag in the response.",
+                },
+                "include_node": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include the node name the pod is scheduled on.",
+                },
+            },
             required=["namespace", "pod"],
         ),
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
         name="k8s_get_pod_logs",
-        title="Read Kubernetes Pod Logs",
+        title="Read Application Logs",
         description=(
-            "Reads redacted logs from a selected Kubernetes Pod in an allowed namespace "
-            "through the IncidentFlow Kubernetes Agent. This tool is read-only and does "
-            "not modify Pods, containers, Deployments, or cluster configuration. "
+            "Streams recent log lines from a running application container for incident "
+            "debugging — equivalent to kubectl logs. Logs are filtered and redacted before "
+            "return. No shell access, no exec, no writes. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
@@ -632,11 +688,25 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="k8s_list_events",
         title="List Kubernetes Events",
         description=(
-            "Lists Kubernetes Events in an allowed namespace through an online IncidentFlow "
-            "Kubernetes Agent and returns warning and normal event metadata. "
-            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+            "Lists Kubernetes Events in a namespace — warnings first, newest first. "
+            "Repeated events are automatically deduplicated with occurrence counts. "
+            "Useful for spotting CrashLoopBackOff, ImagePullBackOff, readiness failures, "
+            f"and scheduling issues. {_K8S_READ_ONLY_JUSTIFICATION}"
         ),
-        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        input_schema=_k8s_schema({
+            "namespace": {"type": "string"},
+            "pod": {
+                "type": "string",
+                "description": "Optional pod name to filter events to a specific pod.",
+            },
+            "limit": {
+                "type": "integer",
+                "default": 50,
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of deduplicated events to return.",
+            },
+        }),
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
@@ -676,34 +746,13 @@ _TOOL_SPECS: list[ToolSpec] = [
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
-        name="k8s_show_namespaces",
-        title="Show Kubernetes Namespaces",
-        description=(
-            "Shows Kubernetes namespaces using automatic cluster resolution through the "
-            f"IncidentFlow Kubernetes Agent. {_K8S_READ_ONLY_JUSTIFICATION}"
-        ),
-        input_schema=_k8s_schema(),
-        annotations=_read_only_annotations(),
-    ),
-    ToolSpec(
-        name="k8s_show_pods",
-        title="Show Kubernetes Pods",
-        description=(
-            "Shows Kubernetes Pods using automatic cluster resolution through the "
-            "IncidentFlow Kubernetes Agent and returns current Pod status metadata. "
-            f"{_K8S_READ_ONLY_JUSTIFICATION}"
-        ),
-        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
-        annotations=_read_only_annotations(),
-    ),
-    ToolSpec(
         name="k8s_show_unhealthy_pods",
         title="Find Unhealthy Kubernetes Pods",
         description=(
             "Finds Kubernetes Pods that are not running, not ready, crash looping, "
-            "pending, failed, or have recent container restarts. This tool performs "
-            "read-only inspection through the IncidentFlow Kubernetes Agent and does not "
-            "create, update, delete, restart, scale, or patch any Kubernetes resources. "
+            "pending, failed, or have high restart counts. Returns each unhealthy pod "
+            "with its reason, restart count, age, likely cause, and recommended next "
+            "action. Use as the first step in namespace-level triage. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}),
@@ -731,6 +780,56 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "tail_lines": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000},
             },
             required=["namespace", "workload"],
+        ),
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="k8s_describe_pod",
+        title="Describe Pod",
+        description=(
+            "Returns a structured pod investigation report — the primary tool for "
+            "understanding why a specific pod is unhealthy. Sections: pod identity "
+            "(name, namespace, workload, node, age), status (phase, ready, restart count), "
+            "containers (per-container readiness and image), relevant events (warnings "
+            "first), and automatic diagnosis of CrashLoopBackOff, ImagePullBackOff, "
+            "readiness/liveness failures, OOMKilled, FailedScheduling, and high restarts. "
+            "Prefer this over k8s_get_pod when investigating a specific pod. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
+        input_schema=_k8s_schema(
+            {
+                "namespace": {"type": "string"},
+                "pod": {"type": "string"},
+            },
+            required=["namespace", "pod"],
+        ),
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="k8s_debug_pod",
+        title="Debug Pod",
+        description=(
+            "Runs a full automated investigation on a specific pod: describes pod state, "
+            "reads recent logs, surfaces relevant Kubernetes events, and checks the "
+            "owner deployment rollout status. Returns a single consolidated investigation "
+            "report with health findings and actionable recommendations. Equivalent to an "
+            "SRE running kubectl describe + logs + events + rollout status manually. "
+            "Use when you need to understand why a pod is unhealthy or behaving unexpectedly. "
+            f"{_K8S_READ_ONLY_JUSTIFICATION}"
+        ),
+        input_schema=_k8s_schema(
+            {
+                "namespace": {"type": "string"},
+                "pod": {"type": "string"},
+                "tail_lines": {
+                    "type": "integer",
+                    "default": 100,
+                    "minimum": 1,
+                    "maximum": 500,
+                    "description": "Log lines to fetch for diagnosis.",
+                },
+            },
+            required=["namespace", "pod"],
         ),
         annotations=_read_only_annotations(),
     ),
