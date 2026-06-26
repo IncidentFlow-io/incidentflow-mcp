@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 _TRACER_NAME = "incidentflow.mcp"
 _initialized = False
+_provider = None
 
 
 def configure_tracing(
@@ -62,7 +63,15 @@ def configure_tracing(
         )
     )
     trace.set_tracer_provider(provider)
+
+    try:
+        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+        HTTPXClientInstrumentor().instrument(tracer_provider=provider)
+    except Exception:
+        logger.debug("HTTPX auto-instrumentation unavailable")
+
     _initialized = True
+    _provider = provider
     logger.info(
         "otel tracing enabled service=%s endpoint=%s env=%s",
         service_name,
@@ -132,3 +141,18 @@ class _NoopTracer:
 
     def start_span(self, name: str, **kwargs):  # noqa: ANN001
         return _NoopSpan()
+
+
+def instrument_fastapi_app(app: object) -> None:
+    """Instrument a FastAPI app with the global TracerProvider.
+
+    Must be called after FastAPI() is constructed but before the first request.
+    Safe to call when tracing is disabled — becomes a no-op.
+    """
+    if _provider is None:
+        return
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        FastAPIInstrumentor.instrument_app(app, tracer_provider=_provider)  # type: ignore[arg-type]
+    except Exception:
+        logger.debug("FastAPI auto-instrumentation unavailable")
