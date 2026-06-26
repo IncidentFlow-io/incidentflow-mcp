@@ -111,19 +111,24 @@ def _normalize_env(value: str) -> str:
     return v or "unknown"
 
 
+class _NoopSpan:
+    """No-op span returned by _NoopTracer so callers never get None."""
+
+    def set_attribute(self, *a, **kw): ...  # noqa: ANN002,ANN003
+    def set_status(self, *a, **kw): ...  # noqa: ANN002,ANN003
+    def record_exception(self, *a, **kw): ...  # noqa: ANN002,ANN003
+    def add_event(self, *a, **kw): ...  # noqa: ANN002,ANN003
+    def end(self): ...
+    def __enter__(self): return self
+    def __exit__(self, *a): ...  # noqa: ANN002
+
+
 class _NoopTracer:
     """Minimal stand-in so callers don't need to guard against None."""
 
     def start_as_current_span(self, name: str, **kwargs):  # noqa: ANN001
         from contextlib import nullcontext
-        return nullcontext()
+        return nullcontext(_NoopSpan())
 
     def start_span(self, name: str, **kwargs):  # noqa: ANN001
-        class _Noop:
-            def set_attribute(self, *a, **kw): ...
-            def set_status(self, *a, **kw): ...
-            def record_exception(self, *a, **kw): ...
-            def end(self): ...
-            def __enter__(self): return self
-            def __exit__(self, *a): ...
-        return _Noop()
+        return _NoopSpan()
