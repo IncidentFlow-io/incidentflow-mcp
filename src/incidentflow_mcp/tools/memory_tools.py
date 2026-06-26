@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.tracing import get_tracer, inject_trace_headers
 
 logger = logging.getLogger(__name__)
 
@@ -47,19 +48,42 @@ class PlatformAPIMemoryClient:
         limit: int = 5,
         score_threshold: float | None = None,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"workspace_id": workspace_id, "query": query, "limit": limit}
-        if service:
-            body["service"] = service
-        if score_threshold is not None:
-            body["score_threshold"] = score_threshold
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(
-                f"{self._base}/internal/memory/search",
-                json=body,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()  # type: ignore[return-value]
+        tracer = get_tracer()
+        with tracer.start_as_current_span("qdrant.search") as span:
+            span.set_attribute("memory.operation", "search")
+            span.set_attribute("workspace.id", workspace_id)
+            span.set_attribute("memory.limit", limit)
+            if service:
+                span.set_attribute("memory.service", service)
+
+            body: dict[str, Any] = {"workspace_id": workspace_id, "query": query, "limit": limit}
+            if service:
+                body["service"] = service
+            if score_threshold is not None:
+                body["score_threshold"] = score_threshold
+
+            headers = self._headers()
+            inject_trace_headers(headers)
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    resp = await client.post(
+                        f"{self._base}/internal/memory/search",
+                        json=body,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    result = resp.json()
+                    matches = result.get("matches", [])
+                    span.set_attribute("memory.results_count", len(matches))
+                    return result  # type: ignore[return-value]
+            except Exception as exc:
+                try:
+                    from opentelemetry.trace import StatusCode
+                    span.record_exception(exc)
+                    span.set_status(StatusCode.ERROR, str(exc))
+                except Exception:
+                    pass
+                raise
 
     async def upsert(
         self,
@@ -70,21 +94,38 @@ class PlatformAPIMemoryClient:
         text: str,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {
-            "workspace_id": workspace_id,
-            "incident_id": incident_id,
-            "source": source,
-            "text": text,
-            **{k: v for k, v in kwargs.items() if v is not None},
-        }
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(
-                f"{self._base}/internal/memory/upsert",
-                json=body,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()  # type: ignore[return-value]
+        tracer = get_tracer()
+        with tracer.start_as_current_span("qdrant.upsert") as span:
+            span.set_attribute("memory.operation", "upsert")
+            span.set_attribute("workspace.id", workspace_id)
+            span.set_attribute("memory.source", source)
+
+            body: dict[str, Any] = {
+                "workspace_id": workspace_id,
+                "incident_id": incident_id,
+                "source": source,
+                "text": text,
+                **{k: v for k, v in kwargs.items() if v is not None},
+            }
+            headers = self._headers()
+            inject_trace_headers(headers)
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    resp = await client.post(
+                        f"{self._base}/internal/memory/upsert",
+                        json=body,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    return resp.json()  # type: ignore[return-value]
+            except Exception as exc:
+                try:
+                    from opentelemetry.trace import StatusCode
+                    span.record_exception(exc)
+                    span.set_status(StatusCode.ERROR, str(exc))
+                except Exception:
+                    pass
+                raise
 
 
 async def memory_search_similar_incidents(

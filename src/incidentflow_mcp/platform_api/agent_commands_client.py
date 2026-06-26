@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.tracing import get_tracer, inject_trace_headers
 
 
 class PlatformAPIAgentCommandsClient:
@@ -17,15 +18,30 @@ class PlatformAPIAgentCommandsClient:
         self._timeout = settings.platform_api_timeout_seconds
 
     async def list_clusters(self, *, bearer_token: str) -> list[dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(
-                f"{self._base_url}/api/v1/agents/clusters",
-                headers={"Authorization": f"Bearer {bearer_token}"},
-            )
-        response.raise_for_status()
-        payload = response.json()
-        clusters = payload.get("clusters") if isinstance(payload, dict) else None
-        return clusters if isinstance(clusters, list) else []
+        tracer = get_tracer()
+        with tracer.start_as_current_span("platform_api.agent_lookup") as span:
+            headers: dict[str, str] = {"Authorization": f"Bearer {bearer_token}"}
+            inject_trace_headers(headers)
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    response = await client.get(
+                        f"{self._base_url}/api/v1/agents/clusters",
+                        headers=headers,
+                    )
+                response.raise_for_status()
+                payload = response.json()
+                clusters = payload.get("clusters") if isinstance(payload, dict) else None
+                result = clusters if isinstance(clusters, list) else []
+                span.set_attribute("clusters.count", len(result))
+                return result
+            except Exception as exc:
+                try:
+                    from opentelemetry.trace import StatusCode
+                    span.record_exception(exc)
+                    span.set_status(StatusCode.ERROR, str(exc))
+                except Exception:
+                    pass
+                raise
 
     async def dispatch(
         self,
@@ -36,18 +52,40 @@ class PlatformAPIAgentCommandsClient:
         params: dict[str, Any],
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "action": action,
-            "params": params,
-        }
-        if timeout_seconds is not None:
-            payload["timeout_seconds"] = timeout_seconds
+        tracer = get_tracer()
+        with tracer.start_as_current_span("platform_api.dispatch_command") as span:
+            span.set_attribute("k8s.command", action)
+            span.set_attribute("cluster.id", cluster_id)
+            if "namespace" in params:
+                span.set_attribute("k8s.namespace.name", str(params["namespace"]))
+            if "pod" in params:
+                span.set_attribute("k8s.pod.name", str(params["pod"]))
 
-        async with httpx.AsyncClient(timeout=self._timeout + (timeout_seconds or 0)) as client:
-            response = await client.post(
-                f"{self._base_url}/api/v1/agents/clusters/{cluster_id}/commands",
-                headers={"Authorization": f"Bearer {bearer_token}"},
-                json=payload,
-            )
-        response.raise_for_status()
-        return response.json()
+            req_payload: dict[str, Any] = {"action": action, "params": params}
+            if timeout_seconds is not None:
+                req_payload["timeout_seconds"] = timeout_seconds
+
+            headers: dict[str, str] = {"Authorization": f"Bearer {bearer_token}"}
+            inject_trace_headers(headers)
+            try:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout + (timeout_seconds or 0)
+                ) as client:
+                    response = await client.post(
+                        f"{self._base_url}/api/v1/agents/clusters/{cluster_id}/commands",
+                        headers=headers,
+                        json=req_payload,
+                    )
+                response.raise_for_status()
+                result = response.json()
+                status = result.get("status", "unknown")
+                span.set_attribute("agent_command.status", str(status))
+                return result
+            except Exception as exc:
+                try:
+                    from opentelemetry.trace import StatusCode
+                    span.record_exception(exc)
+                    span.set_status(StatusCode.ERROR, str(exc))
+                except Exception:
+                    pass
+                raise

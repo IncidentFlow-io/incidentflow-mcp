@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.tracing import get_tracer
 from incidentflow_mcp.observability.metrics import (
     SessionTracker,
     classify_outcome,
@@ -92,12 +93,46 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
 
         status_code = 500
         response: Response | None = None
+        _otel_span = None
+        _otel_token = None
         try:
+            if is_call_tool:
+                _otel_span, _otel_token = _start_tool_span(tool_name, request)
             response = await call_next(request)
             status_code = response.status_code
+            if _otel_span is not None:
+                try:
+                    from opentelemetry.trace import StatusCode
+                    if status_code >= 500:
+                        _otel_span.set_status(StatusCode.ERROR)
+                    else:
+                        _otel_span.set_status(StatusCode.OK)
+                except Exception:
+                    pass
             return response
+        except Exception as exc:
+            if _otel_span is not None:
+                try:
+                    from opentelemetry.trace import StatusCode
+                    _otel_span.record_exception(exc)
+                    _otel_span.set_status(StatusCode.ERROR, str(exc))
+                except Exception:
+                    pass
+            raise
         finally:
             elapsed = max(0.0, perf_counter() - started)
+            if _otel_span is not None:
+                try:
+                    _otel_span.set_attribute("mcp.http.duration_ms", round(elapsed * 1000, 2))
+                    _otel_span.end()
+                except Exception:
+                    pass
+            if _otel_token is not None:
+                try:
+                    import opentelemetry.context as otel_ctx
+                    otel_ctx.detach(_otel_token)
+                except Exception:
+                    pass
             status_code_str = str(status_code)
             status_class = status_class_from_code(status_code)
             outcome = classify_outcome(status_code)
@@ -252,3 +287,48 @@ async def _extract_payload(request: Request) -> Any:
         return await request.json()
     except Exception:
         return None
+
+
+def _start_tool_span(
+    tool_name: str,
+    request: Request,
+) -> tuple[Any, Any]:
+    """Start an mcp.tool.execute span and attach it as the current span.
+
+    Returns (span, context_token) so the caller can end the span and detach
+    the context in the finally block.  Returns (None, None) if OTEL is absent.
+    """
+    try:
+        import opentelemetry.context as otel_ctx
+        from opentelemetry.trace import SpanKind
+
+        tracer = get_tracer()
+        span = tracer.start_span(
+            "mcp.tool.execute",
+            kind=SpanKind.SERVER,
+        )
+
+        # Attach span attributes
+        span.set_attribute("tool.name", tool_name)
+        span.set_attribute("mcp.tool.name", tool_name)
+        span.set_attribute("mcp.request.type", "CallToolRequest")
+
+        # Best-effort: read workspace/request-id from auth/request state
+        request_id = getattr(request.state, "request_id", None)
+        if request_id:
+            span.set_attribute("request.id", str(request_id))
+
+        # Workspace ID from auth context (set by auth middleware upstream)
+        auth_ctx = getattr(request.state, "auth_context", None)
+        if isinstance(auth_ctx, dict):
+            workspace_id = auth_ctx.get("workspace_id")
+            if workspace_id:
+                span.set_attribute("workspace.id", str(workspace_id))
+
+        # Attach the span as current context so child spans nest under it
+        from opentelemetry import trace
+        ctx = trace.set_span_in_context(span)
+        token = otel_ctx.attach(ctx)
+        return span, token
+    except Exception:
+        return None, None

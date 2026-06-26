@@ -42,6 +42,25 @@ class _RedactionFilter(logging.Filter):
         return True
 
 
+class _TraceContextFilter(logging.Filter):
+    """Inject trace_id and span_id from the active OTEL span into every log record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        trace_id = ""
+        span_id = ""
+        try:
+            from opentelemetry import trace
+            ctx = trace.get_current_span().get_span_context()
+            if ctx.is_valid:
+                trace_id = format(ctx.trace_id, "032x")
+                span_id = format(ctx.span_id, "016x")
+        except Exception:
+            pass
+        record.trace_id = trace_id
+        record.span_id = span_id
+        return True
+
+
 def configure_logging(level: str = "info", library_level: str = "warning") -> None:
     """
     Configure root logger with a structured format suitable for both
@@ -55,9 +74,10 @@ def configure_logging(level: str = "info", library_level: str = "warning") -> No
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(numeric_level)
     handler.addFilter(_RedactionFilter())
+    handler.addFilter(_TraceContextFilter())
 
     fmt = logging.Formatter(
-        fmt="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        fmt="%(asctime)s  %(levelname)-8s  %(name)s  trace_id=%(trace_id)s span_id=%(span_id)s  %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
     handler.setFormatter(fmt)
