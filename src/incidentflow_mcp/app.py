@@ -20,6 +20,7 @@ from incidentflow_mcp.http.routers.ops import create_ops_router
 from incidentflow_mcp.http.routes.mcp_proxy import register_mcp_proxy_route
 from incidentflow_mcp.logging_config import configure_logging
 from incidentflow_mcp.mcp.server import create_mcp_server
+from incidentflow_mcp.observability.tracing import configure_tracing
 from incidentflow_mcp.observability.middleware import MCPObservabilityMiddleware
 from incidentflow_mcp.rate_limit.bucket_keys import BucketKeyResolver
 from incidentflow_mcp.rate_limit.middleware import TransportRateLimitMiddleware
@@ -63,6 +64,17 @@ def create_app() -> FastAPI:
         rate_limit_store,
         rate_limit_policy,
         rate_limit_bucket_keys,
+    )
+
+    # configure_tracing must run before FastAPI is instantiated so that
+    # FastAPIInstrumentor middleware is included in Starlette's middleware stack.
+    configure_tracing(
+        service_name=settings.mcp_server_name,
+        service_version=settings.service_version,
+        environment=settings.environment,
+        otlp_endpoint=settings.observability_otlp_endpoint,
+        k8s_namespace=settings.k8s_namespace_name,
+        enabled=settings.observability_enabled and settings.observability_tracing_enabled,
     )
 
     @asynccontextmanager
@@ -120,6 +132,11 @@ def create_app() -> FastAPI:
         docs_url="/docs" if settings.environment != "production" else None,
         redoc_url="/redoc" if settings.environment != "production" else None,
     )
+
+    # Instrument FastAPI after app creation but before serving starts.
+    # Must happen here (not in lifespan) so Starlette includes the middleware.
+    from incidentflow_mcp.observability.tracing import instrument_fastapi_app
+    instrument_fastapi_app(app)
 
     app.state.settings = settings
     app.state.mcp_server = mcp_server

@@ -195,6 +195,30 @@ class Settings(BaseSettings):
     )
 
     # -----------------------------------------------------------------------
+    # Observability / OpenTelemetry
+    # -----------------------------------------------------------------------
+    observability_enabled: bool = Field(
+        default=True,
+        description="Enable Prometheus metrics and OTel tracing when True.",
+    )
+    observability_tracing_enabled: bool = Field(
+        default=False,
+        description="Enable distributed tracing via OTEL SDK (requires OTEL packages).",
+    )
+    observability_otlp_endpoint: str = Field(
+        default="otel-collector.observability.svc.cluster.local:4317",
+        description="gRPC OTLP endpoint for trace export.",
+    )
+    service_version: str = Field(
+        default="0.0.0",
+        description="Service version attached to OTEL resource.",
+    )
+    k8s_namespace_name: str | None = Field(
+        default=None,
+        description="Kubernetes namespace attached to OTEL resource.",
+    )
+
+    # -----------------------------------------------------------------------
     # Rate limiting / Redis
     # -----------------------------------------------------------------------
     redis_url: str = Field(

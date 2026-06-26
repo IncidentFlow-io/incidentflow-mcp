@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.tracing import inject_trace_headers
 from incidentflow_mcp.slack.slack_client import SlackThreadFetchResult, normalize_channel_name
 
 logger = logging.getLogger(__name__)
@@ -54,12 +55,17 @@ class PlatformSlackClient:
                 )
         response.raise_for_status()
 
+    def _outbound_headers(self) -> dict[str, str]:
+        headers = dict(self._headers)
+        inject_trace_headers(headers)
+        return headers
+
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.get(
                 f"{self._base_url}{path}",
                 params=params,
-                headers=self._headers,
+                headers=self._outbound_headers(),
             )
         self._raise_for_platform_error(response)
         return response.json()
@@ -69,7 +75,7 @@ class PlatformSlackClient:
             response = await client.post(
                 f"{self._base_url}{path}",
                 json=payload,
-                headers=self._headers,
+                headers=self._outbound_headers(),
             )
         self._raise_for_platform_error(response)
         return response.json()

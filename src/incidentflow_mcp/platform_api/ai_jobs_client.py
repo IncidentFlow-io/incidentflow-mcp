@@ -7,6 +7,7 @@ import httpx
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.observability.metrics import mcp_platform_api_jobs_errors_total, pod_label_values
+from incidentflow_mcp.observability.tracing import inject_trace_headers
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class PlatformAPIJobsClient:
         headers: dict[str, str] = {}
         if self._internal_api_key:
             headers["X-Internal-Api-Key"] = self._internal_api_key
+        inject_trace_headers(headers)
         return headers
 
     def _observe_error(self, operation: str, exc: Exception) -> None:

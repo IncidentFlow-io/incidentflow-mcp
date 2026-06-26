@@ -46,7 +46,7 @@ class FakeK8sHealthClient(FakeAgentClusterClient):
         self.responses = responses
         self.dispatch_calls: list[tuple[str, dict]] = []
 
-    async def dispatch(
+    async def send_agent_command(
         self,
         *,
         bearer_token: str,
@@ -71,7 +71,7 @@ class FakeK8sHealthClient(FakeAgentClusterClient):
 
 
 class FailingK8sDispatchClient(FakeAgentClusterClient):
-    async def dispatch(
+    async def send_agent_command(
         self,
         *,
         bearer_token: str,

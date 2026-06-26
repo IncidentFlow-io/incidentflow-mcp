@@ -10,9 +10,8 @@ import json
 import logging
 import re
 import time
-import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -62,44 +61,6 @@ class IncidentThreadAlertContext(BaseModel):
     )
 
 
-class K8sAgentCommandParams(BaseModel):
-    namespace: str | None = Field(
-        default=None,
-        description=(
-            "Kubernetes namespace for namespaced actions such as list_pods, get_pod, "
-            "get_pod_logs, list_events, list_deployments, list_services, or get_rollout_status."
-        ),
-    )
-    pod: str | None = Field(
-        default=None,
-        description="Pod name for k8s.get_pod or k8s.get_pod_logs.",
-    )
-    container: str | None = Field(
-        default=None,
-        description="Optional container name for k8s.get_pod_logs.",
-    )
-    deployment: str | None = Field(
-        default=None,
-        description="Deployment name for k8s.get_rollout_status.",
-    )
-    tail_lines: int | None = Field(
-        default=None,
-        ge=1,
-        le=1000,
-        description="Maximum recent log lines for k8s.get_pod_logs.",
-    )
-
-
-K8sReadOnlyAction = Literal[
-    "k8s.list_namespaces",
-    "k8s.list_pods",
-    "k8s.get_pod",
-    "k8s.get_pod_logs",
-    "k8s.list_events",
-    "k8s.list_deployments",
-    "k8s.list_services",
-    "k8s.get_rollout_status",
-]
 
 _VALID_EXECUTION_MODES = {"auto", "sync", "async"}
 _TERMINAL_JOB_STATUSES = {"succeeded", "failed", "cancelled", "canceled"}
@@ -114,6 +75,7 @@ _K8S_ALLOWED_ACTIONS = {
     "k8s.list_deployments",
     "k8s.list_services",
     "k8s.get_rollout_status",
+    "k8s.describe_pod",
 }
 _NO_CONNECTED_CLUSTER_MESSAGE = (
     "No Kubernetes cluster is connected to this workspace. "
@@ -336,7 +298,7 @@ async def _resolve_k8s_cluster_id(
     return str(matches[0]["cluster_id"])
 
 
-async def _dispatch_k8s_agent_command(
+async def _send_k8s_agent_command(
     *,
     settings: Settings,
     cluster_id: str | None,
@@ -361,7 +323,7 @@ async def _dispatch_k8s_agent_command(
         cluster_name=cluster_name,
     )
     try:
-        result = await client.dispatch(
+        result = await client.send_agent_command(
             bearer_token=bearer_token,
             cluster_id=resolved_cluster_id,
             action=action,
@@ -375,7 +337,7 @@ async def _dispatch_k8s_agent_command(
     return json.dumps(result, indent=2)
 
 
-async def _dispatch_k8s_pods_for_analysis(
+async def _fetch_pods_for_analysis(
     *,
     settings: Settings,
     namespace: str | None,
@@ -384,7 +346,7 @@ async def _dispatch_k8s_pods_for_analysis(
     cluster_name: str | None,
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    raw = await _dispatch_k8s_agent_command(
+    raw = await _send_k8s_agent_command(
         settings=settings,
         cluster_id=cluster_id,
         environment=environment,
@@ -637,7 +599,7 @@ def _select_k8s_cluster_summary(
     return matches[0]
 
 
-async def _dispatch_k8s_agent_command_json(
+async def _send_k8s_command(
     *,
     client: PlatformAPIAgentCommandsClient,
     bearer_token: str,
@@ -647,7 +609,7 @@ async def _dispatch_k8s_agent_command_json(
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
     try:
-        return await client.dispatch(
+        return await client.send_agent_command(
             bearer_token=bearer_token,
             cluster_id=cluster_id,
             action=action,
@@ -729,6 +691,7 @@ async def _k8s_connection_health_payload(
     cluster_name: str | None = None,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
+    _health_start = time.perf_counter()
     status = await _k8s_agent_status_payload(
         client=client,
         bearer_token=bearer_token,
@@ -756,8 +719,9 @@ async def _k8s_connection_health_payload(
         )
         return status
 
+    agent_lookup_ms = round((time.perf_counter() - _health_start) * 1000, 2)
     started = time.perf_counter()
-    namespaces_response = await _dispatch_k8s_agent_command_json(
+    namespaces_response = await _send_k8s_command(
         client=client,
         bearer_token=bearer_token,
         cluster_id=str(resolved_cluster_id),
@@ -765,7 +729,8 @@ async def _k8s_connection_health_payload(
         params={},
         timeout_seconds=timeout_seconds,
     )
-    latency_ms = round((time.perf_counter() - started) * 1000, 2)
+    list_namespaces_ms = round((time.perf_counter() - started) * 1000, 2)
+    latency_ms = list_namespaces_ms
     namespaces = _namespace_names(_command_data(namespaces_response, "namespaces"))
     permissions: dict[str, bool | None] = {
         "list_namespaces": _command_ok(namespaces_response),
@@ -786,7 +751,7 @@ async def _k8s_connection_health_payload(
         }
         pod_items: list[Any] = []
         for key, (action, params) in checks.items():
-            response = await _dispatch_k8s_agent_command_json(
+            response = await _send_k8s_command(
                 client=client,
                 bearer_token=bearer_token,
                 cluster_id=str(resolved_cluster_id),
@@ -799,7 +764,7 @@ async def _k8s_connection_health_payload(
                 pod_items = _command_data(response, "pods")
         first_pod = next((pod for pod in pod_items if isinstance(pod, dict)), None)
         if first_pod is not None:
-            response = await _dispatch_k8s_agent_command_json(
+            response = await _send_k8s_command(
                 client=client,
                 bearer_token=bearer_token,
                 cluster_id=str(resolved_cluster_id),
@@ -813,10 +778,23 @@ async def _k8s_connection_health_payload(
             )
             permissions["get_logs"] = _command_ok(response)
 
+    total_health_ms = round((time.perf_counter() - _health_start) * 1000, 2)
+    latency_interpretation = (
+        "latency_ms reflects the platform→gateway→k8s-agent roundtrip for "
+        "k8s.list_namespaces. MCP HTTP handler latency is logged separately "
+        "by the observability middleware (see duration_ms in http_request logs)."
+    )
     status.update(
         {
             "status": "connected" if _command_ok(namespaces_response) else "degraded",
             "latency_ms": latency_ms,
+            "latency_breakdown": {
+                "agent_lookup_ms": agent_lookup_ms,
+                "list_namespaces_ms": list_namespaces_ms,
+                "total_health_check_ms": total_health_ms,
+                "mcp_handler_ms": None,  # measured by HTTP middleware, not available here
+            },
+            "latency_interpretation": latency_interpretation,
             "namespaces_visible": len(namespaces),
             "namespaces": namespaces,
             "permissions": permissions,
@@ -881,7 +859,7 @@ async def _k8s_cluster_overview_payload(
     namespace: str | None = None,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
-    namespaces_response = await _dispatch_k8s_agent_command_json(
+    namespaces_response = await _send_k8s_command(
         client=client,
         bearer_token=bearer_token,
         cluster_id=cluster_id,
@@ -898,7 +876,7 @@ async def _k8s_cluster_overview_payload(
     services: list[Any] = []
     events: list[Any] = []
     for item in namespaces:
-        pods_response = await _dispatch_k8s_agent_command_json(
+        pods_response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -906,7 +884,7 @@ async def _k8s_cluster_overview_payload(
             params={"namespace": item},
             timeout_seconds=timeout_seconds,
         )
-        deployments_response = await _dispatch_k8s_agent_command_json(
+        deployments_response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -914,7 +892,7 @@ async def _k8s_cluster_overview_payload(
             params={"namespace": item},
             timeout_seconds=timeout_seconds,
         )
-        services_response = await _dispatch_k8s_agent_command_json(
+        services_response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -922,7 +900,7 @@ async def _k8s_cluster_overview_payload(
             params={"namespace": item},
             timeout_seconds=timeout_seconds,
         )
-        events_response = await _dispatch_k8s_agent_command_json(
+        events_response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -956,7 +934,7 @@ async def _k8s_rbac_check_payload(
     namespace: str | None = None
     first_pod: dict[str, Any] | None = None
     for key, (action, params) in _K8S_RBAC_ACTIONS.items():
-        response = await _dispatch_k8s_agent_command_json(
+        response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -979,7 +957,7 @@ async def _k8s_rbac_check_payload(
             "message": "No visible pods available to verify log access.",
         }
     else:
-        response = await _dispatch_k8s_agent_command_json(
+        response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -1054,6 +1032,59 @@ def _pod_labels(pod: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _strip_image_digest(image: str) -> str:
+    """Remove @sha256:... digest from an image reference, keep repo:tag."""
+    at = image.find("@")
+    return image[:at] if at != -1 else image
+
+
+def _sanitize_pod(
+    pod: dict[str, Any],
+    *,
+    include_labels: bool = False,
+    include_images: bool = True,
+    include_node: bool = True,
+) -> dict[str, Any]:
+    """Allowlist-based pod summary safe for SaaS output.
+
+    Never exposes labels, node internals, image digests, annotations,
+    env vars, volumes, serviceAccount, ownerReferences, or containerIDs.
+    """
+    containers_raw = pod.get("containers") or []
+    containers: list[dict[str, Any]] = []
+    for c in containers_raw:
+        if not isinstance(c, dict):
+            continue
+        entry: dict[str, Any] = {
+            "name": str(c.get("name") or ""),
+            "ready": bool(c.get("ready")),
+            "restart_count": int(c.get("restart_count") or 0),
+        }
+        if include_images:
+            entry["image"] = _strip_image_digest(str(c.get("image") or ""))
+        containers.append(entry)
+
+    all_ready = bool(containers) and all(c["ready"] for c in containers)
+    total_restarts = sum(c["restart_count"] for c in containers)
+
+    summary: dict[str, Any] = {
+        "name": str(pod.get("name") or ""),
+        "namespace": str(pod.get("namespace") or ""),
+        "phase": str(pod.get("phase") or ""),
+        "ready": all_ready,
+        "restarts": total_restarts,
+        "age": str(pod.get("age") or ""),
+        "containers": containers,
+    }
+    if include_node:
+        summary["node"] = str(pod.get("node_name") or "")
+    if include_labels:
+        raw_labels = pod.get("labels")
+        if isinstance(raw_labels, dict):
+            summary["labels"] = raw_labels
+    return summary
+
+
 def _filter_workload_pods(
     pods: list[Any],
     deployments: list[Any],
@@ -1085,6 +1116,645 @@ def _filter_workload_pods(
             return matched
 
     return [pod for pod in candidates if str(pod.get("name") or "").startswith(f"{workload}-")]
+
+
+def _workload_from_pod_name(pod_name: str) -> str:
+    """Derive deployment/workload name by stripping random k8s suffixes.
+
+    incidentflow-mcp-76f5987dc5-j5r6d  ->  incidentflow-mcp
+    my-service-6d7f9b-xk2z9            ->  my-service
+    standalone-pod                     ->  standalone-pod (unchanged)
+    """
+    import re as _re
+    # ReplicaSet pods: {deployment}-{rs-hash~10}-{pod-hash~5}
+    m = _re.match(r"^(.+?)-[a-z0-9]{9,10}-[a-z0-9]{5}$", pod_name)
+    if m:
+        return m.group(1)
+    # DaemonSet / StatefulSet: {name}-{hash5}
+    m = _re.match(r"^(.+?)-[a-z0-9]{5}$", pod_name)
+    if m:
+        return m.group(1)
+    return pod_name
+
+
+def _deduplicate_events(events: list[Any]) -> list[dict[str, Any]]:
+    """Collapse repeated events into single entries with occurrence counts."""
+    groups: dict[tuple[str, ...], dict[str, Any]] = {}
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        reason = str(event.get("reason") or "")
+        message = str(event.get("message") or "")[:120]
+        involved = event.get("involved_object") or event.get("object") or {}
+        obj_name = str(involved.get("name") if isinstance(involved, dict) else "")
+        namespace = str(event.get("namespace") or "")
+        key = (namespace, obj_name, reason, message)
+        if key not in groups:
+            entry = dict(event)
+            entry["count"] = int(event.get("count") or 1)
+            groups[key] = entry
+        else:
+            existing = groups[key]
+            existing["count"] = existing.get("count", 1) + int(event.get("count") or 1)
+            new_ls = str(event.get("last_seen") or event.get("lastSeen") or "")
+            old_ls = str(existing.get("last_seen") or existing.get("lastSeen") or "")
+            if new_ls > old_ls:
+                existing["last_seen"] = new_ls
+    return list(groups.values())
+
+
+def _sort_events_for_display(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Sort events: warnings first, then newest first within each group."""
+    def _key(e: dict[str, Any]) -> tuple[int, float]:
+        type_order = 0 if str(e.get("type") or "").lower() == "warning" else 1
+        last_seen = e.get("last_seen") or e.get("lastSeen") or e.get("lastTimestamp") or ""
+        ts = _parse_k8s_timestamp(str(last_seen))
+        return (type_order, -ts.timestamp() if ts is not None else 0.0)
+    return sorted(events, key=_key)
+
+
+def _events_for_pod(events: list[Any], pod_name: str) -> list[dict[str, Any]]:
+    """Filter an event list to events that involve a specific pod."""
+    result: list[dict[str, Any]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        involved = event.get("involved_object") or event.get("object") or {}
+        if isinstance(involved, dict):
+            kind = str(involved.get("kind") or "").lower()
+            name = str(involved.get("name") or "")
+            if kind == "pod" and name == pod_name:
+                result.append(event)
+                continue
+        obj_str = str(event.get("object") or "")
+        if f"pod/{pod_name}" in obj_str.lower() or f"Pod/{pod_name}" in obj_str:
+            result.append(event)
+    return result
+
+
+def _diagnose_pod(
+    pod_raw: dict[str, Any],
+    pod_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Detect common pod failure patterns from pod data and filtered events."""
+    phase = str(pod_raw.get("phase") or "").lower()
+    containers = [c for c in (pod_raw.get("containers") or []) if isinstance(c, dict)]
+    total_restarts = sum(_container_restart_count(c) for c in containers)
+    not_ready = [c for c in containers if not c.get("ready")]
+
+    event_reasons: set[str] = set()
+    event_messages: list[str] = []
+    for e in pod_events:
+        if isinstance(e, dict):
+            r = str(e.get("reason") or "").lower()
+            if r:
+                event_reasons.add(r)
+            event_messages.append(str(e.get("message") or "").lower())
+
+    issues: list[dict[str, Any]] = []
+    recommendations: list[str] = []
+
+    if "backoff" in event_reasons or "crashloopbackoff" in event_reasons:
+        issues.append({"type": "CrashLoopBackOff", "severity": "critical"})
+        recommendations.append("Run k8s_get_pod_logs to find the crash reason")
+
+    if "imagepullbackoff" in event_reasons or "errimagepull" in event_reasons:
+        issues.append({"type": "ImagePullBackOff", "severity": "critical"})
+        recommendations.append("Check image name, tag, and registry credentials")
+    elif any("pull" in msg for msg in event_messages) and "failed" in event_reasons:
+        issues.append({"type": "ImagePullFailure", "severity": "critical"})
+        recommendations.append("Check image name, tag, and registry credentials")
+
+    if "oomkilling" in event_reasons or any("oom" in msg for msg in event_messages):
+        issues.append({"type": "OOMKilled", "severity": "critical"})
+        recommendations.append(
+            "Container exceeded memory limit — increase resources.limits.memory or fix memory leak"
+        )
+
+    if "failedscheduling" in event_reasons:
+        issues.append({"type": "FailedScheduling", "severity": "warning"})
+        recommendations.append("Check node resources and pod resource requests")
+
+    readiness_msgs = [msg for msg in event_messages if "readiness" in msg]
+    liveness_msgs = [msg for msg in event_messages if "liveness" in msg]
+    startup_msgs = [msg for msg in event_messages if "startup" in msg]
+    if "unhealthy" in event_reasons:
+        if readiness_msgs:
+            issues.append({"type": "ReadinessProbeFailure", "severity": "warning"})
+            recommendations.append("Check readiness probe endpoint and application startup time")
+        if liveness_msgs:
+            issues.append({"type": "LivenessProbeFailure", "severity": "warning"})
+            recommendations.append("Check liveness probe — container may be restarting")
+        if startup_msgs:
+            issues.append({"type": "StartupProbeFailure", "severity": "warning"})
+            recommendations.append("Startup probe failed — consider increasing initialDelaySeconds")
+
+    if total_restarts > 5 and not any(i["type"] == "CrashLoopBackOff" for i in issues):
+        issues.append({"type": "HighRestartCount", "count": total_restarts, "severity": "warning"})
+        recommendations.append(
+            f"Pod has restarted {total_restarts} times — check logs for past crash reasons"
+        )
+
+    if phase == "pending":
+        if not any(i["type"] == "FailedScheduling" for i in issues):
+            issues.append({"type": "Pending", "severity": "warning"})
+            recommendations.append(
+                "Pod is waiting — check events for scheduling or image pull issues"
+            )
+    elif phase == "failed":
+        issues.append({"type": "PodFailed", "severity": "critical"})
+        recommendations.append("Pod is in Failed state — check logs for exit reason")
+    elif phase == "unknown":
+        issues.append({"type": "UnknownPhase", "severity": "warning"})
+        recommendations.append("Node may be unreachable — check node status")
+
+    if not_ready and not issues and phase == "running":
+        issues.append({
+            "type": "ContainersNotReady",
+            "containers": [c.get("name") for c in not_ready],
+            "severity": "warning",
+        })
+        recommendations.append(
+            "Containers are not ready — check readiness probe and application startup"
+        )
+
+    healthy = not issues and phase == "running" and not not_ready
+    return {
+        "healthy": healthy,
+        "issues": issues,
+        "recommendations": list(dict.fromkeys(recommendations)),
+    }
+
+
+def _describe_pod_structured(
+    pod_raw: dict[str, Any],
+    pod_events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a structured describe response from raw pod data and filtered events."""
+    pod_name = str(pod_raw.get("name") or "")
+    namespace = str(pod_raw.get("namespace") or "")
+    phase = str(pod_raw.get("phase") or "")
+
+    containers_raw = [c for c in (pod_raw.get("containers") or []) if isinstance(c, dict)]
+    containers_out: list[dict[str, Any]] = []
+    for c in containers_raw:
+        entry: dict[str, Any] = {
+            "name": str(c.get("name") or ""),
+            "image": _strip_image_digest(str(c.get("image") or "")),
+            "ready": bool(c.get("ready")),
+            "restart_count": _container_restart_count(c),
+        }
+        for extra in ("state", "last_state", "started_at"):
+            if extra in c:
+                entry[extra] = c[extra]
+        containers_out.append(entry)
+
+    total_restarts = sum(c["restart_count"] for c in containers_out)
+    all_ready = bool(containers_out) and all(c["ready"] for c in containers_out)
+
+    diagnosis = _diagnose_pod(pod_raw, pod_events)
+    sorted_events = _sort_events_for_display(_deduplicate_events(pod_events))[:20]
+
+    workload = _workload_from_pod_name(pod_name)
+    if diagnosis["healthy"]:
+        summary = f"Pod {pod_name} is {phase}, all containers ready, {total_restarts} restarts"
+        finding_lines: list[str] = ["✓ Pod is healthy"]
+    else:
+        issue_types = [i["type"] for i in diagnosis["issues"]]
+        summary = f"Pod {pod_name} is {phase} — issues: {', '.join(issue_types)}"
+        finding_lines = [
+            f"⚠ {i['type']}" + (f" (x{i['count']})" if "count" in i else "")
+            for i in diagnosis["issues"]
+        ]
+
+    return {
+        "status": "success",
+        "summary": summary,
+        "findings": finding_lines,
+        "recommendations": diagnosis["recommendations"],
+        "data": {
+            "pod": {
+                "name": pod_name,
+                "namespace": namespace,
+                "workload": workload,
+                "node": str(pod_raw.get("node_name") or ""),
+                "age": str(pod_raw.get("age") or ""),
+            },
+            "status": {
+                "phase": phase,
+                "ready": all_ready,
+                "restart_count": total_restarts,
+            },
+            "containers": containers_out,
+            "events": [
+                {
+                    "type": e.get("type"),
+                    "reason": e.get("reason"),
+                    "message": str(e.get("message") or "")[:200],
+                    "count": e.get("count", 1),
+                    "last_seen": e.get("last_seen") or e.get("lastSeen"),
+                }
+                for e in sorted_events
+            ],
+            "diagnosis": diagnosis,
+        },
+    }
+
+
+def _diagnose_pod_from_description(
+    status: dict[str, Any],
+    containers: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Diagnose from rich k8s.describe_pod data.
+
+    Separates current_issues (pod needs attention now) from historical_warnings
+    (problems that occurred during startup/rollout but the pod is now healthy).
+    A pod that is Running+Ready with 0 restarts is treated as healthy even if
+    probe-failure events exist in its history.
+    """
+    phase = str(status.get("phase") or "").lower()
+    ready = bool(status.get("ready"))
+    current_issues: list[dict[str, Any]] = []
+    historical_warnings: list[dict[str, Any]] = []
+    recommendations: list[str] = []
+
+    total_restarts = sum(
+        int(c.get("restart_count") or 0) for c in containers if isinstance(c, dict)
+    )
+
+    for c in containers:
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("name") or "")
+        restart_count = int(c.get("restart_count") or 0)
+
+        # Current waiting state — always a live issue
+        waiting = (c.get("state") or {}).get("waiting") or {}
+        w_reason = str(waiting.get("reason") or "").lower()
+        w_message = str(waiting.get("message") or "").lower()
+        if "crashloopbackoff" in w_reason:
+            current_issues.append({
+                "type": "CrashLoopBackOff", "container": name, "severity": "critical",
+            })
+            recommendations.append(
+                f"Container {name} is crash-looping"
+                " — run k8s_get_pod_logs to find the crash reason"
+            )
+        elif "imagepullbackoff" in w_reason or "errimagepull" in w_reason:
+            current_issues.append({
+                "type": "ImagePullBackOff", "container": name, "severity": "critical",
+            })
+            recommendations.append(
+                f"Container {name} cannot pull image"
+                " — check image name, tag, and registry credentials"
+            )
+        elif w_reason and "containercreat" not in w_reason:
+            current_issues.append({
+                "type": f"ContainerWaiting:{w_reason}",
+                "container": name,
+                "severity": "warning",
+            })
+            if w_message:
+                recommendations.append(f"Container {name} waiting: {w_message[:120]}")
+
+        # Last termination reason (OOMKilled)
+        # Historical if pod is now Ready with 0 restarts; current if restarts are ongoing
+        last_state = c.get("last_state") or {}
+        last_term = (last_state.get("terminated") or {}) if isinstance(last_state, dict) else {}
+        if str(last_term.get("reason") or "").lower() == "oomkilled":
+            if restart_count > 0 or not ready or phase != "running":
+                current_issues.append({
+                    "type": "OOMKilled", "container": name, "severity": "critical",
+                })
+                recommendations.append(
+                    f"Container {name} was OOMKilled"
+                    " — increase resources.limits.memory or fix memory leak"
+                )
+            else:
+                historical_warnings.append({
+                    "type": "OOMKilled",
+                    "container": name,
+                    "note": "Pod recovered and is now Ready",
+                })
+
+    # Pod is currently stable if Running+Ready with no container waiting states
+    pod_currently_ok = (
+        phase == "running"
+        and ready
+        and total_restarts == 0
+        and not any(
+            i["type"] in {"CrashLoopBackOff", "ImagePullBackOff"}
+            for i in current_issues
+        )
+    )
+
+    # Event-based issues — collect per-reason metadata from events
+    event_reasons: set[str] = set()
+    event_messages: list[str] = []
+    probe_events: dict[str, dict[str, Any]] = {}  # probe_type → last event info
+    for e in events:
+        if not isinstance(e, dict):
+            continue
+        r = str(e.get("reason") or "").lower()
+        if r:
+            event_reasons.add(r)
+        msg = str(e.get("message") or "").lower()
+        event_messages.append(msg)
+        if r == "unhealthy":
+            for probe in ("readiness", "liveness", "startup"):
+                if probe in msg:
+                    # Keep the most recent event info for this probe type
+                    existing = probe_events.get(probe)
+                    if not existing or str(e.get("last_seen") or "") > str(
+                        existing.get("last_seen") or ""
+                    ):
+                        probe_events[probe] = {
+                            "last_seen": e.get("last_seen"),
+                            "count": int(e.get("count") or 1),
+                            "message": str(e.get("message") or "")[:120],
+                        }
+
+    if "failedscheduling" in event_reasons:
+        if phase == "pending":
+            current_issues.append({"type": "FailedScheduling", "severity": "warning"})
+            recommendations.append("Check node resources and pod resource requests/taints")
+        else:
+            historical_warnings.append({
+                "type": "FailedScheduling",
+                "note": "Pod eventually scheduled and is now Running",
+            })
+
+    if probe_events:
+        probe_type_map = {
+            "readiness": "ReadinessProbeFailure",
+            "liveness": "LivenessProbeFailure",
+            "startup": "StartupProbeFailure",
+        }
+        for probe, info in probe_events.items():
+            issue_type = probe_type_map.get(probe, f"{probe.title()}ProbeFailure")
+            if pod_currently_ok:
+                # Pod is now healthy — probe failures are rollout/startup noise
+                historical_warnings.append({
+                    "type": issue_type,
+                    "reason": f"{probe.title()} probe failed during startup/rollout",
+                    "last_seen": info.get("last_seen"),
+                    "count": info.get("count"),
+                })
+            else:
+                current_issues.append({"type": issue_type, "severity": "warning"})
+                if probe == "readiness":
+                    recommendations.append(
+                        "Check readiness probe endpoint and application startup time"
+                    )
+                elif probe == "liveness":
+                    recommendations.append(
+                        "Check liveness probe — container may be restarting"
+                    )
+                elif probe == "startup":
+                    recommendations.append(
+                        "Startup probe failed — consider increasing initialDelaySeconds"
+                    )
+
+    # Phase-level issues
+    if phase == "pending" and not any(i["type"] == "FailedScheduling" for i in current_issues):
+        if not any("imagepull" in str(i["type"]).lower() for i in current_issues):
+            current_issues.append({"type": "Pending", "severity": "warning"})
+            recommendations.append(
+                "Pod is waiting — check events for scheduling or image pull issues"
+            )
+    elif phase == "failed":
+        current_issues.append({"type": "PodFailed", "severity": "critical"})
+        recommendations.append("Pod is in Failed state — check logs for exit reason")
+    elif phase == "unknown":
+        current_issues.append({"type": "UnknownPhase", "severity": "warning"})
+        recommendations.append("Node may be unreachable — check node status")
+
+    # Containers not ready with no specific cause yet detected
+    not_ready = [
+        c.get("name") for c in containers
+        if isinstance(c, dict) and not c.get("ready")
+    ]
+    if not_ready and not current_issues and phase == "running":
+        current_issues.append({
+            "type": "ContainersNotReady",
+            "containers": not_ready,
+            "severity": "warning",
+        })
+        recommendations.append(
+            "Containers are not ready — check readiness probe and application startup"
+        )
+
+    healthy = not current_issues and phase == "running" and not not_ready
+    return {
+        "healthy": healthy,
+        "current_issues": current_issues,
+        "historical_warnings": historical_warnings,
+        # keep "issues" as alias so existing callers don't break
+        "issues": current_issues,
+        "recommendations": list(dict.fromkeys(recommendations)),
+    }
+
+
+def _build_describe_response(desc: dict[str, Any]) -> dict[str, Any]:
+    """Build the MCP k8s_describe_pod response from a k8s.describe_pod agent payload."""
+    meta = desc.get("metadata") or {}
+    status = desc.get("status") or {}
+    containers = [c for c in (desc.get("containers") or []) if isinstance(c, dict)]
+    resources = desc.get("resources") or {}
+    probes = desc.get("probes") or []
+    events = [e for e in (desc.get("events") or []) if isinstance(e, dict)]
+
+    pod_name = str(meta.get("name") or "")
+    phase = str(status.get("phase") or "")
+    total_restarts = sum(int(c.get("restart_count") or 0) for c in containers)
+
+    diagnosis = _diagnose_pod_from_description(status, containers, events)
+    workload = _workload_from_pod_name(pod_name)
+
+    historical = diagnosis.get("historical_warnings") or []
+
+    if diagnosis["healthy"]:
+        if historical:
+            hw_types = list(dict.fromkeys(w["type"] for w in historical))
+            summary = (
+                f"Pod {pod_name} is currently healthy"
+                f"; historical warnings found during startup/rollout: {', '.join(hw_types)}"
+            )
+            findings: list[str] = [
+                "✓ Pod is Running and Ready",
+                f"✓ {total_restarts} restarts",
+            ] + [
+                "~ Historical: " + w["type"]
+                + (f" ({w.get('reason', '')})" if w.get("reason") else "")
+                for w in historical
+            ]
+        else:
+            summary = (
+                f"Pod {pod_name} is {phase}, all containers ready, {total_restarts} restarts"
+            )
+            findings = ["✓ Pod is healthy"]
+    else:
+        issue_types = [i["type"] for i in diagnosis["current_issues"]]
+        summary = f"Pod {pod_name} is {phase} — issues: {', '.join(issue_types)}"
+        findings = [
+            f"⚠ {i['type']}" + (f" (container: {i['container']})" if "container" in i else "")
+            for i in diagnosis["current_issues"]
+        ]
+
+    return {
+        "status": "success",
+        "summary": summary,
+        "findings": findings,
+        "recommendations": diagnosis["recommendations"],
+        "data": {
+            "pod": {
+                "name": pod_name,
+                "namespace": str(meta.get("namespace") or ""),
+                "workload": workload,
+                "owner": str(meta.get("owner") or ""),
+                "node": str(meta.get("node") or ""),
+                "pod_ip": str(meta.get("pod_ip") or ""),
+                "age": str(meta.get("age") or ""),
+            },
+            "status": {
+                "phase": phase,
+                "ready": bool(status.get("ready")),
+                "conditions": status.get("conditions") or [],
+                "restart_count": total_restarts,
+                "reason": str(status.get("reason") or ""),
+                "message": str(status.get("message") or ""),
+            },
+            "containers": containers,
+            "resources": resources,
+            "probes": probes,
+            "events": [
+                {
+                    "type": e.get("type"),
+                    "reason": e.get("reason"),
+                    "message": str(e.get("message") or "")[:200],
+                    "count": e.get("count", 1),
+                    "last_seen": e.get("last_seen"),
+                }
+                for e in events[:20]
+            ],
+            "diagnosis": diagnosis,
+        },
+    }
+
+
+def _unhealthy_pod_entry(pod: dict[str, Any]) -> dict[str, Any]:
+    """Build a rich unhealthy pod summary with likely cause and next action."""
+    phase = str(pod.get("phase") or "")
+    containers = [c for c in (pod.get("containers") or []) if isinstance(c, dict)]
+    not_ready = [c for c in containers if not c.get("ready")]
+    total_restarts = sum(_container_restart_count(c) for c in containers)
+
+    if phase.lower() == "pending":
+        reason = "Pending"
+        likely_cause = "Pod is waiting to be scheduled or pulling an image"
+        recommendation = (
+            "Run k8s_describe_pod then check events for FailedScheduling or ImagePullBackOff"
+        )
+    elif phase.lower() == "failed":
+        reason = "Failed"
+        likely_cause = "Container exited with a non-zero exit code"
+        recommendation = "Run k8s_debug_pod to find the crash reason in logs"
+    elif phase.lower() == "unknown":
+        reason = "Unknown"
+        likely_cause = "Node is unreachable or the agent cannot contact the Kubernetes API"
+        recommendation = "Check node status and cluster connectivity"
+    elif total_restarts > 5:
+        reason = f"CrashLoopBackOff (restarts: {total_restarts})"
+        likely_cause = "Container is crashing repeatedly"
+        recommendation = "Run k8s_debug_pod to investigate logs and crash cause"
+    elif not_ready:
+        not_ready_names = [str(c.get("name") or "") for c in not_ready]
+        reason = f"Containers not ready: {', '.join(not_ready_names)}"
+        likely_cause = "Readiness probe is failing or application is still starting up"
+        recommendation = "Run k8s_describe_pod to see events and k8s_get_pod_logs for errors"
+    else:
+        reason = f"Phase: {phase}"
+        likely_cause = "Unexpected pod state"
+        recommendation = "Run k8s_describe_pod for details"
+
+    return {
+        "name": str(pod.get("name") or ""),
+        "namespace": str(pod.get("namespace") or ""),
+        "phase": phase,
+        "reason": reason,
+        "restart_count": total_restarts,
+        "age": str(pod.get("age") or ""),
+        "likely_cause": likely_cause,
+        "recommendation": recommendation,
+    }
+
+
+def _cluster_health_assessment(overview: dict[str, Any]) -> dict[str, Any]:
+    """Derive cluster health, findings, and recommendations from an overview payload."""
+    findings: list[str] = []
+    recommendations: list[str] = []
+
+    unhealthy_count = int(overview.get("pods_unhealthy") or 0)
+    total_pods = int(overview.get("pods_total") or 0)
+    ws = overview.get("warning_event_summary") or {}
+    active_warnings = int(ws.get("active_warning_events") or 0)
+    top_restarts = overview.get("top_restarts") or []
+
+    if unhealthy_count == 0:
+        findings.append("✓ No unhealthy pods")
+    else:
+        findings.append(f"⚠ {unhealthy_count} unhealthy pod{'s' if unhealthy_count != 1 else ''}")
+        for pod in (overview.get("unhealthy_pods") or [])[:3]:
+            findings.append(f"  - {pod.get('pod')}: {pod.get('phase')}")
+        recommendations.append(
+            f"Investigate {unhealthy_count} unhealthy pod(s) with k8s_show_unhealthy_pods"
+        )
+
+    if active_warnings == 0:
+        findings.append("✓ No active warning events")
+    else:
+        findings.append(
+            f"⚠ {active_warnings} active warning event{'s' if active_warnings != 1 else ''}"
+        )
+        recommendations.append("Review active warning events with k8s_list_events")
+
+    high_restart = [p for p in top_restarts if int(p.get("restarts") or 0) > 5]
+    if high_restart:
+        for p in high_restart[:3]:
+            findings.append(f"⚠ {p.get('pod')} has {p.get('restarts')} restarts")
+        recommendations.append("Investigate high-restart pods with k8s_debug_pod")
+    elif not high_restart and unhealthy_count == 0:
+        findings.append("✓ No high-restart pods")
+
+    # Three-tier classification:
+    # Degraded  — unhealthy pods, high-restart pods, or crashed workloads
+    # Warning   — all pods healthy but warning events are present
+    # Healthy   — all pods healthy, no warnings
+    if unhealthy_count > 0 or high_restart:
+        cluster_health = "Degraded"
+        summary = (
+            f"{unhealthy_count}/{total_pods} pods unhealthy, "
+            f"{active_warnings} active warning event{'s' if active_warnings != 1 else ''}"
+        )
+    elif active_warnings > 0:
+        cluster_health = "Warning"
+        summary = (
+            f"All {total_pods} pod{'s' if total_pods != 1 else ''} healthy"
+            f", but {active_warnings} active warning event{'s' if active_warnings != 1 else ''}"
+            " present. Review events to confirm they are not current failures."
+        )
+        recommendations.append("Review active warning events with k8s_list_events")
+    else:
+        cluster_health = "Healthy"
+        summary = f"All {total_pods} pods running normally"
+
+    return {
+        "cluster_health": cluster_health,
+        "summary": summary,
+        "findings": findings,
+        "recommendations": recommendations,
+    }
 
 
 def _select_workload_pod(pods: list[Any], workload: str) -> str | None:
@@ -1892,7 +2562,7 @@ def create_mcp_server() -> FastMCP:
             return _platform_slack_error_json(exc)
 
         # Auto-persist to semantic memory — non-blocking, never delays the response
-        asyncio.create_task(
+        asyncio.create_task(  # noqa: RUF006
             _auto_upsert_thread_summary(
                 workspace_id=token_workspace_id,
                 channel_id=channel_id,
@@ -1903,25 +2573,6 @@ def create_mcp_server() -> FastMCP:
         )
 
         return json.dumps(result, indent=2)
-
-    @mcp.tool(**_tool_metadata(_specs["k8s_agent_command"]))
-    async def k8s_agent_command(
-        action: K8sReadOnlyAction,
-        params: K8sAgentCommandParams | None = None,
-        cluster_id: str | None = None,
-        environment: str | None = None,
-        cluster_name: str | None = None,
-        timeout_seconds: int = 30,
-    ) -> str:
-        return await _dispatch_k8s_agent_command(
-            settings=settings,
-            cluster_id=cluster_id,
-            environment=environment,
-            cluster_name=cluster_name,
-            action=action,
-            params=params.model_dump(exclude_none=True) if params else None,
-            timeout_seconds=timeout_seconds,
-        )
 
     @mcp.tool(**_tool_metadata(_specs["k8s_connection_health"]))
     async def k8s_connection_health(
@@ -1974,11 +2625,16 @@ def create_mcp_server() -> FastMCP:
             cluster_id=str(cluster["cluster_id"]),
             timeout_seconds=timeout_seconds,
         )
+        health = _cluster_health_assessment(overview)
         overview.update(
             {
                 "status": "connected",
                 "cluster_id": cluster.get("cluster_id"),
                 "cluster_name": cluster.get("name"),
+                "cluster_health": health["cluster_health"],
+                "summary": health["summary"],
+                "findings": health["findings"],
+                "recommendations": health["recommendations"],
             }
         )
         return _json(overview)
@@ -2063,7 +2719,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2080,8 +2736,12 @@ def create_mcp_server() -> FastMCP:
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
+        include_labels: bool = False,
+        include_images: bool = True,
+        include_node: bool = True,
+        limit: int = 50,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        raw = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2090,19 +2750,53 @@ def create_mcp_server() -> FastMCP:
             params={"namespace": namespace} if namespace else {},
             timeout_seconds=timeout_seconds,
         )
+        payload = json.loads(raw)
+        data = payload.get("data") if isinstance(payload, dict) else None
+        pods_raw = (data.get("pods") if isinstance(data, dict) else None) or []
+        capped = pods_raw[: max(1, min(limit, 200))]
+        pods_out = [
+            _sanitize_pod(
+                p,
+                include_labels=include_labels,
+                include_images=include_images,
+                include_node=include_node,
+            )
+            for p in capped
+            if isinstance(p, dict)
+        ]
+        return json.dumps(
+            {
+                "status": payload.get("status", "unknown"),
+                "data": {
+                    "pods": pods_out,
+                    "count": len(pods_out),
+                    "total": len(pods_raw),
+                    "truncated": len(pods_raw) > len(capped),
+                },
+                "error": payload.get("error"),
+            },
+            indent=2,
+        )
 
     @mcp.tool(**_tool_metadata(_specs["k8s_get_pod"]))
     async def k8s_get_pod(
         namespace: str,
         pod: str,
+        detail_level: str = "summary",
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
+        include_labels: bool = False,
+        include_images: bool = True,
+        include_node: bool = True,
     ) -> str:
         if not namespace:
             raise ValueError(_MISSING_NAMESPACE_MESSAGE)
-        return await _dispatch_k8s_agent_command(
+        if detail_level not in {"summary", "standard", "debug"}:
+            raise ValueError("detail_level must be summary, standard, or debug")
+
+        raw = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2111,6 +2805,63 @@ def create_mcp_server() -> FastMCP:
             params={"namespace": namespace, "pod": pod},
             timeout_seconds=timeout_seconds,
         )
+        payload = json.loads(raw)
+        data = payload.get("data") if isinstance(payload, dict) else None
+        pod_raw = data.get("pod") if isinstance(data, dict) else None
+        if not isinstance(pod_raw, dict):
+            return raw
+
+        sanitized = _sanitize_pod(
+            pod_raw,
+            include_labels=include_labels,
+            include_images=include_images,
+            include_node=include_node,
+        )
+
+        if detail_level == "summary":
+            return json.dumps(
+                {"status": payload.get("status", "unknown"), "data": {"pod": sanitized},
+                 "error": payload.get("error")},
+                indent=2,
+            )
+
+        # standard / debug — also fetch events for this pod
+        events_raw_str = await _send_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.list_events",
+            params={"namespace": namespace},
+            timeout_seconds=timeout_seconds,
+        )
+        events_payload = json.loads(events_raw_str)
+        all_events = _command_data(events_payload, "events")
+        pod_events = _sort_events_for_display(
+            _deduplicate_events(_events_for_pod(all_events, pod))
+        )[:15]
+
+        result: dict[str, Any] = {
+            "status": payload.get("status", "unknown"),
+            "data": {
+                "pod": sanitized,
+                "events": [
+                    {
+                        "type": e.get("type"),
+                        "reason": e.get("reason"),
+                        "message": str(e.get("message") or "")[:200],
+                        "count": e.get("count", 1),
+                        "last_seen": e.get("last_seen") or e.get("lastSeen"),
+                    }
+                    for e in pod_events
+                ],
+                "diagnosis": _diagnose_pod(pod_raw, _events_for_pod(all_events, pod)),
+            },
+            "error": payload.get("error"),
+        }
+        if detail_level == "debug":
+            result["data"]["_raw_agent_keys"] = list(pod_raw.keys())
+        return json.dumps(result, indent=2)
 
     @mcp.tool(**_tool_metadata(_specs["k8s_get_pod_logs"]))
     async def k8s_get_pod_logs(
@@ -2142,7 +2893,7 @@ def create_mcp_server() -> FastMCP:
             params["since_minutes"] = since_minutes
         if json_parse:
             params["json_parse"] = json_parse
-        raw = await _dispatch_k8s_agent_command(
+        raw = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2166,12 +2917,14 @@ def create_mcp_server() -> FastMCP:
     @mcp.tool(**_tool_metadata(_specs["k8s_list_events"]))
     async def k8s_list_events(
         namespace: str | None = None,
+        pod: str | None = None,
+        limit: int = 50,
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        raw = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2179,6 +2932,36 @@ def create_mcp_server() -> FastMCP:
             action="k8s.list_events",
             params={"namespace": namespace} if namespace else {},
             timeout_seconds=timeout_seconds,
+        )
+        payload = json.loads(raw)
+        data = payload.get("data") if isinstance(payload, dict) else None
+        events_raw = (data.get("events") if isinstance(data, dict) else None) or []
+        events = [e for e in events_raw if isinstance(e, dict)]
+        if pod:
+            events = _events_for_pod(events, pod)
+        deduped = _deduplicate_events(events)
+        sorted_events = _sort_events_for_display(deduped)
+        capped = sorted_events[: max(1, min(limit, 200))]
+        warning_count = sum(
+            1 for e in capped if str(e.get("type") or "").lower() == "warning"
+        )
+        return json.dumps(
+            {
+                "status": payload.get("status", "unknown"),
+                "summary": (
+                    f"{len(capped)} events ({warning_count} warnings)"
+                    + (f" for pod {pod}" if pod else "")
+                ),
+                "data": {
+                    "events": capped,
+                    "count": len(capped),
+                    "total": len(events),
+                    "warning_count": warning_count,
+                    "truncated": len(deduped) > len(capped),
+                },
+                "error": payload.get("error"),
+            },
+            indent=2,
         )
 
     @mcp.tool(**_tool_metadata(_specs["k8s_list_deployments"]))
@@ -2189,7 +2972,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2207,7 +2990,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2220,7 +3003,8 @@ def create_mcp_server() -> FastMCP:
     @mcp.tool(**_tool_metadata(_specs["k8s_get_rollout_status"]))
     async def k8s_get_rollout_status(
         namespace: str,
-        deployment: str,
+        deployment: str | None = None,
+        workload: str | None = None,
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
@@ -2228,43 +3012,21 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         if not namespace:
             raise ValueError(_MISSING_NAMESPACE_MESSAGE)
-        return await _dispatch_k8s_agent_command(
+        if deployment and workload and deployment != workload:
+            raise ValueError(
+                f"deployment ({deployment!r}) and workload ({workload!r}) both provided "
+                "but differ — use only one."
+            )
+        resolved = deployment or workload
+        if not resolved:
+            raise ValueError("Either 'deployment' or 'workload' is required.")
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
             cluster_name=cluster_name,
             action="k8s.get_rollout_status",
-            params={"namespace": namespace, "deployment": deployment},
-            timeout_seconds=timeout_seconds,
-        )
-
-    @mcp.tool(**_tool_metadata(_specs["k8s_show_namespaces"]))
-    async def k8s_show_namespaces(
-        environment: str | None = None,
-        cluster_name: str | None = None,
-        cluster_id: str | None = None,
-        timeout_seconds: int = 30,
-    ) -> str:
-        return await k8s_list_namespaces(
-            environment=environment,
-            cluster_name=cluster_name,
-            cluster_id=cluster_id,
-            timeout_seconds=timeout_seconds,
-        )
-
-    @mcp.tool(**_tool_metadata(_specs["k8s_show_pods"]))
-    async def k8s_show_pods(
-        namespace: str | None = None,
-        environment: str | None = None,
-        cluster_name: str | None = None,
-        cluster_id: str | None = None,
-        timeout_seconds: int = 30,
-    ) -> str:
-        return await k8s_list_pods(
-            namespace=namespace,
-            environment=environment,
-            cluster_name=cluster_name,
-            cluster_id=cluster_id,
+            params={"namespace": namespace, "deployment": resolved},
             timeout_seconds=timeout_seconds,
         )
 
@@ -2276,7 +3038,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        result = await _dispatch_k8s_pods_for_analysis(
+        result = await _fetch_pods_for_analysis(
             settings=settings,
             namespace=namespace,
             cluster_id=cluster_id,
@@ -2289,13 +3051,32 @@ def create_mcp_server() -> FastMCP:
         pods = pods if isinstance(pods, list) else []
         unhealthy = [pod for pod in pods if isinstance(pod, dict) and _is_unhealthy_pod(pod)]
         completed = [pod for pod in pods if isinstance(pod, dict) and _is_completed_pod(pod)]
+        unhealthy_entries = [_unhealthy_pod_entry(p) for p in unhealthy]
+        findings: list[str] = (
+            [f"⚠ {len(unhealthy)} unhealthy pod{'s' if len(unhealthy) != 1 else ''}"]
+            + [f"  - {e['name']}: {e['reason']}" for e in unhealthy_entries[:5]]
+            if unhealthy
+            else ["✓ No unhealthy pods"]
+        )
+        recommendations: list[str] = list(
+            dict.fromkeys(
+                e["recommendation"] for e in unhealthy_entries if e.get("recommendation")
+            )
+        )
         return json.dumps(
             {
                 "status": "success",
+                "summary": (
+                    f"{len(unhealthy)} unhealthy pod{'s' if len(unhealthy) != 1 else ''}"
+                    if unhealthy
+                    else "All pods are healthy"
+                ),
+                "findings": findings,
+                "recommendations": recommendations,
                 "data": {
-                    "pods": unhealthy,
+                    "unhealthy_pods": unhealthy_entries,
                     "count": len(unhealthy),
-                    "completed_jobs": completed,
+                    "completed_jobs": [_sanitize_pod(p) for p in completed],
                     "completed_count": len(completed),
                 },
                 "error": None,
@@ -2330,7 +3111,7 @@ def create_mcp_server() -> FastMCP:
         if not workload:
             raise ValueError("Please specify a pod or deployment name to analyze.")
 
-        rollout = await _dispatch_k8s_agent_command(
+        rollout = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2339,7 +3120,7 @@ def create_mcp_server() -> FastMCP:
             params={"namespace": namespace, "deployment": workload},
             timeout_seconds=timeout_seconds,
         )
-        pods = await _dispatch_k8s_pods_for_analysis(
+        pods = await _fetch_pods_for_analysis(
             settings=settings,
             namespace=namespace,
             cluster_id=cluster_id,
@@ -2349,7 +3130,7 @@ def create_mcp_server() -> FastMCP:
         )
         pods_data = pods.get("data") if isinstance(pods, dict) else None
         pod_items = pods_data.get("pods") if isinstance(pods_data, dict) else []
-        deployments = await _dispatch_k8s_agent_command(
+        deployments = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2374,7 +3155,7 @@ def create_mcp_server() -> FastMCP:
         )
         logs_data = None
         if selected_pod:
-            logs = await _dispatch_k8s_agent_command(
+            logs = await _send_k8s_agent_command(
                 settings=settings,
                 cluster_id=cluster_id,
                 environment=environment,
@@ -2393,7 +3174,7 @@ def create_mcp_server() -> FastMCP:
                 "status": "success",
                 "data": {
                     "rollout_status": json.loads(rollout).get("data"),
-                    "pods": related_pods,
+                    "pods": [_sanitize_pod(p) for p in related_pods if isinstance(p, dict)],
                     "pods_total": len(related_pods),
                     "logs": logs_data,
                     "selected_pod": selected_pod,
@@ -2405,6 +3186,191 @@ def create_mcp_server() -> FastMCP:
                     "tail_lines": tail_lines,
                 },
                 "error": None,
+            },
+            indent=2,
+        )
+
+    @mcp.tool(**_tool_metadata(_specs["k8s_describe_pod"]))
+    async def k8s_describe_pod(
+        namespace: str,
+        pod: str,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        if not namespace:
+            raise ValueError(_MISSING_NAMESPACE_MESSAGE)
+
+        raw_str = await _send_k8s_agent_command(
+            settings=settings,
+            cluster_id=cluster_id,
+            environment=environment,
+            cluster_name=cluster_name,
+            action="k8s.describe_pod",
+            params={"namespace": namespace, "pod": pod},
+            timeout_seconds=timeout_seconds,
+        )
+
+        payload = json.loads(raw_str)
+        data = payload.get("data") if isinstance(payload, dict) else None
+        desc = data.get("description") if isinstance(data, dict) else None
+        if not isinstance(desc, dict):
+            return raw_str
+
+        return json.dumps(_build_describe_response(desc), indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["k8s_debug_pod"]))
+    async def k8s_debug_pod(
+        namespace: str,
+        pod: str,
+        tail_lines: int = 100,
+        include_evidence_details: bool = False,
+        environment: str | None = None,
+        cluster_name: str | None = None,
+        cluster_id: str | None = None,
+        timeout_seconds: int = 30,
+    ) -> str:
+        if not namespace:
+            raise ValueError(_MISSING_NAMESPACE_MESSAGE)
+
+        describe_str, logs_raw_str = await asyncio.gather(
+            _send_k8s_agent_command(
+                settings=settings, cluster_id=cluster_id, environment=environment,
+                cluster_name=cluster_name, action="k8s.describe_pod",
+                params={"namespace": namespace, "pod": pod}, timeout_seconds=timeout_seconds,
+            ),
+            _send_k8s_agent_command(
+                settings=settings, cluster_id=cluster_id, environment=environment,
+                cluster_name=cluster_name, action="k8s.get_pod_logs",
+                params={"namespace": namespace, "pod": pod, "tail_lines": tail_lines},
+                timeout_seconds=timeout_seconds,
+            ),
+        )
+
+        desc_payload = json.loads(describe_str)
+        desc_data = desc_payload.get("data") if isinstance(desc_payload, dict) else None
+        desc = desc_data.get("description") if isinstance(desc_data, dict) else None
+        if not isinstance(desc, dict):
+            return describe_str
+
+        describe = _build_describe_response(desc)
+        diagnosis = describe["data"]["diagnosis"]
+
+        logs_payload = json.loads(logs_raw_str)
+        logs_data = _compact_log_payload(
+            logs_payload, level=None, contains=None, exclude=None, compact=True
+        )
+        log_lines = (logs_data.get("data") or {})
+        highlighted = log_lines.get("highlighted") or []
+        recent_lines = log_lines.get("lines") or []
+
+        # Conditionally fetch rollout status if owner is a Deployment/ReplicaSet
+        rollout_complete: bool | None = None
+        owner = str((desc.get("metadata") or {}).get("owner") or "")
+        if owner.lower().startswith("deployment/") or owner.lower().startswith("replicaset/"):
+            workload_name = _workload_from_pod_name(pod)
+            try:
+                rollout_str = await _send_k8s_agent_command(
+                    settings=settings, cluster_id=cluster_id, environment=environment,
+                    cluster_name=cluster_name, action="k8s.get_rollout_status",
+                    params={"namespace": namespace, "deployment": workload_name},
+                    timeout_seconds=timeout_seconds,
+                )
+                rollout_payload = json.loads(rollout_str)
+                rollout_inner = (rollout_payload.get("data") or {}).get("rollout") or {}
+                rollout_complete = bool(rollout_inner.get("complete"))
+            except Exception:
+                pass
+
+        # --- Build compact SRE report ---
+        pod_meta = describe["data"]["pod"]
+        pod_status = describe["data"]["status"]
+        containers = describe["data"]["containers"]
+        historical = diagnosis.get("historical_warnings") or []
+        current_issues = diagnosis.get("current_issues") or []
+
+        total_restarts = int(pod_status.get("restart_count") or 0)
+        pod_ready = bool(pod_status.get("ready"))
+        log_error_count = len([
+            line for line in (recent_lines or [])
+            if isinstance(line, str) and any(
+                kw in line.lower() for kw in ("error", "exception", "fatal", "panic")
+            )
+        ])
+        log_warning_count = len([
+            line for line in (recent_lines or [])
+            if isinstance(line, str) and "warn" in line.lower()
+        ])
+
+        # Latest warning event age in minutes
+        latest_warning_age_minutes: int | None = None
+        warning_reasons: list[str] = []
+        for w in historical:
+            warning_reasons.append(w.get("type", ""))
+        for i in current_issues:
+            warning_reasons.append(i.get("type", ""))
+
+        findings = list(describe["findings"])
+        if highlighted:
+            findings.append(
+                f"⚠ {len(highlighted)} log line{'s' if len(highlighted) != 1 else ''}"
+                " with errors/warnings"
+            )
+        elif recent_lines:
+            findings.append(
+                f"✓ No error/warning patterns in {len(recent_lines)} sampled log lines"
+            )
+        if rollout_complete is True:
+            findings.append("✓ Deployment rollout is complete")
+        elif rollout_complete is False:
+            findings.append("⚠ Deployment rollout is not complete")
+
+        recommendations = list(describe["recommendations"])
+        if not current_issues and pod_ready and total_restarts == 0:
+            recommendations = recommendations or ["No immediate action needed"]
+
+        evidence: dict[str, Any] = {
+            "pod_ready": pod_ready,
+            "phase": pod_status.get("phase"),
+            "restart_count": total_restarts,
+            "rollout_complete": rollout_complete,
+            "warning_reasons": list(dict.fromkeys(warning_reasons)),
+            "log_error_count": log_error_count,
+            "log_warning_count": log_warning_count,
+            "latest_warning_age_minutes": latest_warning_age_minutes,
+        }
+        if include_evidence_details:
+            evidence["highlighted_log_lines"] = highlighted[-10:]
+            evidence["containers"] = [
+                {
+                    "name": c.get("name"),
+                    "ready": c.get("ready"),
+                    "restart_count": c.get("restart_count"),
+                    "state": c.get("state"),
+                }
+                for c in containers
+                if isinstance(c, dict)
+            ]
+            evidence["events"] = [
+                {
+                    "type": e.get("type"),
+                    "reason": e.get("reason"),
+                    "message": str(e.get("message") or "")[:120],
+                    "count": e.get("count"),
+                    "last_seen": e.get("last_seen"),
+                }
+                for e in describe["data"].get("events", [])[:10]
+            ]
+            evidence["node"] = pod_meta.get("node")
+
+        return json.dumps(
+            {
+                "status": "success",
+                "summary": describe["summary"],
+                "findings": findings,
+                "recommendations": recommendations,
+                "evidence": evidence,
             },
             indent=2,
         )
@@ -2421,7 +3387,7 @@ def create_mcp_server() -> FastMCP:
     )
 
     def _workspace(workspace_id: str | None) -> str:
-        wid = workspace_id or settings.mcp_default_workspace_id
+        wid = workspace_id or _current_token_workspace_id() or settings.mcp_default_workspace_id
         if not wid:
             raise ValueError(
                 "workspace_id is required. Pass it explicitly or set INCIDENTFLOW_WORKSPACE_ID."
