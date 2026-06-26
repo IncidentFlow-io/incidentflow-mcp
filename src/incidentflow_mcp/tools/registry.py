@@ -494,38 +494,6 @@ _TOOL_SPECS: list[ToolSpec] = [
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
-        name="k8s_agent_command",
-        title="Run Read-Only Kubernetes Inspection",
-        description=(
-            "Dispatches one allowlisted read-only Kubernetes inspection command to an "
-            "online IncidentFlow Kubernetes Agent through platform-api and agent-gateway. "
-            f"{_K8S_READ_ONLY_JUSTIFICATION}"
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                **_k8s_cluster_properties(),
-                "action": {
-                    "type": "string",
-                    "enum": [
-                        "k8s.list_namespaces",
-                        "k8s.list_pods",
-                        "k8s.get_pod",
-                        "k8s.get_pod_logs",
-                        "k8s.list_events",
-                        "k8s.list_deployments",
-                        "k8s.list_services",
-                        "k8s.get_rollout_status",
-                    ],
-                },
-                "params": {**_k8s_agent_params_schema(), "default": {}},
-                "timeout_seconds": _timeout_property(),
-            },
-            "required": ["action"],
-        },
-        annotations=_read_only_annotations(),
-    ),
-    ToolSpec(
         name="k8s_connection_health",
         title="Check Kubernetes Connection",
         description=(
@@ -854,7 +822,7 @@ _TOOL_SPECS.extend([
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",
+                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
                 },
             },
             "required": ["service"],
@@ -912,7 +880,7 @@ _TOOL_SPECS.extend([
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",
+                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
                 },
             },
             "required": ["incident_id", "source", "text"],
@@ -955,7 +923,7 @@ _TOOL_SPECS.extend([
                 },
                 "workspace_id": {
                     "type": "string",
-                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",
+                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
                 },
             },
             "required": ["query"],

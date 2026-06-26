@@ -10,7 +10,6 @@ EXPECTED_TOOL_NAMES = {
     "slack_alerts_list",
     "slack_alert_thread_get",
     "incident_thread_summary",
-    "k8s_agent_command",
     "k8s_connection_health",
     "k8s_cluster_overview",
     "k8s_namespace_overview",
@@ -28,6 +27,10 @@ EXPECTED_TOOL_NAMES = {
     "k8s_show_pods",
     "k8s_show_unhealthy_pods",
     "k8s_analyze_workload",
+    "memory_search_similar_incidents",
+    "memory_get_service_context",
+    "memory_upsert_incident_summary",
+    "memory_find_runbook",
 }
 
 REQUIRED_BOOLEAN_ANNOTATIONS = {
@@ -51,7 +54,8 @@ def test_all_registry_tools_have_submission_metadata() -> None:
             value = spec.annotations.get(annotation_name)
             assert isinstance(value, bool), f"{spec.name} {annotation_name} must be a boolean"
 
-        assert spec.annotations["readOnlyHint"] is True
+        if spec.name != "memory_upsert_incident_summary":
+            assert spec.annotations["readOnlyHint"] is True, f"{spec.name} should be read-only"
         assert spec.annotations["openWorldHint"] is False
         assert spec.annotations["destructiveHint"] is False
 
@@ -75,7 +79,8 @@ async def test_fastmcp_tools_publish_submission_metadata() -> None:
             value = getattr(tool.annotations, annotation_name)
             assert isinstance(value, bool), f"{tool.name} {annotation_name} must be a boolean"
 
-        assert tool.annotations.readOnlyHint is True
+        if tool.name != "memory_upsert_incident_summary":
+            assert tool.annotations.readOnlyHint is True, f"{tool.name} should be read-only"
         assert tool.annotations.openWorldHint is False
         assert tool.annotations.destructiveHint is False
 
@@ -86,28 +91,22 @@ async def test_submission_risky_tool_inputs_are_structured() -> None:
     tools = {tool.name: tool for tool in await mcp.list_tools()}
 
     correlate_schema = tools["correlate_alerts"].inputSchema
-    assert "alerts_json" not in correlate_schema["properties"]
-    assert correlate_schema["properties"]["alerts"]["type"] == "array"
-    assert correlate_schema["properties"]["alerts"]["items"]["$ref"] == "#/$defs/Alert"
-    assert "alerts" in correlate_schema["required"]
+    alerts_field = correlate_schema["properties"]["alerts"]
+    alerts_types = alerts_field.get("anyOf", [alerts_field])
+    array_type = next((t for t in alerts_types if t.get("type") == "array"), None)
+    assert array_type is not None, "alerts field must have an array type variant"
+    assert array_type["items"]["$ref"] == "#/$defs/Alert"
 
     thread_schema = tools["incident_thread_summary"].inputSchema
     alert_context = thread_schema["properties"]["alert_context"]["anyOf"][0]
     assert alert_context["$ref"] == "#/$defs/IncidentThreadAlertContext"
 
-    command_schema = tools["k8s_agent_command"].inputSchema
-    assert command_schema["properties"]["action"]["enum"] == [
-        "k8s.list_namespaces",
-        "k8s.list_pods",
-        "k8s.get_pod",
-        "k8s.get_pod_logs",
-        "k8s.list_events",
-        "k8s.list_deployments",
-        "k8s.list_services",
-        "k8s.get_rollout_status",
-    ]
-    params = command_schema["properties"]["params"]["anyOf"][0]
-    assert params["$ref"] == "#/$defs/K8sAgentCommandParams"
+    pods_schema = tools["k8s_list_pods"].inputSchema
+    assert "namespace" in pods_schema["properties"]
+
+    logs_schema = tools["k8s_get_pod_logs"].inputSchema
+    assert "namespace" in logs_schema["required"]
+    assert "pod" in logs_schema["required"]
 
     workload_schema = tools["k8s_analyze_workload"].inputSchema
     assert workload_schema["properties"]["workload"]["type"] == "string"

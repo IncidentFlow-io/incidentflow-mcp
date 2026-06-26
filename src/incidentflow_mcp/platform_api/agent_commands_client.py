@@ -9,7 +9,7 @@ from incidentflow_mcp.observability.tracing import get_tracer, inject_trace_head
 
 
 class PlatformAPIAgentCommandsClient:
-    """Thin client for Kubernetes agent command dispatch through platform-api."""
+    """Thin HTTP client for sending read-only Kubernetes agent commands through platform-api."""
 
     def __init__(self, settings: Settings) -> None:
         if not settings.platform_api_base_url:
@@ -49,7 +49,7 @@ class PlatformAPIAgentCommandsClient:
                     pass
                 raise
 
-    async def dispatch(
+    async def send_agent_command(
         self,
         *,
         bearer_token: str,
@@ -60,11 +60,13 @@ class PlatformAPIAgentCommandsClient:
     ) -> dict[str, Any]:
         import json as _json
         tracer = get_tracer()
-        with tracer.start_as_current_span("platform_api.dispatch_command") as span:
+        _span_name = "platform_api." + action.replace(".", "_")
+        with tracer.start_as_current_span(_span_name) as span:
             span.set_attribute("k8s.command", action)
             span.set_attribute("cluster.id", cluster_id)
             span.set_attribute("http.method", "POST")
-            span.set_attribute("http.url", f"{self._base_url}/api/v1/agents/clusters/{cluster_id}/commands")
+            _url = f"{self._base_url}/api/v1/agents/clusters/{cluster_id}/commands"
+            span.set_attribute("http.url", _url)
             if timeout_seconds is not None:
                 span.set_attribute("agent_command.timeout_seconds", timeout_seconds)
             if "namespace" in params:

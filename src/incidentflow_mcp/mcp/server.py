@@ -10,9 +10,8 @@ import json
 import logging
 import re
 import time
-import uuid
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 import httpx
 from mcp.server.fastmcp import FastMCP
@@ -62,44 +61,6 @@ class IncidentThreadAlertContext(BaseModel):
     )
 
 
-class K8sAgentCommandParams(BaseModel):
-    namespace: str | None = Field(
-        default=None,
-        description=(
-            "Kubernetes namespace for namespaced actions such as list_pods, get_pod, "
-            "get_pod_logs, list_events, list_deployments, list_services, or get_rollout_status."
-        ),
-    )
-    pod: str | None = Field(
-        default=None,
-        description="Pod name for k8s.get_pod or k8s.get_pod_logs.",
-    )
-    container: str | None = Field(
-        default=None,
-        description="Optional container name for k8s.get_pod_logs.",
-    )
-    deployment: str | None = Field(
-        default=None,
-        description="Deployment name for k8s.get_rollout_status.",
-    )
-    tail_lines: int | None = Field(
-        default=None,
-        ge=1,
-        le=1000,
-        description="Maximum recent log lines for k8s.get_pod_logs.",
-    )
-
-
-K8sReadOnlyAction = Literal[
-    "k8s.list_namespaces",
-    "k8s.list_pods",
-    "k8s.get_pod",
-    "k8s.get_pod_logs",
-    "k8s.list_events",
-    "k8s.list_deployments",
-    "k8s.list_services",
-    "k8s.get_rollout_status",
-]
 
 _VALID_EXECUTION_MODES = {"auto", "sync", "async"}
 _TERMINAL_JOB_STATUSES = {"succeeded", "failed", "cancelled", "canceled"}
@@ -336,7 +297,7 @@ async def _resolve_k8s_cluster_id(
     return str(matches[0]["cluster_id"])
 
 
-async def _dispatch_k8s_agent_command(
+async def _send_k8s_agent_command(
     *,
     settings: Settings,
     cluster_id: str | None,
@@ -361,7 +322,7 @@ async def _dispatch_k8s_agent_command(
         cluster_name=cluster_name,
     )
     try:
-        result = await client.dispatch(
+        result = await client.send_agent_command(
             bearer_token=bearer_token,
             cluster_id=resolved_cluster_id,
             action=action,
@@ -375,7 +336,7 @@ async def _dispatch_k8s_agent_command(
     return json.dumps(result, indent=2)
 
 
-async def _dispatch_k8s_pods_for_analysis(
+async def _fetch_pods_for_analysis(
     *,
     settings: Settings,
     namespace: str | None,
@@ -384,7 +345,7 @@ async def _dispatch_k8s_pods_for_analysis(
     cluster_name: str | None,
     timeout_seconds: int,
 ) -> dict[str, Any]:
-    raw = await _dispatch_k8s_agent_command(
+    raw = await _send_k8s_agent_command(
         settings=settings,
         cluster_id=cluster_id,
         environment=environment,
@@ -637,7 +598,7 @@ def _select_k8s_cluster_summary(
     return matches[0]
 
 
-async def _dispatch_k8s_agent_command_json(
+async def _send_k8s_command(
     *,
     client: PlatformAPIAgentCommandsClient,
     bearer_token: str,
@@ -647,7 +608,7 @@ async def _dispatch_k8s_agent_command_json(
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
     try:
-        return await client.dispatch(
+        return await client.send_agent_command(
             bearer_token=bearer_token,
             cluster_id=cluster_id,
             action=action,
@@ -757,7 +718,7 @@ async def _k8s_connection_health_payload(
         return status
 
     started = time.perf_counter()
-    namespaces_response = await _dispatch_k8s_agent_command_json(
+    namespaces_response = await _send_k8s_command(
         client=client,
         bearer_token=bearer_token,
         cluster_id=str(resolved_cluster_id),
@@ -786,7 +747,7 @@ async def _k8s_connection_health_payload(
         }
         pod_items: list[Any] = []
         for key, (action, params) in checks.items():
-            response = await _dispatch_k8s_agent_command_json(
+            response = await _send_k8s_command(
                 client=client,
                 bearer_token=bearer_token,
                 cluster_id=str(resolved_cluster_id),
@@ -799,7 +760,7 @@ async def _k8s_connection_health_payload(
                 pod_items = _command_data(response, "pods")
         first_pod = next((pod for pod in pod_items if isinstance(pod, dict)), None)
         if first_pod is not None:
-            response = await _dispatch_k8s_agent_command_json(
+            response = await _send_k8s_command(
                 client=client,
                 bearer_token=bearer_token,
                 cluster_id=str(resolved_cluster_id),
@@ -881,7 +842,7 @@ async def _k8s_cluster_overview_payload(
     namespace: str | None = None,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
-    namespaces_response = await _dispatch_k8s_agent_command_json(
+    namespaces_response = await _send_k8s_command(
         client=client,
         bearer_token=bearer_token,
         cluster_id=cluster_id,
@@ -898,7 +859,7 @@ async def _k8s_cluster_overview_payload(
     services: list[Any] = []
     events: list[Any] = []
     for item in namespaces:
-        pods_response = await _dispatch_k8s_agent_command_json(
+        pods_response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -906,7 +867,7 @@ async def _k8s_cluster_overview_payload(
             params={"namespace": item},
             timeout_seconds=timeout_seconds,
         )
-        deployments_response = await _dispatch_k8s_agent_command_json(
+        deployments_response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -914,7 +875,7 @@ async def _k8s_cluster_overview_payload(
             params={"namespace": item},
             timeout_seconds=timeout_seconds,
         )
-        services_response = await _dispatch_k8s_agent_command_json(
+        services_response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -922,7 +883,7 @@ async def _k8s_cluster_overview_payload(
             params={"namespace": item},
             timeout_seconds=timeout_seconds,
         )
-        events_response = await _dispatch_k8s_agent_command_json(
+        events_response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -956,7 +917,7 @@ async def _k8s_rbac_check_payload(
     namespace: str | None = None
     first_pod: dict[str, Any] | None = None
     for key, (action, params) in _K8S_RBAC_ACTIONS.items():
-        response = await _dispatch_k8s_agent_command_json(
+        response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -979,7 +940,7 @@ async def _k8s_rbac_check_payload(
             "message": "No visible pods available to verify log access.",
         }
     else:
-        response = await _dispatch_k8s_agent_command_json(
+        response = await _send_k8s_command(
             client=client,
             bearer_token=bearer_token,
             cluster_id=cluster_id,
@@ -1892,7 +1853,7 @@ def create_mcp_server() -> FastMCP:
             return _platform_slack_error_json(exc)
 
         # Auto-persist to semantic memory — non-blocking, never delays the response
-        asyncio.create_task(
+        asyncio.create_task(  # noqa: RUF006
             _auto_upsert_thread_summary(
                 workspace_id=token_workspace_id,
                 channel_id=channel_id,
@@ -1903,25 +1864,6 @@ def create_mcp_server() -> FastMCP:
         )
 
         return json.dumps(result, indent=2)
-
-    @mcp.tool(**_tool_metadata(_specs["k8s_agent_command"]))
-    async def k8s_agent_command(
-        action: K8sReadOnlyAction,
-        params: K8sAgentCommandParams | None = None,
-        cluster_id: str | None = None,
-        environment: str | None = None,
-        cluster_name: str | None = None,
-        timeout_seconds: int = 30,
-    ) -> str:
-        return await _dispatch_k8s_agent_command(
-            settings=settings,
-            cluster_id=cluster_id,
-            environment=environment,
-            cluster_name=cluster_name,
-            action=action,
-            params=params.model_dump(exclude_none=True) if params else None,
-            timeout_seconds=timeout_seconds,
-        )
 
     @mcp.tool(**_tool_metadata(_specs["k8s_connection_health"]))
     async def k8s_connection_health(
@@ -2063,7 +2005,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2081,7 +2023,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2102,7 +2044,7 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         if not namespace:
             raise ValueError(_MISSING_NAMESPACE_MESSAGE)
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2142,7 +2084,7 @@ def create_mcp_server() -> FastMCP:
             params["since_minutes"] = since_minutes
         if json_parse:
             params["json_parse"] = json_parse
-        raw = await _dispatch_k8s_agent_command(
+        raw = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2171,7 +2113,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2189,7 +2131,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2207,7 +2149,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2228,7 +2170,7 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         if not namespace:
             raise ValueError(_MISSING_NAMESPACE_MESSAGE)
-        return await _dispatch_k8s_agent_command(
+        return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2276,7 +2218,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        result = await _dispatch_k8s_pods_for_analysis(
+        result = await _fetch_pods_for_analysis(
             settings=settings,
             namespace=namespace,
             cluster_id=cluster_id,
@@ -2330,7 +2272,7 @@ def create_mcp_server() -> FastMCP:
         if not workload:
             raise ValueError("Please specify a pod or deployment name to analyze.")
 
-        rollout = await _dispatch_k8s_agent_command(
+        rollout = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2339,7 +2281,7 @@ def create_mcp_server() -> FastMCP:
             params={"namespace": namespace, "deployment": workload},
             timeout_seconds=timeout_seconds,
         )
-        pods = await _dispatch_k8s_pods_for_analysis(
+        pods = await _fetch_pods_for_analysis(
             settings=settings,
             namespace=namespace,
             cluster_id=cluster_id,
@@ -2349,7 +2291,7 @@ def create_mcp_server() -> FastMCP:
         )
         pods_data = pods.get("data") if isinstance(pods, dict) else None
         pod_items = pods_data.get("pods") if isinstance(pods_data, dict) else []
-        deployments = await _dispatch_k8s_agent_command(
+        deployments = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2374,7 +2316,7 @@ def create_mcp_server() -> FastMCP:
         )
         logs_data = None
         if selected_pod:
-            logs = await _dispatch_k8s_agent_command(
+            logs = await _send_k8s_agent_command(
                 settings=settings,
                 cluster_id=cluster_id,
                 environment=environment,
