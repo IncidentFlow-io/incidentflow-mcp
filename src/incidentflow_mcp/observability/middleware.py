@@ -312,11 +312,34 @@ def _start_tool_span(
         span.set_attribute("tool.name", tool_name)
         span.set_attribute("mcp.tool.name", tool_name)
         span.set_attribute("mcp.request.type", "CallToolRequest")
+        span.set_attribute("mcp.transport", "http")
+
+        # Tool category based on name prefix
+        if tool_name.startswith("k8s_"):
+            span.set_attribute("tool.category", "kubernetes")
+        elif tool_name.startswith("memory_"):
+            span.set_attribute("tool.category", "memory")
+        elif tool_name.startswith("slack_"):
+            span.set_attribute("tool.category", "slack")
+        elif tool_name.startswith("ai_"):
+            span.set_attribute("tool.category", "ai")
+        else:
+            span.set_attribute("tool.category", "general")
 
         # Best-effort: read workspace/request-id from auth/request state
         request_id = getattr(request.state, "request_id", None)
         if request_id:
             span.set_attribute("request.id", str(request_id))
+
+        # MCP session ID
+        session_id = request.headers.get("mcp-session-id")
+        if session_id:
+            span.set_attribute("mcp.session.id", session_id)
+
+        # Client user-agent (e.g. "Claude Desktop", "ChatGPT")
+        user_agent = request.headers.get("user-agent", "")
+        if user_agent:
+            span.set_attribute("mcp.client.user_agent", user_agent[:128])
 
         # Workspace ID from auth context (set by auth middleware upstream)
         auth_ctx = getattr(request.state, "auth_context", None)
@@ -324,6 +347,10 @@ def _start_tool_span(
             workspace_id = auth_ctx.get("workspace_id")
             if workspace_id:
                 span.set_attribute("workspace.id", str(workspace_id))
+            user_id = auth_ctx.get("user_id") or auth_ctx.get("sub")
+            if user_id:
+                import hashlib
+                span.set_attribute("user.id.hash", hashlib.sha256(str(user_id).encode()).hexdigest()[:16])
 
         # Attach the span as current context so child spans nest under it
         from opentelemetry import trace
