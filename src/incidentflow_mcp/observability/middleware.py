@@ -127,12 +127,8 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                     _otel_span.end()
                 except Exception:
                     pass
-            if _otel_token is not None:
-                try:
-                    import opentelemetry.context as otel_ctx
-                    otel_ctx.detach(_otel_token)
-                except Exception:
-                    pass
+            # NOTE: otel_ctx.detach() is called AFTER the request log below so that
+            # _TraceContextFilter can still read trace_id/span_id from the active context.
             status_code_str = str(status_code)
             status_class = status_class_from_code(status_code)
             outcome = classify_outcome(status_code)
@@ -217,6 +213,8 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                 )
 
             request_id = getattr(request.state, "request_id", None)
+            # Log while OTel context is still attached so _TraceContextFilter
+            # can inject non-empty trace_id/span_id into this log record.
             logger.info(
                 "http_request method=%s route=%s traffic=%s status_code=%d "
                 "duration_ms=%.2f request_id=%s request_type=%s tool=%s session_mode=%s",
@@ -230,6 +228,12 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                 tool_name if is_call_tool else "-",
                 session_mode if route == "/mcp" else "-",
             )
+            if _otel_token is not None:
+                try:
+                    import opentelemetry.context as otel_ctx
+                    otel_ctx.detach(_otel_token)
+                except Exception:
+                    pass
 
     def _update_session_metrics(
         self,

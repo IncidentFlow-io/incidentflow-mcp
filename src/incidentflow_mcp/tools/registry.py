@@ -740,8 +740,18 @@ _TOOL_SPECS: list[ToolSpec] = [
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(
-            {"namespace": {"type": "string"}, "deployment": {"type": "string"}},
-            required=["namespace", "deployment"],
+            {
+                "namespace": {"type": "string"},
+                "deployment": {
+                    "type": "string",
+                    "description": "Deployment name. Use 'workload' as an alias if preferred.",
+                },
+                "workload": {
+                    "type": "string",
+                    "description": "Alias for 'deployment'. Provide one or the other, not both.",
+                },
+            },
+            required=["namespace"],
         ),
         annotations=_read_only_annotations(),
     ),

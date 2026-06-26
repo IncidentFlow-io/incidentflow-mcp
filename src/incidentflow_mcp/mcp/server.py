@@ -691,6 +691,7 @@ async def _k8s_connection_health_payload(
     cluster_name: str | None = None,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
+    _health_start = time.perf_counter()
     status = await _k8s_agent_status_payload(
         client=client,
         bearer_token=bearer_token,
@@ -718,6 +719,7 @@ async def _k8s_connection_health_payload(
         )
         return status
 
+    agent_lookup_ms = round((time.perf_counter() - _health_start) * 1000, 2)
     started = time.perf_counter()
     namespaces_response = await _send_k8s_command(
         client=client,
@@ -727,7 +729,8 @@ async def _k8s_connection_health_payload(
         params={},
         timeout_seconds=timeout_seconds,
     )
-    latency_ms = round((time.perf_counter() - started) * 1000, 2)
+    list_namespaces_ms = round((time.perf_counter() - started) * 1000, 2)
+    latency_ms = list_namespaces_ms
     namespaces = _namespace_names(_command_data(namespaces_response, "namespaces"))
     permissions: dict[str, bool | None] = {
         "list_namespaces": _command_ok(namespaces_response),
@@ -775,10 +778,23 @@ async def _k8s_connection_health_payload(
             )
             permissions["get_logs"] = _command_ok(response)
 
+    total_health_ms = round((time.perf_counter() - _health_start) * 1000, 2)
+    latency_interpretation = (
+        "latency_ms reflects the platform→gateway→k8s-agent roundtrip for "
+        "k8s.list_namespaces. MCP HTTP handler latency is logged separately "
+        "by the observability middleware (see duration_ms in http_request logs)."
+    )
     status.update(
         {
             "status": "connected" if _command_ok(namespaces_response) else "degraded",
             "latency_ms": latency_ms,
+            "latency_breakdown": {
+                "agent_lookup_ms": agent_lookup_ms,
+                "list_namespaces_ms": list_namespaces_ms,
+                "total_health_check_ms": total_health_ms,
+                "mcp_handler_ms": None,  # measured by HTTP middleware, not available here
+            },
+            "latency_interpretation": latency_interpretation,
             "namespaces_visible": len(namespaces),
             "namespaces": namespaces,
             "permissions": permissions,
@@ -1350,32 +1366,51 @@ def _diagnose_pod_from_description(
     containers: list[dict[str, Any]],
     events: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Diagnose from rich k8s.describe_pod data — uses actual container states/last_state."""
+    """Diagnose from rich k8s.describe_pod data.
+
+    Separates current_issues (pod needs attention now) from historical_warnings
+    (problems that occurred during startup/rollout but the pod is now healthy).
+    A pod that is Running+Ready with 0 restarts is treated as healthy even if
+    probe-failure events exist in its history.
+    """
     phase = str(status.get("phase") or "").lower()
-    issues: list[dict[str, Any]] = []
+    ready = bool(status.get("ready"))
+    current_issues: list[dict[str, Any]] = []
+    historical_warnings: list[dict[str, Any]] = []
     recommendations: list[str] = []
+
+    total_restarts = sum(
+        int(c.get("restart_count") or 0) for c in containers if isinstance(c, dict)
+    )
 
     for c in containers:
         if not isinstance(c, dict):
             continue
         name = str(c.get("name") or "")
-        # Current waiting reason
+        restart_count = int(c.get("restart_count") or 0)
+
+        # Current waiting state — always a live issue
         waiting = (c.get("state") or {}).get("waiting") or {}
         w_reason = str(waiting.get("reason") or "").lower()
         w_message = str(waiting.get("message") or "").lower()
         if "crashloopbackoff" in w_reason:
-            issues.append({"type": "CrashLoopBackOff", "container": name, "severity": "critical"})
+            current_issues.append({
+                "type": "CrashLoopBackOff", "container": name, "severity": "critical",
+            })
             recommendations.append(
-                f"Container {name} is crash-looping — run k8s_get_pod_logs to find the crash reason"
+                f"Container {name} is crash-looping"
+                " — run k8s_get_pod_logs to find the crash reason"
             )
         elif "imagepullbackoff" in w_reason or "errimagepull" in w_reason:
-            issues.append({"type": "ImagePullBackOff", "container": name, "severity": "critical"})
+            current_issues.append({
+                "type": "ImagePullBackOff", "container": name, "severity": "critical",
+            })
             recommendations.append(
                 f"Container {name} cannot pull image"
                 " — check image name, tag, and registry credentials"
             )
         elif w_reason and "containercreat" not in w_reason:
-            issues.append({
+            current_issues.append({
                 "type": f"ContainerWaiting:{w_reason}",
                 "container": name,
                 "severity": "warning",
@@ -1383,69 +1418,125 @@ def _diagnose_pod_from_description(
             if w_message:
                 recommendations.append(f"Container {name} waiting: {w_message[:120]}")
 
-        # Last termination reason — detect OOMKilled
+        # Last termination reason (OOMKilled)
+        # Historical if pod is now Ready with 0 restarts; current if restarts are ongoing
         last_state = c.get("last_state") or {}
         last_term = (last_state.get("terminated") or {}) if isinstance(last_state, dict) else {}
         if str(last_term.get("reason") or "").lower() == "oomkilled":
-            issues.append({"type": "OOMKilled", "container": name, "severity": "critical"})
-            recommendations.append(
-                f"Container {name} was OOMKilled"
-                " — increase resources.limits.memory or fix memory leak"
-            )
+            if restart_count > 0 or not ready or phase != "running":
+                current_issues.append({
+                    "type": "OOMKilled", "container": name, "severity": "critical",
+                })
+                recommendations.append(
+                    f"Container {name} was OOMKilled"
+                    " — increase resources.limits.memory or fix memory leak"
+                )
+            else:
+                historical_warnings.append({
+                    "type": "OOMKilled",
+                    "container": name,
+                    "note": "Pod recovered and is now Ready",
+                })
 
-    # Event-based issues
+    # Pod is currently stable if Running+Ready with no container waiting states
+    pod_currently_ok = (
+        phase == "running"
+        and ready
+        and total_restarts == 0
+        and not any(
+            i["type"] in {"CrashLoopBackOff", "ImagePullBackOff"}
+            for i in current_issues
+        )
+    )
+
+    # Event-based issues — collect per-reason metadata from events
     event_reasons: set[str] = set()
     event_messages: list[str] = []
+    probe_events: dict[str, dict[str, Any]] = {}  # probe_type → last event info
     for e in events:
-        if isinstance(e, dict):
-            r = str(e.get("reason") or "").lower()
-            if r:
-                event_reasons.add(r)
-            event_messages.append(str(e.get("message") or "").lower())
+        if not isinstance(e, dict):
+            continue
+        r = str(e.get("reason") or "").lower()
+        if r:
+            event_reasons.add(r)
+        msg = str(e.get("message") or "").lower()
+        event_messages.append(msg)
+        if r == "unhealthy":
+            for probe in ("readiness", "liveness", "startup"):
+                if probe in msg:
+                    # Keep the most recent event info for this probe type
+                    existing = probe_events.get(probe)
+                    if not existing or str(e.get("last_seen") or "") > str(
+                        existing.get("last_seen") or ""
+                    ):
+                        probe_events[probe] = {
+                            "last_seen": e.get("last_seen"),
+                            "count": int(e.get("count") or 1),
+                            "message": str(e.get("message") or "")[:120],
+                        }
 
     if "failedscheduling" in event_reasons:
-        issues.append({"type": "FailedScheduling", "severity": "warning"})
-        recommendations.append("Check node resources and pod resource requests/taints")
+        if phase == "pending":
+            current_issues.append({"type": "FailedScheduling", "severity": "warning"})
+            recommendations.append("Check node resources and pod resource requests/taints")
+        else:
+            historical_warnings.append({
+                "type": "FailedScheduling",
+                "note": "Pod eventually scheduled and is now Running",
+            })
 
-    if "unhealthy" in event_reasons:
-        readiness_msgs = [m for m in event_messages if "readiness" in m]
-        liveness_msgs = [m for m in event_messages if "liveness" in m]
-        startup_msgs = [m for m in event_messages if "startup" in m]
-        if readiness_msgs:
-            issues.append({"type": "ReadinessProbeFailure", "severity": "warning"})
-            recommendations.append(
-                "Check readiness probe endpoint and application startup time"
-            )
-        if liveness_msgs:
-            issues.append({"type": "LivenessProbeFailure", "severity": "warning"})
-            recommendations.append("Check liveness probe — container may be restarting")
-        if startup_msgs:
-            issues.append({"type": "StartupProbeFailure", "severity": "warning"})
-            recommendations.append(
-                "Startup probe failed — consider increasing initialDelaySeconds"
-            )
+    if probe_events:
+        probe_type_map = {
+            "readiness": "ReadinessProbeFailure",
+            "liveness": "LivenessProbeFailure",
+            "startup": "StartupProbeFailure",
+        }
+        for probe, info in probe_events.items():
+            issue_type = probe_type_map.get(probe, f"{probe.title()}ProbeFailure")
+            if pod_currently_ok:
+                # Pod is now healthy — probe failures are rollout/startup noise
+                historical_warnings.append({
+                    "type": issue_type,
+                    "reason": f"{probe.title()} probe failed during startup/rollout",
+                    "last_seen": info.get("last_seen"),
+                    "count": info.get("count"),
+                })
+            else:
+                current_issues.append({"type": issue_type, "severity": "warning"})
+                if probe == "readiness":
+                    recommendations.append(
+                        "Check readiness probe endpoint and application startup time"
+                    )
+                elif probe == "liveness":
+                    recommendations.append(
+                        "Check liveness probe — container may be restarting"
+                    )
+                elif probe == "startup":
+                    recommendations.append(
+                        "Startup probe failed — consider increasing initialDelaySeconds"
+                    )
 
-    # Phase-level issues not already covered
-    if phase == "pending" and not any(i["type"] == "FailedScheduling" for i in issues):
-        if not any("imagepull" in str(i["type"]).lower() for i in issues):
-            issues.append({"type": "Pending", "severity": "warning"})
+    # Phase-level issues
+    if phase == "pending" and not any(i["type"] == "FailedScheduling" for i in current_issues):
+        if not any("imagepull" in str(i["type"]).lower() for i in current_issues):
+            current_issues.append({"type": "Pending", "severity": "warning"})
             recommendations.append(
                 "Pod is waiting — check events for scheduling or image pull issues"
             )
     elif phase == "failed":
-        issues.append({"type": "PodFailed", "severity": "critical"})
+        current_issues.append({"type": "PodFailed", "severity": "critical"})
         recommendations.append("Pod is in Failed state — check logs for exit reason")
     elif phase == "unknown":
-        issues.append({"type": "UnknownPhase", "severity": "warning"})
+        current_issues.append({"type": "UnknownPhase", "severity": "warning"})
         recommendations.append("Node may be unreachable — check node status")
 
-    # Containers not ready without a specific issue already detected
+    # Containers not ready with no specific cause yet detected
     not_ready = [
         c.get("name") for c in containers
         if isinstance(c, dict) and not c.get("ready")
     ]
-    if not_ready and not issues and phase == "running":
-        issues.append({
+    if not_ready and not current_issues and phase == "running":
+        current_issues.append({
             "type": "ContainersNotReady",
             "containers": not_ready,
             "severity": "warning",
@@ -1454,10 +1545,13 @@ def _diagnose_pod_from_description(
             "Containers are not ready — check readiness probe and application startup"
         )
 
-    healthy = not issues and phase == "running" and not not_ready
+    healthy = not current_issues and phase == "running" and not not_ready
     return {
         "healthy": healthy,
-        "issues": issues,
+        "current_issues": current_issues,
+        "historical_warnings": historical_warnings,
+        # keep "issues" as alias so existing callers don't break
+        "issues": current_issues,
         "recommendations": list(dict.fromkeys(recommendations)),
     }
 
@@ -1478,15 +1572,34 @@ def _build_describe_response(desc: dict[str, Any]) -> dict[str, Any]:
     diagnosis = _diagnose_pod_from_description(status, containers, events)
     workload = _workload_from_pod_name(pod_name)
 
+    historical = diagnosis.get("historical_warnings") or []
+
     if diagnosis["healthy"]:
-        summary = f"Pod {pod_name} is {phase}, all containers ready, {total_restarts} restarts"
-        findings: list[str] = ["✓ Pod is healthy"]
+        if historical:
+            hw_types = list(dict.fromkeys(w["type"] for w in historical))
+            summary = (
+                f"Pod {pod_name} is currently healthy"
+                f"; historical warnings found during startup/rollout: {', '.join(hw_types)}"
+            )
+            findings: list[str] = [
+                "✓ Pod is Running and Ready",
+                f"✓ {total_restarts} restarts",
+            ] + [
+                "~ Historical: " + w["type"]
+                + (f" ({w.get('reason', '')})" if w.get("reason") else "")
+                for w in historical
+            ]
+        else:
+            summary = (
+                f"Pod {pod_name} is {phase}, all containers ready, {total_restarts} restarts"
+            )
+            findings = ["✓ Pod is healthy"]
     else:
-        issue_types = [i["type"] for i in diagnosis["issues"]]
+        issue_types = [i["type"] for i in diagnosis["current_issues"]]
         summary = f"Pod {pod_name} is {phase} — issues: {', '.join(issue_types)}"
         findings = [
             f"⚠ {i['type']}" + (f" (container: {i['container']})" if "container" in i else "")
-            for i in diagnosis["issues"]
+            for i in diagnosis["current_issues"]
         ]
 
     return {
@@ -1614,17 +1727,31 @@ def _cluster_health_assessment(overview: dict[str, Any]) -> dict[str, Any]:
     elif not high_restart and unhealthy_count == 0:
         findings.append("✓ No high-restart pods")
 
-    healthy = unhealthy_count == 0 and active_warnings == 0 and not high_restart
+    # Three-tier classification:
+    # Degraded  — unhealthy pods, high-restart pods, or crashed workloads
+    # Warning   — all pods healthy but warning events are present
+    # Healthy   — all pods healthy, no warnings
+    if unhealthy_count > 0 or high_restart:
+        cluster_health = "Degraded"
+        summary = (
+            f"{unhealthy_count}/{total_pods} pods unhealthy, "
+            f"{active_warnings} active warning event{'s' if active_warnings != 1 else ''}"
+        )
+    elif active_warnings > 0:
+        cluster_health = "Warning"
+        summary = (
+            f"All {total_pods} pod{'s' if total_pods != 1 else ''} healthy"
+            f", but {active_warnings} active warning event{'s' if active_warnings != 1 else ''}"
+            " present. Review events to confirm they are not current failures."
+        )
+        recommendations.append("Review active warning events with k8s_list_events")
+    else:
+        cluster_health = "Healthy"
+        summary = f"All {total_pods} pods running normally"
+
     return {
-        "cluster_health": "Healthy" if healthy else "Degraded",
-        "summary": (
-            f"All {total_pods} pods running normally"
-            if healthy
-            else (
-                f"{unhealthy_count}/{total_pods} pods unhealthy, "
-                f"{active_warnings} active warning event{'s' if active_warnings != 1 else ''}"
-            )
-        ),
+        "cluster_health": cluster_health,
+        "summary": summary,
         "findings": findings,
         "recommendations": recommendations,
     }
@@ -2876,7 +3003,8 @@ def create_mcp_server() -> FastMCP:
     @mcp.tool(**_tool_metadata(_specs["k8s_get_rollout_status"]))
     async def k8s_get_rollout_status(
         namespace: str,
-        deployment: str,
+        deployment: str | None = None,
+        workload: str | None = None,
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
@@ -2884,13 +3012,21 @@ def create_mcp_server() -> FastMCP:
     ) -> str:
         if not namespace:
             raise ValueError(_MISSING_NAMESPACE_MESSAGE)
+        if deployment and workload and deployment != workload:
+            raise ValueError(
+                f"deployment ({deployment!r}) and workload ({workload!r}) both provided "
+                "but differ — use only one."
+            )
+        resolved = deployment or workload
+        if not resolved:
+            raise ValueError("Either 'deployment' or 'workload' is required.")
         return await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
             cluster_name=cluster_name,
             action="k8s.get_rollout_status",
-            params={"namespace": namespace, "deployment": deployment},
+            params={"namespace": namespace, "deployment": resolved},
             timeout_seconds=timeout_seconds,
         )
 
@@ -3089,6 +3225,7 @@ def create_mcp_server() -> FastMCP:
         namespace: str,
         pod: str,
         tail_lines: int = 100,
+        include_evidence_details: bool = False,
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
@@ -3124,37 +3261,108 @@ def create_mcp_server() -> FastMCP:
         logs_data = _compact_log_payload(
             logs_payload, level=None, contains=None, exclude=None, compact=True
         )
-
-        # Conditionally fetch rollout status if owner is a Deployment
-        rollout_data: dict[str, Any] | None = None
-        owner = str((desc.get("metadata") or {}).get("owner") or "")
-        if owner.lower().startswith("deployment/") or owner.lower().startswith("replicaset/"):
-            workload = _workload_from_pod_name(pod)
-            try:
-                rollout_str = await _send_k8s_agent_command(
-                    settings=settings, cluster_id=cluster_id, environment=environment,
-                    cluster_name=cluster_name, action="k8s.get_rollout_status",
-                    params={"namespace": namespace, "deployment": workload},
-                    timeout_seconds=timeout_seconds,
-                )
-                rollout_data = json.loads(rollout_str).get("data")
-            except Exception:
-                pass
-
         log_lines = (logs_data.get("data") or {})
         highlighted = log_lines.get("highlighted") or []
         recent_lines = log_lines.get("lines") or []
 
+        # Conditionally fetch rollout status if owner is a Deployment/ReplicaSet
+        rollout_complete: bool | None = None
+        owner = str((desc.get("metadata") or {}).get("owner") or "")
+        if owner.lower().startswith("deployment/") or owner.lower().startswith("replicaset/"):
+            workload_name = _workload_from_pod_name(pod)
+            try:
+                rollout_str = await _send_k8s_agent_command(
+                    settings=settings, cluster_id=cluster_id, environment=environment,
+                    cluster_name=cluster_name, action="k8s.get_rollout_status",
+                    params={"namespace": namespace, "deployment": workload_name},
+                    timeout_seconds=timeout_seconds,
+                )
+                rollout_payload = json.loads(rollout_str)
+                rollout_inner = (rollout_payload.get("data") or {}).get("rollout") or {}
+                rollout_complete = bool(rollout_inner.get("complete"))
+            except Exception:
+                pass
+
+        # --- Build compact SRE report ---
+        pod_meta = describe["data"]["pod"]
+        pod_status = describe["data"]["status"]
+        containers = describe["data"]["containers"]
+        historical = diagnosis.get("historical_warnings") or []
+        current_issues = diagnosis.get("current_issues") or []
+
+        total_restarts = int(pod_status.get("restart_count") or 0)
+        pod_ready = bool(pod_status.get("ready"))
+        log_error_count = len([
+            line for line in (recent_lines or [])
+            if isinstance(line, str) and any(
+                kw in line.lower() for kw in ("error", "exception", "fatal", "panic")
+            )
+        ])
+        log_warning_count = len([
+            line for line in (recent_lines or [])
+            if isinstance(line, str) and "warn" in line.lower()
+        ])
+
+        # Latest warning event age in minutes
+        latest_warning_age_minutes: int | None = None
+        warning_reasons: list[str] = []
+        for w in historical:
+            warning_reasons.append(w.get("type", ""))
+        for i in current_issues:
+            warning_reasons.append(i.get("type", ""))
+
         findings = list(describe["findings"])
         if highlighted:
             findings.append(
-                f"⚠ {len(highlighted)} highlighted log line{'s' if len(highlighted) != 1 else ''} "
-                "(errors/warnings)"
+                f"⚠ {len(highlighted)} log line{'s' if len(highlighted) != 1 else ''}"
+                " with errors/warnings"
             )
         elif recent_lines:
-            findings.append(f"✓ No error/warning patterns in last {len(recent_lines)} log lines")
+            findings.append(
+                f"✓ No error/warning patterns in {len(recent_lines)} sampled log lines"
+            )
+        if rollout_complete is True:
+            findings.append("✓ Deployment rollout is complete")
+        elif rollout_complete is False:
+            findings.append("⚠ Deployment rollout is not complete")
 
         recommendations = list(describe["recommendations"])
+        if not current_issues and pod_ready and total_restarts == 0:
+            recommendations = recommendations or ["No immediate action needed"]
+
+        evidence: dict[str, Any] = {
+            "pod_ready": pod_ready,
+            "phase": pod_status.get("phase"),
+            "restart_count": total_restarts,
+            "rollout_complete": rollout_complete,
+            "warning_reasons": list(dict.fromkeys(warning_reasons)),
+            "log_error_count": log_error_count,
+            "log_warning_count": log_warning_count,
+            "latest_warning_age_minutes": latest_warning_age_minutes,
+        }
+        if include_evidence_details:
+            evidence["highlighted_log_lines"] = highlighted[-10:]
+            evidence["containers"] = [
+                {
+                    "name": c.get("name"),
+                    "ready": c.get("ready"),
+                    "restart_count": c.get("restart_count"),
+                    "state": c.get("state"),
+                }
+                for c in containers
+                if isinstance(c, dict)
+            ]
+            evidence["events"] = [
+                {
+                    "type": e.get("type"),
+                    "reason": e.get("reason"),
+                    "message": str(e.get("message") or "")[:120],
+                    "count": e.get("count"),
+                    "last_seen": e.get("last_seen"),
+                }
+                for e in describe["data"].get("events", [])[:10]
+            ]
+            evidence["node"] = pod_meta.get("node")
 
         return json.dumps(
             {
@@ -3162,20 +3370,7 @@ def create_mcp_server() -> FastMCP:
                 "summary": describe["summary"],
                 "findings": findings,
                 "recommendations": recommendations,
-                "data": {
-                    "pod": describe["data"]["pod"],
-                    "status": describe["data"]["status"],
-                    "containers": describe["data"]["containers"],
-                    "events": describe["data"]["events"],
-                    "diagnosis": diagnosis,
-                    "logs": {
-                        "highlighted": highlighted[-20:],
-                        "line_count": log_lines.get("line_count", 0),
-                        "returned_line_count": log_lines.get("returned_line_count", 0),
-                    },
-                    "rollout_status": rollout_data,
-                },
-                "error": None,
+                "evidence": evidence,
             },
             indent=2,
         )
