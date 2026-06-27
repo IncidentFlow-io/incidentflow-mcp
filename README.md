@@ -126,6 +126,32 @@ For local end-to-end testing, use OAuth/platform bearer auth for MCP so
 dispatch. A static `INCIDENTFLOW_PAT` is useful for MCP-only auth smoke tests,
 but it may not carry enough platform context for Kubernetes command dispatch.
 
+### Grafana MCP tools (read-only)
+
+The MCP package now ships Grafana read tools over the /mcp transport.
+All tools are read-only and rely on platform-api for allow-lists, PromQL guardrails, and label sanitization.
+
+Available tools:
+- grafana_list_dashboards
+- grafana_get_dashboard
+- grafana_extract_panel_queries
+- grafana_metrics_query
+- grafana_metrics_query_range
+- analyze_dashboard_health
+- analyze_dns_dashboard
+
+Typical workflows:
+
+```text
+List approved dashboards: grafana_list_dashboards
+Read dashboard metadata: grafana_get_dashboard {"dashboard_uid":"dns"}
+Extract dashboard queries: grafana_extract_panel_queries {"dashboard_uid":"dns"}
+Run instant PromQL: grafana_metrics_query {"datasource_uid":"prometheus", "query":"sum(rate(http_requests_total[5m]))"}
+Run range PromQL: grafana_metrics_query_range {"datasource_uid":"prometheus", "query":"sum(rate(http_requests_total[5m]))", "start":"now-1h", "end":"now", "step":"30s"}
+Inspect full dashboard health: analyze_dashboard_health {"dashboard_uid":"dns", "start":"now-6h", "end":"now", "step":"60s"}
+DNS-focused analysis: analyze_dns_dashboard {"dashboard_uid":"dns"}
+```
+
 ### CI automation (GitHub Actions)
 
 This repository includes a docs workflow at `.github/workflows/docs.yml`:

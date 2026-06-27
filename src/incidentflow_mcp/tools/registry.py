@@ -843,6 +843,194 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         annotations=_read_only_annotations(),
     ),
+    ToolSpec(
+        name="grafana_list_dashboards",
+        description=(
+            "List the Grafana dashboards approved (allow-listed) for this workspace, "
+            "with uid, title, folder, and tags. Use the uid with the other grafana tools."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "workspace_id": {
+                    "type": "string",
+                    "description": (
+                        "Workspace scope. Optional when the token has workspace scope "
+                        "or INCIDENTFLOW_WORKSPACE_ID is configured."
+                    ),
+                },
+            },
+            "required": [],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+    ToolSpec(
+        name="grafana_get_dashboard",
+        description=(
+            "Fetch a single allow-listed Grafana dashboard's metadata (panels, "
+            "datasources) by uid."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+            },
+            "required": ["dashboard_uid"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+    ToolSpec(
+        name="grafana_extract_panel_queries",
+        description=(
+            "Extract the Prometheus/PromQL queries from a dashboard's panels (rows "
+            "traversed, non-Prometheus targets skipped). Returns panel title, refId, "
+            "datasource uid, and the expression."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+            },
+            "required": ["dashboard_uid"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+    ToolSpec(
+        name="grafana_metrics_query",
+        description=(
+            "Run an instant PromQL query through Grafana's datasource proxy. The query "
+            "is validated server-side (allow-listed metrics, shape limits) and the result "
+            "is returned as normalized, label-sanitized series."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "datasource_uid": {"type": "string", "description": "Grafana datasource uid."},
+                "query": {"type": "string", "description": "PromQL expression."},
+                "time": {
+                    "type": "string",
+                    "description": "Optional evaluation time (RFC3339 or unix seconds).",
+                },
+                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+            },
+            "required": ["datasource_uid", "query"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+    ToolSpec(
+        name="grafana_metrics_query_range",
+        description=(
+            "Run a range PromQL query through Grafana's datasource proxy over [start, end] "
+            "at a given step. Validated server-side; returns normalized, label-sanitized "
+            "time series."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "datasource_uid": {"type": "string", "description": "Grafana datasource uid."},
+                "query": {"type": "string", "description": "PromQL expression."},
+                "start": {"type": "string", "description": "Range start (RFC3339/unix/now-6h)."},
+                "end": {"type": "string", "description": "Range end (RFC3339/unix/now)."},
+                "step": {"type": "string", "description": "Step, e.g. '30s' or seconds."},
+                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+            },
+            "required": ["datasource_uid", "query", "start", "end", "step"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+    ToolSpec(
+        name="analyze_dashboard_health",
+        description=(
+            "Analyze an allow-listed Grafana dashboard over a time window: extracts each "
+            "panel's PromQL, runs it (guardrail-checked), and returns per-panel normalized "
+            "series with anomaly flags and a summary. Read-only; suggests no actions."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "start": {
+                    "type": "string",
+                    "default": "now-6h",
+                    "description": "Window start (default now-6h).",
+                },
+                "end": {
+                    "type": "string",
+                    "default": "now",
+                    "description": "Window end (default now).",
+                },
+                "step": {"type": "string", "description": "Optional step; server picks a default."},
+                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+            },
+            "required": ["dashboard_uid"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
+    ToolSpec(
+        name="analyze_dns_dashboard",
+        description=(
+            "Analyze an allow-listed Grafana dashboard over a time window with DNS-focused "
+            "summary hints. Reuses the generic dashboard health analysis, then highlights "
+            "DNS-related panels and returned NXDOMAIN/SERVFAIL response-code series."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "start": {
+                    "type": "string",
+                    "default": "now-6h",
+                    "description": "Window start (default now-6h).",
+                },
+                "end": {
+                    "type": "string",
+                    "default": "now",
+                    "description": "Window end (default now).",
+                },
+                "step": {"type": "string", "description": "Optional step; server picks a default."},
+                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+            },
+            "required": ["dashboard_uid"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+    ),
 ]
 
 
