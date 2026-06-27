@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from incidentflow_mcp.tools.grafana import (
+    _dns_summary_hints,
+    _join_limited,
     analyze_dashboard_health,
     analyze_dns_dashboard,
     grafana_extract_panel_queries,
@@ -127,7 +129,7 @@ class TestMetricsQuery:
                 "query": "up",
                 "result_type": "vector",
                 "series": [
-                    {"metric": {"job": "node"}, "samples": [{"timestamp": 1.0, "value": 1.0}]}
+                    {"metric": {"job": "node"}, "samples": [{"timestamp": 1.0, "value": 1.0}]},
                 ],
             }
         )
@@ -147,7 +149,12 @@ class TestMetricsQuery:
             }
         )
         out = await grafana_metrics_query_range(
-            client, datasource_uid="ds1", query="up", start="now-6h", end="now", step="60s"
+            client,
+            datasource_uid="ds1",
+            query="up",
+            start="now-6h",
+            end="now",
+            step="60s",
         )
         assert out.result_type == "matrix"
         assert client.calls[0][1]["step"] == "60s"
@@ -267,3 +274,28 @@ class TestAnalyzeDnsDashboard:
         )
 
         assert out.summary_hints == ["No DNS-focused panels detected by expression markers"]
+
+
+class TestDnsSummaryHelpers:
+    async def test_join_limited_deduplicates_and_limits(self) -> None:
+        assert _join_limited(["a", "b", "a", "c", "d", "e", "f", "g"], limit=5) == "a, b, c, d, e, +2 more"
+
+    async def test_dns_summary_hints_includes_limited_dns_panels(self) -> None:
+        payload = {
+            "dashboard_uid": "dns",
+            "dashboard_title": "DNS",
+            "panels": [
+                {"panel_title": f"DNS panel {i}", "expr": "coredns_dns_requests_total"}
+                for i in range(1, 8)
+            ],
+            "summary_hints": [],
+        }
+        out = await analyze_dns_dashboard(FakeClient(analyze=payload), dashboard_uid="dns")
+
+        assert out.summary_hints == [
+            "DNS-focused panels detected: DNS panel 1, DNS panel 2, DNS panel 3, DNS panel 4, DNS panel 5, +2 more"
+        ]
+
+    async def test_dns_summary_includes_no_dns_panel_warning(self) -> None:
+        hints = _dns_summary_hints([])
+        assert hints == ["No DNS-focused panels detected by expression markers"]
