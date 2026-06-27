@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 logger = logging.getLogger(__name__)
+
+_SLACK_TS_RE = re.compile(r"^\d+\.\d+$")
 
 
 class SlackAPIError(RuntimeError):
@@ -176,6 +179,11 @@ class SlackClient:
         max_replies: int,
         include_root: bool = False,
     ) -> SlackThreadFetchResult:
+        if not _SLACK_TS_RE.match(thread_ts):
+            return SlackThreadFetchResult(
+                root=None, replies=[], messages=[], warning="invalid_thread_ts"
+            )
+
         messages: list[dict[str, Any]] = []
         cursor: str | None = None
         remaining = max(0, max_replies) + 1

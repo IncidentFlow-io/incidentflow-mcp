@@ -57,6 +57,7 @@ class TokenRecord:
     last_used_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
+    workspace_id: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +113,7 @@ def _to_dict(r: TokenRecord) -> dict:
         "token_hash": r.token_hash,
         "name": r.name,
         "scopes": r.scopes,
+        "workspace_id": r.workspace_id,
         "created_at": _dt_to_str(r.created_at),
         "last_used_at": _dt_to_str(r.last_used_at),
         "expires_at": _dt_to_str(r.expires_at),
@@ -125,6 +127,7 @@ def _from_dict(d: dict) -> TokenRecord:
         token_hash=d["token_hash"],
         name=d["name"],
         scopes=d.get("scopes", []),
+        workspace_id=d.get("workspace_id"),
         created_at=_str_to_dt(d["created_at"]),  # type: ignore[arg-type]
         last_used_at=_str_to_dt(d.get("last_used_at")),
         expires_at=_str_to_dt(d.get("expires_at")),

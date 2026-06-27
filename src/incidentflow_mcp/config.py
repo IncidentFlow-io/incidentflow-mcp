@@ -23,12 +23,15 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", description="Bind host")
     port: int = Field(default=8000, description="Bind port")
     log_level: str = Field(default="info", description="Logging level")
+    library_log_level: str = Field(
+        default="warning",
+        description="Default log level for noisy third-party libraries.",
+    )
     environment: str = Field(default="development", description="Environment name")
     allow_unprotected_in_production: bool = Field(
         default=False,
         description=(
-            "Allow startup in production without auth providers. "
-            "Default false (fail-closed)."
+            "Allow startup in production without auth providers. Default false (fail-closed)."
         ),
     )
 
@@ -158,6 +161,16 @@ class Settings(BaseSettings):
             "When true, external status tool requests trigger OMS persistence side-effects."
         ),
     )
+    openai_domain_verification_path: str | None = Field(
+        default=None,
+        description=(
+            "Optional absolute /.well-known path used by OpenAI Apps domain verification."
+        ),
+    )
+    openai_domain_verification_token: SecretStr | None = Field(
+        default=None,
+        description="Optional OpenAI Apps domain verification token returned as plain text.",
+    )
     slack_bot_token: SecretStr | None = Field(
         default=None,
         description="Slack Bot User OAuth Token used by Slack read-only MCP tools.",
@@ -179,6 +192,30 @@ class Settings(BaseSettings):
     max_alert_correlation_window_minutes: int = Field(
         default=60,
         description="Time window used by correlate_alerts tool",
+    )
+
+    # -----------------------------------------------------------------------
+    # Observability / OpenTelemetry
+    # -----------------------------------------------------------------------
+    observability_enabled: bool = Field(
+        default=True,
+        description="Enable Prometheus metrics and OTel tracing when True.",
+    )
+    observability_tracing_enabled: bool = Field(
+        default=False,
+        description="Enable distributed tracing via OTEL SDK (requires OTEL packages).",
+    )
+    observability_otlp_endpoint: str = Field(
+        default="otel-collector.observability.svc.cluster.local:4317",
+        description="gRPC OTLP endpoint for trace export.",
+    )
+    service_version: str = Field(
+        default="0.0.0",
+        description="Service version attached to OTEL resource.",
+    )
+    k8s_namespace_name: str | None = Field(
+        default=None,
+        description="Kubernetes namespace attached to OTEL resource.",
     )
 
     # -----------------------------------------------------------------------
@@ -244,7 +281,7 @@ class Settings(BaseSettings):
         description="Bucket scope for unauthenticated identities: ip | principal | workspace",
     )
     metrics_trusted_cidrs: str = Field(
-        default="127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+        default="127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
         description=(
             "Comma-separated CIDRs allowed to read /metrics without bearer auth. "
             "Use private cluster CIDRs to keep Prometheus scraping working."

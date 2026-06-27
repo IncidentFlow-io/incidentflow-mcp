@@ -6,9 +6,19 @@ from typing import Any
 import httpx
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.tracing import inject_trace_headers
 from incidentflow_mcp.slack.slack_client import SlackThreadFetchResult, normalize_channel_name
 
 logger = logging.getLogger(__name__)
+
+
+class PlatformSlackAPIError(RuntimeError):
+    """Structured platform-api Slack error exposed to MCP tool callers."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.message = message or code
 
 
 class PlatformSlackClient:
@@ -28,14 +38,36 @@ class PlatformSlackClient:
             "X-MCP-Client-Id": "incidentflow-mcp",
         }
 
+    def _raise_for_platform_error(self, response: httpx.Response) -> None:
+        if not response.is_error:
+            return
+        try:
+            payload = response.json()
+        except ValueError:
+            response.raise_for_status()
+        if isinstance(payload, dict):
+            code = payload.get("code")
+            if isinstance(code, str) and code:
+                message = payload.get("message")
+                raise PlatformSlackAPIError(
+                    code,
+                    str(message) if message is not None else None,
+                )
+        response.raise_for_status()
+
+    def _outbound_headers(self) -> dict[str, str]:
+        headers = dict(self._headers)
+        inject_trace_headers(headers)
+        return headers
+
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.get(
                 f"{self._base_url}{path}",
                 params=params,
-                headers=self._headers,
+                headers=self._outbound_headers(),
             )
-        response.raise_for_status()
+        self._raise_for_platform_error(response)
         return response.json()
 
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -43,9 +75,9 @@ class PlatformSlackClient:
             response = await client.post(
                 f"{self._base_url}{path}",
                 json=payload,
-                headers=self._headers,
+                headers=self._outbound_headers(),
             )
-        response.raise_for_status()
+        self._raise_for_platform_error(response)
         return response.json()
 
     async def allowed_channels(self, *, purpose: str | None = None) -> list[dict[str, Any]]:
@@ -61,12 +93,14 @@ class PlatformSlackClient:
     async def resolve_channel(self, channel: str) -> tuple[str, str | None]:
         normalized = normalize_channel_name(channel)
         channels = await self.allowed_channels(purpose="alerts")
+        if not channels:
+            raise RuntimeError("no_enabled_alert_channel_for_workspace")
         for item in channels:
             channel_id = str(item.get("id") or "")
             name = str(item.get("name") or "")
             if normalized in {channel_id, name}:
                 return channel_id, name
-        raise RuntimeError(f"slack_channel_not_allowed:{channel}")
+        raise RuntimeError(f"slack_channel_not_in_allowlist:{channel}")
 
     async def conversation_history(self, *, channel_id: str, limit: int) -> list[dict[str, Any]]:
         payload = await self._post(

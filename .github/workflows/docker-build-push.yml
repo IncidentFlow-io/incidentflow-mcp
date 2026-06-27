@@ -1,0 +1,221 @@
+name: docker-build-push
+
+on:
+  push:
+    tags:
+      - 'incidentflow-mcp/v*'
+      - 'incidentflow-mcp/dev-v*'
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service to build
+        required: true
+        type: choice
+        options:
+          - incidentflow-mcp
+      version:
+        description: "Image version tag — prod: v1.0.8, dev: dev-v1.0.8"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/incidentflow-io/incidentflow-mcp
+  INFRA_VALUES_DEV: helm/incidentflow-mcp/values-dev.yaml
+  INFRA_VALUES_PROD: helm/incidentflow-mcp/values-prod.yaml
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      build_matrix: ${{ steps.release.outputs.build_matrix }}
+      image: ${{ steps.release.outputs.image }}
+      service: ${{ steps.release.outputs.service }}
+      environment: ${{ steps.release.outputs.environment }}
+      version: ${{ steps.release.outputs.version }}
+      values_file: ${{ steps.release.outputs.values_file }}
+    steps:
+      - name: Prepare release metadata
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            service="${{ inputs.service }}"
+            version="${{ inputs.version }}"
+          else
+            service="${GITHUB_REF_NAME%/*}"
+            version="${GITHUB_REF_NAME#*/}"
+          fi
+
+          case "$service" in
+            incidentflow-mcp) ;;
+            *) echo "Unsupported service: $service" >&2; exit 1 ;;
+          esac
+
+          if [[ "$version" == dev-* ]]; then
+            environment="dev"
+            values_file="${INFRA_VALUES_DEV}"
+          else
+            environment="prod"
+            values_file="${INFRA_VALUES_PROD}"
+          fi
+
+          build_matrix=$(printf '{"include":[{"image":"%s","platform":"linux/amd64","runner":"ubuntu-latest"},{"image":"%s","platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}' "$IMAGE" "$IMAGE")
+
+          echo "build_matrix=${build_matrix}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "service=${service}" >> "$GITHUB_OUTPUT"
+          echo "environment=${environment}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "values_file=${values_file}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs:
+      - prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare platform
+        shell: bash
+        run: |
+          platform="${{ matrix.platform }}"
+          echo "PLATFORM_PAIR=${platform//\//-}" >> "$GITHUB_ENV"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: ${{ matrix.platform }}
+          tags: ${{ matrix.image }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        shell: bash
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-incidentflow-mcp-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - build
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-incidentflow-mcp-*
+          merge-multiple: true
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        shell: bash
+        run: |
+          docker buildx imagetools create \
+            -t "${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.version }}" \
+            $(printf '${{ needs.prepare.outputs.image }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect "${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.version }}"
+
+  update-infra:
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - merge
+    permissions:
+      contents: read
+    steps:
+      - name: Check infrastructure token
+        env:
+          INFRA_GITHUB_TOKEN: ${{ secrets.INFRA_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$INFRA_GITHUB_TOKEN" ]; then
+            echo "INFRA_GITHUB_TOKEN secret is missing or empty. Add a PAT with contents:write access to IncidentFlow-io/infrastructure." >&2
+            exit 1
+          fi
+
+      - name: Checkout infrastructure repo
+        uses: actions/checkout@v4
+        with:
+          repository: IncidentFlow-io/infrastructure
+          token: ${{ secrets.INFRA_GITHUB_TOKEN }}
+
+      - name: Install yq
+        run: |
+          YQ_VERSION="v4.44.3"
+          wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          chmod +x /usr/local/bin/yq
+
+      - name: Update Helm values image tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          values_file="${{ needs.prepare.outputs.values_file }}"
+          version="${{ needs.prepare.outputs.version }}"
+          environment="${{ needs.prepare.outputs.environment }}"
+
+          export version
+          yq -i '.image.tag = strenv(version)' "$values_file"
+
+          echo "Updated ${values_file}:"
+          yq '.image.tag' "$values_file"
+
+          git config user.email "ci-bot@incidentflow.io"
+          git config user.name "CI Bot"
+          git add "$values_file"
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit. Tag already matches current value."
+            exit 0
+          fi
+
+          git commit -m "chore(incidentflow-mcp): update ${environment} image tag to ${version} [skip ci]"
+          git push

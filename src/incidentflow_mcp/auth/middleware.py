@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import Request
@@ -21,21 +21,23 @@ from incidentflow_mcp.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-_PUBLIC_PATHS: frozenset[str] = frozenset({
-    "/healthz",
-    "/readyz",
-    "/install.sh",
-    "/docs",
-    "/openapi.json",
-    "/redoc",
-    "/.well-known/oauth-protected-resource",
-    "/.well-known/oauth-protected-resource/mcp",
-    "/.well-known/oauth-authorization-server",
-    "/.well-known/openid-configuration",
-    "/.well-known/jwks.json",
-    "/register",
-    "/oauth/register",
-})
+_PUBLIC_PATHS: frozenset[str] = frozenset(
+    {
+        "/healthz",
+        "/readyz",
+        "/install.sh",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/openid-configuration",
+        "/.well-known/jwks.json",
+        "/register",
+        "/oauth/register",
+    }
+)
 
 _MCP_ALLOWED_METHODS: frozenset[str] = frozenset({"GET", "POST", "OPTIONS"})
 
@@ -55,6 +57,13 @@ def _required_scope_for_request(request: Request) -> str | None:
     return None
 
 
+def _is_openai_domain_verification_path(path: str) -> bool:
+    settings = get_settings()
+    if not settings.openai_domain_verification_path:
+        return False
+    return path == settings.openai_domain_verification_path
+
+
 class BearerAuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         clear_current_auth_context()
@@ -62,7 +71,9 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             if request.url.path == "/mcp" and request.method.upper() not in _MCP_ALLOWED_METHODS:
                 return await call_next(request)
 
-            if request.url.path in _PUBLIC_PATHS:
+            if request.url.path in _PUBLIC_PATHS or _is_openai_domain_verification_path(
+                request.url.path
+            ):
                 return await call_next(request)
 
             error = await _verify_bearer(request)
@@ -79,7 +90,9 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
 
     if "token" in request.query_params or "access_token" in request.query_params:
         logger.warning("auth: rejected token sent via query parameter from %s", _client_ip(request))
-        return _unauthorized("Tokens must be sent in the Authorization header, not as query parameters.")
+        return _unauthorized(
+            "Tokens must be sent in the Authorization header, not as query parameters."
+        )
 
     auth_header = request.headers.get("Authorization", "")
     if not auth_header:
@@ -101,13 +114,21 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
 
     required_scope = _required_scope_for_request(request)
 
-    oauth_check = await _attempt_oauth_validation(request=request, token=token, required_scope=required_scope)
+    oauth_check = await _attempt_oauth_validation(
+        request=request,
+        token=token,
+        required_scope=required_scope,
+    )
     if oauth_check is not None:
         if oauth_check.status_code == 200:
             return None
         return oauth_check
 
-    pat_check = await introspect_managed_pat(request=request, token=token, required_scope=required_scope)
+    pat_check = await introspect_managed_pat(
+        request=request,
+        token=token,
+        required_scope=required_scope,
+    )
     if pat_check is not None:
         if pat_check.status_code == 200:
             return None
@@ -144,14 +165,18 @@ async def _attempt_oauth_validation(
     if not settings.oauth_validation_enabled():
         return None
 
-    result = await validate_oauth_access_token(
-        token=token,
-        jwks_url=str(settings.oauth_jwks_url),
-        issuer=str(settings.oauth_expected_issuer),
-        audience=settings.mcp_canonical_resource,
-        required_scope=required_scope,
-        timeout_seconds=settings.platform_api_timeout_seconds,
-    )
+    try:
+        result = await validate_oauth_access_token(
+            token=token,
+            jwks_url=str(settings.oauth_jwks_url),
+            issuer=str(settings.oauth_expected_issuer),
+            audience=settings.mcp_canonical_resource,
+            required_scope=required_scope,
+            timeout_seconds=settings.platform_api_timeout_seconds,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("auth: oauth jwks validation failed: %s", str(exc))
+        return _service_unavailable("Token verification service unavailable")
 
     if result.ok:
         claims = result.claims or {}
@@ -192,7 +217,11 @@ async def introspect_managed_pat(
 
     try:
         async with httpx.AsyncClient(timeout=settings.platform_api_timeout_seconds) as client:
-            response = await client.post(url, headers={"Authorization": f"Bearer {token}"}, json=payload)
+            response = await client.post(
+                url,
+                headers={"Authorization": f"Bearer {token}"},
+                json=payload,
+            )
     except httpx.HTTPError as exc:
         logger.warning("auth: platform-api introspection failed (%s): %s", url, str(exc))
         return _service_unavailable("Token verification service unavailable")
@@ -216,7 +245,11 @@ async def introspect_managed_pat(
     if response.status_code == 401:
         return JSONResponse(status_code=404, content={})
 
-    logger.warning("auth: unexpected introspection status=%s body=%s", response.status_code, response.text)
+    logger.warning(
+        "auth: unexpected introspection status=%s body=%s",
+        response.status_code,
+        response.text,
+    )
     return _service_unavailable("Token verification service error")
 
 
@@ -240,7 +273,7 @@ def validate_local_pat(
         logger.warning("auth: revoked token %r used from %s", token_id, _client_ip(request))
         return _unauthorized("Token has been revoked.", required_scope=required_scope)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if record.expires_at is not None and record.expires_at < now:
         logger.warning("auth: expired token %r used from %s", token_id, _client_ip(request))
         return _unauthorized("Token has expired.", required_scope=required_scope)
@@ -249,7 +282,11 @@ def validate_local_pat(
         logger.warning("auth: invalid token secret for %r from %s", token_id, _client_ip(request))
         return _unauthorized("Invalid token.", required_scope=required_scope)
 
-    if required_scope is not None and required_scope not in record.scopes and get_settings().scopes_enforced():
+    if (
+        required_scope is not None
+        and required_scope not in record.scopes
+        and get_settings().scopes_enforced()
+    ):
         logger.warning("auth_scope_denied token_id=%s required_scope=%s", token_id, required_scope)
         return _unauthorized("Insufficient token scope", required_scope=required_scope)
 
@@ -259,9 +296,13 @@ def validate_local_pat(
         authenticated=True,
         bearer_token=token,
         client_id=token_id,
-        workspace_id=request.headers.get("x-workspace-id"),
+        workspace_id=record.workspace_id,
         user_id=request.headers.get("x-user-id"),
-        plan=(request.headers.get("x-plan") or request.headers.get("x-plan-tier") or request.headers.get("x-tier")),
+        plan=(
+            request.headers.get("x-plan")
+            or request.headers.get("x-plan-tier")
+            or request.headers.get("x-tier")
+        ),
     )
     return JSONResponse(status_code=200, content={})
 
