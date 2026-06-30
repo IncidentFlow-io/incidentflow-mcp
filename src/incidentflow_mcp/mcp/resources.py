@@ -27,10 +27,7 @@ def register_resources(mcp: FastMCP) -> None:
     @mcp.resource(
         "incidents://recent",
         name="recent_incidents",
-        description=(
-            "Brief list of recent incidents: "
-            "id, title, severity, and current status."
-        ),
+        description=("Brief list of recent incidents: id, title, severity, and current status."),
         mime_type="application/json",
     )
     def recent_incidents() -> list[dict]:
@@ -87,8 +84,7 @@ def register_resources(mcp: FastMCP) -> None:
         "incidents://timeline/{incident_id}",
         name="incident_timeline",
         description=(
-            "Incident event timeline: timestamps, step descriptions, "
-            "and actors (systems / users)."
+            "Incident event timeline: timestamps, step descriptions, and actors (systems / users)."
         ),
         mime_type="application/json",
     )

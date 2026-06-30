@@ -278,7 +278,10 @@ class TestAnalyzeDnsDashboard:
 
 class TestDnsSummaryHelpers:
     async def test_join_limited_deduplicates_and_limits(self) -> None:
-        assert _join_limited(["a", "b", "a", "c", "d", "e", "f", "g"], limit=5) == "a, b, c, d, e, +2 more"
+        assert (
+            _join_limited(["a", "b", "a", "c", "d", "e", "f", "g"], limit=5)
+            == "a, b, c, d, e, +2 more"
+        )
 
     async def test_dns_summary_hints_includes_limited_dns_panels(self) -> None:
         payload = {
@@ -293,7 +296,8 @@ class TestDnsSummaryHelpers:
         out = await analyze_dns_dashboard(FakeClient(analyze=payload), dashboard_uid="dns")
 
         assert out.summary_hints == [
-            "DNS-focused panels detected: DNS panel 1, DNS panel 2, DNS panel 3, DNS panel 4, DNS panel 5, +2 more"
+            "DNS-focused panels detected: DNS panel 1, DNS panel 2, DNS panel 3, "
+            "DNS panel 4, DNS panel 5, +2 more"
         ]
 
     async def test_dns_summary_includes_no_dns_panel_warning(self) -> None:

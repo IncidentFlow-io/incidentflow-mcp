@@ -55,13 +55,15 @@ _MCP_METHOD_TO_REQUEST_TYPE = {
 }
 
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
-_KNOWN_ROUTES = frozenset({
-    "/mcp",
-    "/healthz",
-    "/readyz",
-    "/metrics",
-    "/install.sh",
-})
+_KNOWN_ROUTES = frozenset(
+    {
+        "/mcp",
+        "/healthz",
+        "/readyz",
+        "/metrics",
+        "/install.sh",
+    }
+)
 
 http_requests_total = Counter(
     "http_requests_total",

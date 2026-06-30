@@ -14,6 +14,7 @@ from incidentflow_mcp.mcp.server import _sanitize_pod, _strip_image_digest
 # _strip_image_digest
 # ---------------------------------------------------------------------------
 
+
 def test_strip_image_digest_removes_sha256() -> None:
     image = "ghcr.io/myorg/myapp:v1.2.3@sha256:abc123def456"
     assert _strip_image_digest(image) == "ghcr.io/myorg/myapp:v1.2.3"
@@ -161,6 +162,7 @@ def test_sanitize_pod_handles_missing_optional_fields() -> None:
 # ---------------------------------------------------------------------------
 # Integration: k8s_list_pods output shape
 # ---------------------------------------------------------------------------
+
 
 def test_k8s_list_pods_output_shape_via_sanitizer() -> None:
     """Simulate what k8s_list_pods returns for a two-pod namespace."""

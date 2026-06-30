@@ -149,7 +149,12 @@ def _build_mcp_post_request_examples() -> dict[str, Any]:
                 "params": {
                     "name": "correlate_alerts",
                     "arguments": {
-                        "alerts_json": '[{"alert_id":"a1","name":"HighMemoryUsage","service":"api-gateway","severity":"critical","status":"firing","fired_at":"2024-01-15T10:00:00Z","labels":{"env":"prod"}}]',
+                        "alerts_json": (
+                            '[{"alert_id":"a1","name":"HighMemoryUsage",'
+                            '"service":"api-gateway","severity":"critical",'
+                            '"status":"firing","fired_at":"2024-01-15T10:00:00Z",'
+                            '"labels":{"env":"prod"}}]'
+                        ),
                         "window_minutes": 30,
                         "min_cluster_size": 2,
                         "execution_mode": "auto",
@@ -304,7 +309,12 @@ def _add_components(spec: dict[str, Any]) -> None:
     schemas["UnauthorizedError"] = {
         "type": "object",
         "required": ["detail"],
-        "properties": {"detail": {"type": "string", "example": "Missing or malformed Authorization: Bearer <token>."}},
+        "properties": {
+            "detail": {
+                "type": "string",
+                "example": "Missing or malformed Authorization: Bearer <token>.",
+            }
+        },
     }
     schemas["ForbiddenScopeError"] = {
         "type": "object",
@@ -334,7 +344,10 @@ def _add_components(spec: dict[str, Any]) -> None:
         "bearerAuth": {
             "type": "http",
             "scheme": "bearer",
-            "description": "Bearer token auth. In development with no auth provider configured, /mcp may run unprotected.",
+            "description": (
+                "Bearer token auth. In development with no auth provider configured, "
+                "/mcp may run unprotected."
+            ),
         }
     }
 
@@ -393,7 +406,8 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
             "summary": "MCP Streamable HTTP handshake",
             "description": (
                 "MCP Streamable HTTP endpoint (custom ASGI proxy route). "
-                "GET is supported by transport and may be used by MCP clients for handshake/session semantics."
+                "GET is supported by transport and may be used by MCP clients "
+                "for handshake/session semantics."
             ),
             "security": [{"bearerAuth": []}],
             "responses": {
@@ -419,7 +433,9 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
             "tags": ["mcp"],
             "operationId": "mcpOptions",
             "summary": "MCP CORS preflight",
-            "description": "OPTIONS support for MCP endpoint (kept for CORS preflight compatibility).",
+            "description": (
+                "OPTIONS support for MCP endpoint (kept for CORS preflight compatibility)."
+            ),
             "security": [{"bearerAuth": []}],
             "responses": {
                 "200": {
@@ -436,7 +452,8 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
             "operationId": "mcpPost",
             "summary": "MCP JSON-RPC endpoint",
             "description": (
-                "Primary MCP endpoint. Accepts JSON-RPC requests such as `initialize`, `tools/list`, and `tools/call`. "
+                "Primary MCP endpoint. Accepts JSON-RPC requests such as "
+                "`initialize`, `tools/list`, and `tools/call`. "
                 "Some responses may stream over SSE depending on client transport/session flow."
             ),
             "security": [{"bearerAuth": []}],
@@ -510,7 +527,9 @@ def _annotate_existing_paths(spec: dict[str, Any]) -> None:
                 continue
 
             if "operationId" not in operation or not operation["operationId"]:
-                operation["operationId"] = f"{method}_{path.strip('/').replace('/', '_').replace('.', '_')}"
+                operation["operationId"] = (
+                    f"{method}_{path.strip('/').replace('/', '_').replace('.', '_')}"
+                )
 
             if path in public_paths:
                 operation["security"] = []

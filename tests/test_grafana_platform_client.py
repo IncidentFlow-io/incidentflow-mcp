@@ -37,16 +37,21 @@ def _json(payload: object, status: int = 200) -> Callable[[httpx.Request], httpx
 
 
 class TestConstruction:
-    def test_requires_base_url(self) -> None:
+    def test_requires_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PLATFORM_API_BASE_URL", raising=False)
         with pytest.raises(ValueError, match="PLATFORM_API_BASE_URL"):
             PlatformGrafanaClient(
-                Settings(platform_api_internal_api_key="k"), workspace_id=WORKSPACE_ID
+                Settings(_env_file=None, platform_api_internal_api_key="k"),
+                workspace_id=WORKSPACE_ID,
             )
 
-    def test_requires_internal_token(self) -> None:
+    def test_requires_internal_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PLATFORM_API_INTERNAL_TOKEN", raising=False)
+        monkeypatch.delenv("PLATFORM_API_INTERNAL_API_KEY", raising=False)
         with pytest.raises(ValueError, match="PLATFORM_API_INTERNAL_TOKEN"):
             PlatformGrafanaClient(
-                Settings(platform_api_base_url="http://platform.test"), workspace_id=WORKSPACE_ID
+                Settings(_env_file=None, platform_api_base_url="http://platform.test"),
+                workspace_id=WORKSPACE_ID,
             )
 
     def test_sets_internal_headers(self) -> None:

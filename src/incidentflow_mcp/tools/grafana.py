@@ -215,11 +215,7 @@ def _dns_summary_hints(panels: list[PanelAnalysis]) -> list[str]:
 
 
 def _dns_panel_titles(panels: list[PanelAnalysis]) -> list[str]:
-    return [
-        _panel_label(panel)
-        for panel in panels
-        if _contains_any(panel.expr, _DNS_EXPR_MARKERS)
-    ]
+    return [_panel_label(panel) for panel in panels if _contains_any(panel.expr, _DNS_EXPR_MARKERS)]
 
 
 def _dns_error_code_panels(panels: list[PanelAnalysis]) -> dict[str, list[str]]:

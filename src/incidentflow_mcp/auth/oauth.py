@@ -36,7 +36,9 @@ class JwksCache:
         self._jwks: dict[str, Any] | None = None
         self._expires_at: float = 0.0
 
-    async def get(self, *, jwks_url: str, timeout_seconds: float, ttl_seconds: int = 300) -> dict[str, Any]:
+    async def get(
+        self, *, jwks_url: str, timeout_seconds: float, ttl_seconds: int = 300
+    ) -> dict[str, Any]:
         now = time.time()
         if self._jwks is not None and now < self._expires_at:
             return self._jwks
@@ -107,7 +109,9 @@ async def validate_oauth_access_token(
         signing_input = f"{header_segment}.{payload_segment}".encode("ascii")
         public_key.verify(signature, signing_input, padding.PKCS1v15(), hashes.SHA256())
     except Exception:
-        return OAuthValidationResult(ok=False, code="oauth_invalid", detail="Invalid token signature")
+        return OAuthValidationResult(
+            ok=False, code="oauth_invalid", detail="Invalid token signature"
+        )
 
     now = int(time.time())
     token_iss = str(claims.get("iss", ""))
@@ -124,13 +128,17 @@ async def validate_oauth_access_token(
     elif isinstance(token_aud, list):
         aud_ok = audience in [str(item) for item in token_aud]
     if not aud_ok:
-        return OAuthValidationResult(ok=False, code="oauth_invalid", detail="Invalid token audience/resource")
+        return OAuthValidationResult(
+            ok=False, code="oauth_invalid", detail="Invalid token audience/resource"
+        )
 
     if not isinstance(exp, int) or exp <= now:
         return OAuthValidationResult(ok=False, code="oauth_invalid", detail="Token expired")
 
     if isinstance(nbf, int) and nbf > now:
-        return OAuthValidationResult(ok=False, code="oauth_invalid", detail="Token is not active yet")
+        return OAuthValidationResult(
+            ok=False, code="oauth_invalid", detail="Token is not active yet"
+        )
 
     if required_scope is not None:
         raw_scope = claims.get("scope", "")

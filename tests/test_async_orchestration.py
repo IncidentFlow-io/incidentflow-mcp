@@ -136,8 +136,7 @@ def test_select_workload_pod_prefers_exact_then_prefix() -> None:
     pods = [{"name": "checkout-api-abc"}, {"name": "checkout-api"}]
     assert _select_workload_pod(pods, "checkout-api") == "checkout-api"
     assert (
-        _select_workload_pod([{"name": "checkout-api-abc"}], "checkout-api")
-        == "checkout-api-abc"
+        _select_workload_pod([{"name": "checkout-api-abc"}], "checkout-api") == "checkout-api-abc"
     )
 
 
@@ -660,9 +659,7 @@ def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
 def test_compact_log_payload_redacts_secrets() -> None:
     payload = {
         "status": "succeeded",
-        "data": {
-            "logs": "INFO redis_url=redis://:super-secret@redis-master:6379/0 token=abc123"
-        },
+        "data": {"logs": "INFO redis_url=redis://:super-secret@redis-master:6379/0 token=abc123"},
     }
 
     compact = _compact_log_payload(
@@ -673,9 +670,7 @@ def test_compact_log_payload_redacts_secrets() -> None:
         compact=True,
     )
 
-    assert compact["data"]["lines"] == [
-        "INFO redis_url=redis://***@redis-master:6379/0 token=***"
-    ]
+    assert compact["data"]["lines"] == ["INFO redis_url=redis://***@redis-master:6379/0 token=***"]
 
 
 def test_compact_external_status_includes_failed_provider_entries() -> None:

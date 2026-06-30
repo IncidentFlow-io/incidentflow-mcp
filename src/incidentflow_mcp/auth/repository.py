@@ -16,9 +16,8 @@ import json
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Datetime serialisation (always UTC ISO-8601)
@@ -54,10 +53,10 @@ class TokenRecord:
     name: str
     scopes: list[str]
     created_at: datetime
-    last_used_at: Optional[datetime] = None
-    expires_at: Optional[datetime] = None
-    revoked_at: Optional[datetime] = None
-    workspace_id: Optional[str] = None
+    last_used_at: datetime | None = None
+    expires_at: datetime | None = None
+    revoked_at: datetime | None = None
+    workspace_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +77,7 @@ class TokenRepository(ABC):
     def save(self, record: TokenRecord) -> None: ...
 
     @abstractmethod
-    def find_by_id(self, token_id: str) -> Optional[TokenRecord]: ...
+    def find_by_id(self, token_id: str) -> TokenRecord | None: ...
 
     @abstractmethod
     def list_all(self) -> list[TokenRecord]: ...
@@ -97,14 +96,14 @@ class TokenRepository(ABC):
 # ---------------------------------------------------------------------------
 
 
-def _dt_to_str(dt: Optional[datetime]) -> Optional[str]:
+def _dt_to_str(dt: datetime | None) -> str | None:
     return dt.strftime(_ISO_FMT) if dt is not None else None
 
 
-def _str_to_dt(s: Optional[str]) -> Optional[datetime]:
+def _str_to_dt(s: str | None) -> datetime | None:
     if not s:
         return None
-    return datetime.strptime(s, _ISO_FMT).replace(tzinfo=timezone.utc)
+    return datetime.strptime(s, _ISO_FMT).replace(tzinfo=UTC)
 
 
 def _to_dict(r: TokenRecord) -> dict:
@@ -151,7 +150,7 @@ class JsonTokenRepository(TokenRepository):
     Override via: INCIDENTFLOW_TOKEN_DB env var or constructor argument.
     """
 
-    def __init__(self, path: Optional[Path] = None) -> None:
+    def __init__(self, path: Path | None = None) -> None:
         if path is None:
             env = os.environ.get("INCIDENTFLOW_TOKEN_DB")
             path = Path(env) if env else Path.home() / ".incidentflow" / "tokens.json"
@@ -181,7 +180,7 @@ class JsonTokenRepository(TokenRepository):
         data[record.token_id] = _to_dict(record)
         self._persist(data)
 
-    def find_by_id(self, token_id: str) -> Optional[TokenRecord]:
+    def find_by_id(self, token_id: str) -> TokenRecord | None:
         entry = self._load().get(token_id)
         return _from_dict(entry) if entry is not None else None
 
@@ -221,7 +220,7 @@ class InMemoryTokenRepository(TokenRepository):
     def save(self, record: TokenRecord) -> None:
         self._store[record.token_id] = record
 
-    def find_by_id(self, token_id: str) -> Optional[TokenRecord]:
+    def find_by_id(self, token_id: str) -> TokenRecord | None:
         return self._store.get(token_id)
 
     def list_all(self) -> list[TokenRecord]:
@@ -241,7 +240,7 @@ class InMemoryTokenRepository(TokenRepository):
 # Repository factory (singleton, monkeypatchable in tests)
 # ---------------------------------------------------------------------------
 
-_repo: Optional[TokenRepository] = None
+_repo: TokenRepository | None = None
 
 
 def get_token_repository() -> TokenRepository:

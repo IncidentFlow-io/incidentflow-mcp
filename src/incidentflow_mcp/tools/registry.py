@@ -569,31 +569,33 @@ _TOOL_SPECS: list[ToolSpec] = [
             "Use during incident triage to check whether pods are Running, Pending, or "
             f"CrashLooping. {_K8S_READ_ONLY_JUSTIFICATION}"
         ),
-        input_schema=_k8s_schema({
-            "namespace": {"type": "string"},
-            "include_labels": {
-                "type": "boolean",
-                "default": False,
-                "description": "Include Kubernetes labels in the response. Off by default.",
-            },
-            "include_images": {
-                "type": "boolean",
-                "default": True,
-                "description": "Include container image name:tag in the response.",
-            },
-            "include_node": {
-                "type": "boolean",
-                "default": True,
-                "description": "Include the node name the pod is scheduled on.",
-            },
-            "limit": {
-                "type": "integer",
-                "default": 50,
-                "minimum": 1,
-                "maximum": 200,
-                "description": "Maximum number of pods to return. Defaults to 50.",
-            },
-        }),
+        input_schema=_k8s_schema(
+            {
+                "namespace": {"type": "string"},
+                "include_labels": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Include Kubernetes labels in the response. Off by default.",
+                },
+                "include_images": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include container image name:tag in the response.",
+                },
+                "include_node": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Include the node name the pod is scheduled on.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200,
+                    "description": "Maximum number of pods to return. Defaults to 50.",
+                },
+            }
+        ),
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
@@ -693,20 +695,22 @@ _TOOL_SPECS: list[ToolSpec] = [
             "Useful for spotting CrashLoopBackOff, ImagePullBackOff, readiness failures, "
             f"and scheduling issues. {_K8S_READ_ONLY_JUSTIFICATION}"
         ),
-        input_schema=_k8s_schema({
-            "namespace": {"type": "string"},
-            "pod": {
-                "type": "string",
-                "description": "Optional pod name to filter events to a specific pod.",
-            },
-            "limit": {
-                "type": "integer",
-                "default": 50,
-                "minimum": 1,
-                "maximum": 200,
-                "description": "Maximum number of deduplicated events to return.",
-            },
-        }),
+        input_schema=_k8s_schema(
+            {
+                "namespace": {"type": "string"},
+                "pod": {
+                    "type": "string",
+                    "description": "Optional pod name to filter events to a specific pod.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200,
+                    "description": "Maximum number of deduplicated events to return.",
+                },
+            }
+        ),
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
@@ -845,9 +849,12 @@ _TOOL_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="grafana_list_dashboards",
+        title="List Grafana Dashboards",
         description=(
-            "List the Grafana dashboards approved (allow-listed) for this workspace, "
-            "with uid, title, folder, and tags. Use the uid with the other grafana tools."
+            "Use this when you need to discover which Grafana dashboards are approved for "
+            "the current workspace before reading panels or running dashboard analysis. "
+            "Returns allow-listed dashboard uid, title, folder, and tags. Read-only; access "
+            "is mediated by platform-api workspace policy."
         ),
         input_schema={
             "type": "object",
@@ -866,14 +873,16 @@ _TOOL_SPECS: list[ToolSpec] = [
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True,
+            "openWorldHint": False,
         },
     ),
     ToolSpec(
         name="grafana_get_dashboard",
+        title="Get Grafana Dashboard",
         description=(
-            "Fetch a single allow-listed Grafana dashboard's metadata (panels, "
-            "datasources) by uid."
+            "Use this when you already have an allow-listed Grafana dashboard uid and need "
+            "its dashboard metadata, panels, and datasource references. Read-only; the "
+            "dashboard must be approved for the workspace in platform-api."
         ),
         input_schema={
             "type": "object",
@@ -887,15 +896,17 @@ _TOOL_SPECS: list[ToolSpec] = [
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True,
+            "openWorldHint": False,
         },
     ),
     ToolSpec(
         name="grafana_extract_panel_queries",
+        title="Extract Grafana Panel Queries",
         description=(
-            "Extract the Prometheus/PromQL queries from a dashboard's panels (rows "
-            "traversed, non-Prometheus targets skipped). Returns panel title, refId, "
-            "datasource uid, and the expression."
+            "Use this when you need the Prometheus/PromQL expressions embedded in an "
+            "allow-listed Grafana dashboard before deciding which metrics to query. "
+            "Returns panel title, refId, datasource uid, and expression; skips unsupported "
+            "or non-Prometheus targets."
         ),
         input_schema={
             "type": "object",
@@ -909,15 +920,16 @@ _TOOL_SPECS: list[ToolSpec] = [
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True,
+            "openWorldHint": False,
         },
     ),
     ToolSpec(
         name="grafana_metrics_query",
+        title="Query Grafana Metrics",
         description=(
-            "Run an instant PromQL query through Grafana's datasource proxy. The query "
-            "is validated server-side (allow-listed metrics, shape limits) and the result "
-            "is returned as normalized, label-sanitized series."
+            "Use this when you need a point-in-time PromQL result from an approved Grafana "
+            "datasource. Runs an instant query through platform-api, where PromQL guardrails, "
+            "workspace policy, and label sanitization are enforced server-side."
         ),
         input_schema={
             "type": "object",
@@ -936,15 +948,16 @@ _TOOL_SPECS: list[ToolSpec] = [
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True,
+            "openWorldHint": False,
         },
     ),
     ToolSpec(
         name="grafana_metrics_query_range",
+        title="Query Grafana Metrics Range",
         description=(
-            "Run a range PromQL query through Grafana's datasource proxy over [start, end] "
-            "at a given step. Validated server-side; returns normalized, label-sanitized "
-            "time series."
+            "Use this when you need a PromQL time series over a bounded window from an "
+            "approved Grafana datasource. Runs a range query through platform-api with "
+            "server-side query limits, workspace policy, and label sanitization."
         ),
         input_schema={
             "type": "object",
@@ -962,15 +975,16 @@ _TOOL_SPECS: list[ToolSpec] = [
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True,
+            "openWorldHint": False,
         },
     ),
     ToolSpec(
         name="analyze_dashboard_health",
+        title="Analyze Dashboard Health",
         description=(
-            "Analyze an allow-listed Grafana dashboard over a time window: extracts each "
-            "panel's PromQL, runs it (guardrail-checked), and returns per-panel normalized "
-            "series with anomaly flags and a summary. Read-only; suggests no actions."
+            "Use this when you need a read-only health summary for an allow-listed Grafana "
+            "dashboard over a time window. Extracts panel PromQL, runs guarded range queries, "
+            "and returns per-panel series, anomaly flags, and a concise summary."
         ),
         input_schema={
             "type": "object",
@@ -995,15 +1009,16 @@ _TOOL_SPECS: list[ToolSpec] = [
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True,
+            "openWorldHint": False,
         },
     ),
     ToolSpec(
         name="analyze_dns_dashboard",
+        title="Analyze DNS Dashboard",
         description=(
-            "Analyze an allow-listed Grafana dashboard over a time window with DNS-focused "
-            "summary hints. Reuses the generic dashboard health analysis, then highlights "
-            "DNS-related panels and returned NXDOMAIN/SERVFAIL response-code series."
+            "Use this when investigating DNS health from an allow-listed Grafana dashboard. "
+            "Runs the dashboard health analysis, then highlights DNS-related panels and "
+            "NXDOMAIN/SERVFAIL-style response-code series when present."
         ),
         input_schema={
             "type": "object",
@@ -1028,7 +1043,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,
-            "openWorldHint": True,
+            "openWorldHint": False,
         },
     ),
 ]
@@ -1046,188 +1061,192 @@ _MEMORY_WRITE_JUSTIFICATION = (
     "It does not modify Kubernetes resources, Slack messages, or any external system."
 )
 
-_TOOL_SPECS.extend([
-    ToolSpec(
-        name="memory_search_similar_incidents",
-        title="Search Similar Past Incidents",
-        description=(
-            "Searches IncidentFlow's semantic memory for past incidents similar to the "
-            "provided query. Returns ranked matches with incident IDs, similarity scores, "
-            "service context, severity, resolution summaries, and source metadata. "
-            "Use this to surface past RCA patterns and proven remediation steps for "
-            f"the current incident. {_MEMORY_READ_ONLY_JUSTIFICATION}"
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": (
-                        "Free-text description of the current incident or alert, e.g. "
-                        "'readiness probe failed after deployment istio-proxy backoff'."
-                    ),
+_TOOL_SPECS.extend(
+    [
+        ToolSpec(
+            name="memory_search_similar_incidents",
+            title="Search Similar Past Incidents",
+            description=(
+                "Searches IncidentFlow's semantic memory for past incidents similar to the "
+                "provided query. Returns ranked matches with incident IDs, similarity scores, "
+                "service context, severity, resolution summaries, and source metadata. "
+                "Use this to surface past RCA patterns and proven remediation steps for "
+                f"the current incident. {_MEMORY_READ_ONLY_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Free-text description of the current incident or alert, e.g. "
+                            "'readiness probe failed after deployment istio-proxy backoff'."
+                        ),
+                    },
+                    "service": {
+                        "type": "string",
+                        "description": "Optional service name to narrow the search scope.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 20,
+                        "description": "Maximum number of similar incidents to return.",
+                    },
+                    "workspace_id": {
+                        "type": "string",
+                        "description": (
+                            "Workspace scope. Optional when "
+                            "INCIDENTFLOW_WORKSPACE_ID is configured."
+                        ),
+                    },
                 },
-                "service": {
-                    "type": "string",
-                    "description": "Optional service name to narrow the search scope.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "default": 5,
-                    "minimum": 1,
-                    "maximum": 20,
-                    "description": "Maximum number of similar incidents to return.",
-                },
-                "workspace_id": {
-                    "type": "string",
-                    "description": (
-                        "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is configured."
-                    ),
-                },
+                "required": ["query"],
             },
-            "required": ["query"],
-        },
-        annotations=_read_only_annotations(),
-    ),
-    ToolSpec(
-        name="memory_get_service_context",
-        title="Get Service Incident History",
-        description=(
-            "Returns recent semantic memory entries for a specific service — past incident "
-            "summaries, Slack thread context, and RCA patterns stored in IncidentFlow memory. "
-            "Use to understand a service's historical failure patterns before investigating "
-            f"a new incident. {_MEMORY_READ_ONLY_JUSTIFICATION}"
+            annotations=_read_only_annotations(),
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "service": {
-                    "type": "string",
-                    "description": "Service name to retrieve memory context for.",
+        ToolSpec(
+            name="memory_get_service_context",
+            title="Get Service Incident History",
+            description=(
+                "Returns recent semantic memory entries for a specific service — past incident "
+                "summaries, Slack thread context, and RCA patterns stored in IncidentFlow memory. "
+                "Use to understand a service's historical failure patterns before investigating "
+                f"a new incident. {_MEMORY_READ_ONLY_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "service": {
+                        "type": "string",
+                        "description": "Service name to retrieve memory context for.",
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Optional free-text context to refine results, "
+                            "e.g. 'OOM probe failure'."
+                        ),
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 5,
+                        "minimum": 1,
+                        "maximum": 20,
+                    },
+                    "workspace_id": {
+                        "type": "string",
+                        "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
+                    },
                 },
-                "query": {
-                    "type": "string",
-                    "description": (
-                        "Optional free-text context to refine results, e.g. 'OOM probe failure'."
-                    ),
-                },
-                "limit": {
-                    "type": "integer",
-                    "default": 5,
-                    "minimum": 1,
-                    "maximum": 20,
-                },
-                "workspace_id": {
-                    "type": "string",
-                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
-                },
+                "required": ["service"],
             },
-            "required": ["service"],
-        },
-        annotations=_read_only_annotations(),
-    ),
-    ToolSpec(
-        name="memory_upsert_incident_summary",
-        title="Save Incident Summary to Memory",
-        description=(
-            "Persists an incident summary, Slack thread summary, or RCA into IncidentFlow's "
-            "semantic memory so future incidents can find it via similarity search. "
-            f"{_MEMORY_WRITE_JUSTIFICATION}"
+            annotations=_read_only_annotations(),
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "incident_id": {
-                    "type": "string",
-                    "description": "Incident identifier, e.g. INC-001.",
+        ToolSpec(
+            name="memory_upsert_incident_summary",
+            title="Save Incident Summary to Memory",
+            description=(
+                "Persists an incident summary, Slack thread summary, or RCA into IncidentFlow's "
+                "semantic memory so future incidents can find it via similarity search. "
+                f"{_MEMORY_WRITE_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "incident_id": {
+                        "type": "string",
+                        "description": "Incident identifier, e.g. INC-001.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": [
+                            "incident_summary",
+                            "slack_thread",
+                            "rca",
+                            "runbook",
+                            "alert_pattern",
+                        ],
+                        "description": "Type of document being stored.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": (
+                            "Free-text summary to embed. Should be concise and factual, "
+                            "e.g. the RCA or resolution steps."
+                        ),
+                    },
+                    "service": {"type": "string", "description": "Affected service name."},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "high", "medium", "low", "info"],
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["open", "investigating", "mitigating", "resolved"],
+                    },
+                    "cluster": {"type": "string", "description": "Kubernetes cluster name."},
+                    "namespace": {"type": "string", "description": "Kubernetes namespace."},
+                    "started_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "Incident start time as ISO 8601.",
+                    },
+                    "workspace_id": {
+                        "type": "string",
+                        "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
+                    },
                 },
-                "source": {
-                    "type": "string",
-                    "enum": [
-                        "incident_summary",
-                        "slack_thread",
-                        "rca",
-                        "runbook",
-                        "alert_pattern",
-                    ],
-                    "description": "Type of document being stored.",
-                },
-                "text": {
-                    "type": "string",
-                    "description": (
-                        "Free-text summary to embed. Should be concise and factual, "
-                        "e.g. the RCA or resolution steps."
-                    ),
-                },
-                "service": {"type": "string", "description": "Affected service name."},
-                "severity": {
-                    "type": "string",
-                    "enum": ["critical", "high", "medium", "low", "info"],
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["open", "investigating", "mitigating", "resolved"],
-                },
-                "cluster": {"type": "string", "description": "Kubernetes cluster name."},
-                "namespace": {"type": "string", "description": "Kubernetes namespace."},
-                "started_at": {
-                    "type": "string",
-                    "format": "date-time",
-                    "description": "Incident start time as ISO 8601.",
-                },
-                "workspace_id": {
-                    "type": "string",
-                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
-                },
+                "required": ["incident_id", "source", "text"],
             },
-            "required": ["incident_id", "source", "text"],
-        },
-        annotations={
-            "readOnlyHint": False,
-            "openWorldHint": False,
-            "destructiveHint": False,
-            "idempotentHint": True,
-        },
-    ),
-    ToolSpec(
-        name="memory_find_runbook",
-        title="Find Runbook from Memory",
-        description=(
-            "Searches IncidentFlow's semantic memory for stored runbook steps that match "
-            "the current incident pattern. Returns the most relevant runbook entries with "
-            "similarity scores and step descriptions. "
-            f"{_MEMORY_READ_ONLY_JUSTIFICATION}"
+            annotations={
+                "readOnlyHint": False,
+                "openWorldHint": False,
+                "destructiveHint": False,
+                "idempotentHint": True,
+            },
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": (
-                        "Describe the problem to find matching runbooks for, e.g. "
-                        "'istio sidecar startup delay causes readiness probe failure'."
-                    ),
+        ToolSpec(
+            name="memory_find_runbook",
+            title="Find Runbook from Memory",
+            description=(
+                "Searches IncidentFlow's semantic memory for stored runbook steps that match "
+                "the current incident pattern. Returns the most relevant runbook entries with "
+                "similarity scores and step descriptions. "
+                f"{_MEMORY_READ_ONLY_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Describe the problem to find matching runbooks for, e.g. "
+                            "'istio sidecar startup delay causes readiness probe failure'."
+                        ),
+                    },
+                    "service": {
+                        "type": "string",
+                        "description": "Optional service name to filter runbooks.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "default": 3,
+                        "minimum": 1,
+                        "maximum": 10,
+                    },
+                    "workspace_id": {
+                        "type": "string",
+                        "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
+                    },
                 },
-                "service": {
-                    "type": "string",
-                    "description": "Optional service name to filter runbooks.",
-                },
-                "limit": {
-                    "type": "integer",
-                    "default": 3,
-                    "minimum": 1,
-                    "maximum": 10,
-                },
-                "workspace_id": {
-                    "type": "string",
-                    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
-                },
+                "required": ["query"],
             },
-            "required": ["query"],
-        },
-        annotations=_read_only_annotations(),
-    ),
-])
+            annotations=_read_only_annotations(),
+        ),
+    ]
+)
 
 
 def get_tool_specs() -> list[ToolSpec]:

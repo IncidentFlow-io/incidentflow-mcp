@@ -1,6 +1,7 @@
 # uv run python _test_mcp.py
 
 import json
+
 import httpx
 
 BASE = "http://localhost:8000"
@@ -194,7 +195,9 @@ r = httpx.post(
     json={"jsonrpc": "2.0", "id": 99, "method": "tools/list", "params": {}},
     timeout=5,
 )
-print(f"\033[{'32' if r.status_code == 401 else '31'}mSTATUS {r.status_code}  (expected 401)\033[0m")
+print(
+    f"\033[{'32' if r.status_code == 401 else '31'}mSTATUS {r.status_code}  (expected 401)\033[0m"
+)
 
 sep("POST /mcp  wrong token → 401")
 r = httpx.post(
@@ -207,4 +210,6 @@ r = httpx.post(
     json={"jsonrpc": "2.0", "id": 99, "method": "tools/list", "params": {}},
     timeout=5,
 )
-print(f"\033[{'32' if r.status_code == 401 else '31'}mSTATUS {r.status_code}  (expected 401)\033[0m")
+print(
+    f"\033[{'32' if r.status_code == 401 else '31'}mSTATUS {r.status_code}  (expected 401)\033[0m"
+)
