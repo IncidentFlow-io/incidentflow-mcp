@@ -131,6 +131,21 @@ but it may not carry enough platform context for Kubernetes command dispatch.
 The MCP package now ships Grafana read tools over the /mcp transport.
 All tools are read-only and rely on platform-api for allow-lists, PromQL guardrails, and label sanitization.
 
+MCP does not connect to Grafana directly and does not store a Grafana service
+account token. The request path is:
+
+```text
+MCP grafana_* tool
+  -> platform-api /internal/integrations/grafana/*
+  -> platform-api decrypts stored Grafana SA token
+  -> Grafana API / datasource proxy
+```
+
+The MCP-to-platform call uses `PLATFORM_API_INTERNAL_API_KEY` as
+`X-Internal-Api-Key`. The user-facing MCP bearer token is only used to resolve
+and authorize the workspace. If the token carries a workspace scope, an explicit
+different `workspace_id` is rejected with `workspace_scope_mismatch`.
+
 Available tools:
 - grafana_list_dashboards
 - grafana_get_dashboard
@@ -151,6 +166,16 @@ Run range PromQL: grafana_metrics_query_range {"datasource_uid":"prometheus", "q
 Inspect full dashboard health: analyze_dashboard_health {"dashboard_uid":"dns", "start":"now-6h", "end":"now", "step":"60s"}
 DNS-focused analysis: analyze_dns_dashboard {"dashboard_uid":"dns"}
 ```
+
+Production/dev prerequisites:
+
+- The workspace must have a connected Grafana integration in platform-api.
+- At least one dashboard must be saved in `grafana_allowed_dashboards`.
+- MCP must have `PLATFORM_API_BASE_URL` pointing to platform-api and
+  `PLATFORM_API_INTERNAL_API_KEY` configured.
+- MCP should have either a workspace-scoped token or
+  `MCP_DEFAULT_WORKSPACE_ID`/`INCIDENTFLOW_WORKSPACE_ID` configured for local
+  smoke tests.
 
 ### Local Grafana smoke stack
 
