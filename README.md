@@ -126,6 +126,169 @@ For local end-to-end testing, use OAuth/platform bearer auth for MCP so
 dispatch. A static `INCIDENTFLOW_PAT` is useful for MCP-only auth smoke tests,
 but it may not carry enough platform context for Kubernetes command dispatch.
 
+### Grafana MCP tools (read-only)
+
+The MCP package now ships Grafana read tools over the /mcp transport.
+All tools are read-only and rely on platform-api for allow-lists, PromQL guardrails, and label sanitization.
+
+MCP does not connect to Grafana directly and does not store a Grafana service
+account token. The request path is:
+
+```text
+MCP grafana_* tool
+  -> platform-api /internal/integrations/grafana/*
+  -> platform-api decrypts stored Grafana SA token
+  -> Grafana API / datasource proxy
+```
+
+The MCP-to-platform call uses `PLATFORM_API_INTERNAL_API_KEY` as
+`X-Internal-Api-Key`. The user-facing MCP bearer token is only used to resolve
+and authorize the workspace. If the token carries a workspace scope, an explicit
+different `workspace_id` is rejected with `workspace_scope_mismatch`.
+
+Available tools:
+- grafana_list_dashboards
+- grafana_get_dashboard
+- grafana_extract_panel_queries
+- grafana_metrics_query
+- grafana_metrics_query_range
+- analyze_dashboard_health
+- analyze_dns_dashboard
+
+Typical workflows:
+
+```text
+List approved dashboards: grafana_list_dashboards
+Read dashboard metadata: grafana_get_dashboard {"dashboard_uid":"dns"}
+Extract dashboard queries: grafana_extract_panel_queries {"dashboard_uid":"dns"}
+Run instant PromQL: grafana_metrics_query {"datasource_uid":"prometheus", "query":"sum(rate(http_requests_total[5m]))"}
+Run range PromQL: grafana_metrics_query_range {"datasource_uid":"prometheus", "query":"sum(rate(http_requests_total[5m]))", "start":"now-1h", "end":"now", "step":"30s"}
+Inspect full dashboard health: analyze_dashboard_health {"dashboard_uid":"dns", "start":"now-6h", "end":"now", "step":"60s"}
+DNS-focused analysis: analyze_dns_dashboard {"dashboard_uid":"dns"}
+```
+
+Production/dev prerequisites:
+
+- The workspace must have a connected Grafana integration in platform-api.
+- At least one dashboard must be saved in `grafana_allowed_dashboards`.
+- MCP must have `PLATFORM_API_BASE_URL` pointing to platform-api and
+  `PLATFORM_API_INTERNAL_API_KEY` configured.
+- MCP should have either a workspace-scoped token or
+  `MCP_DEFAULT_WORKSPACE_ID`/`INCIDENTFLOW_WORKSPACE_ID` configured for local
+  smoke tests.
+
+### Local Grafana smoke stack
+
+For local MCP testing, `docker-compose.yml` includes a `grafana-smoke` profile with:
+
+- Grafana on `http://localhost:3000`
+- Prometheus on `http://localhost:9090`
+- node-exporter on `http://localhost:9100`
+- Grafana.com dashboard `1860` imported automatically
+- a one-shot helper that creates a Grafana service-account token for platform-api
+
+Start the stack:
+
+```bash
+docker compose --profile grafana-smoke up -d prometheus node-exporter grafana grafana-dashboard-1860
+```
+
+Create and print a Grafana service-account token:
+
+```bash
+docker compose --profile grafana-smoke run --rm grafana-sa-token
+```
+
+Use the printed `GRAFANA_SA_TOKEN` with platform-api. For local-only testing,
+platform-api must allow private/loopback Grafana URLs:
+
+```bash
+GRAFANA_ALLOW_PRIVATE_URLS_FOR_DEV=true \
+AGENT_GATEWAY_URL=ws://host.docker.internal:8002/agents/ws \
+uv run uvicorn platform_api.main:app --reload --app-dir src --host 0.0.0.0 --port 8000
+```
+
+Connect platform-api to local Grafana with the service-account token:
+
+```bash
+curl -sS -X POST http://localhost:8000/api/v1/integrations/grafana/connect \
+  -H "Authorization: Bearer $PLATFORM_USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data "{\"grafana_url\":\"http://localhost:3000\",\"grafana_token\":\"$GRAFANA_SA_TOKEN\",\"default_datasource_uid\":\"prometheus\"}"
+```
+
+Then discover dashboards and save dashboard `1860` to the workspace allow-list:
+
+```bash
+curl -sS http://localhost:8000/api/v1/integrations/grafana/dashboards \
+  -H "Authorization: Bearer $PLATFORM_USER_TOKEN"
+
+curl -sS -X POST http://localhost:8000/api/v1/integrations/grafana/allowed-dashboards \
+  -H "Authorization: Bearer $PLATFORM_USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"dashboards":[{"dashboard_uid":"rYdddlPWk","title":"Node Exporter Full","folder":"","datasource_uid":"prometheus","enabled":true}]}'
+```
+
+Finally call MCP through the normal `/mcp` transport:
+
+```bash
+curl -sS http://127.0.0.1:8001/mcp \
+  -H "Authorization: Bearer $MCP_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"grafana_list_dashboards","arguments":{}}}'
+```
+
+### Creating an MCP PAT with workspace scope
+
+Grafana (and Kubernetes) tools resolve the workspace via the MCP bearer token.
+A token without a `workspace_id` will return empty results for any workspace-scoped tool.
+
+**Step 1 — find the workspace ID:**
+
+```bash
+# from the platform-api database
+psql $DATABASE_URL -c "SELECT id, name FROM workspaces;"
+# or from the platform-api REST API (when authenticated)
+curl -sS http://localhost:8000/api/v1/workspaces \
+  -H "Authorization: Bearer $PLATFORM_USER_TOKEN"
+```
+
+**Step 2 — create a PAT bound to that workspace:**
+
+```bash
+uv run incidentflow-mcp token create \
+  --name "local-dev" \
+  --workspace-id "<workspace-uuid>"
+```
+
+The `--workspace-id` flag was added specifically to avoid the empty-result
+issue where tokens created without it returned 0 dashboards from
+`grafana_list_dashboards`.
+
+**Step 3 — wire the token into `.vscode/mcp.json`:**
+
+```json
+{
+  "servers": {
+    "incidentflow-local": {
+      "url": "http://127.0.0.1:8001/mcp",
+      "type": "http",
+      "headers": {
+        "Authorization": "Bearer <token printed by token create>"
+      }
+    }
+  }
+}
+```
+
+**Revoke old tokens** (any previously created without `--workspace-id`):
+
+```bash
+uv run incidentflow-mcp token list      # find token IDs
+uv run incidentflow-mcp token revoke <token_id>
+```
+
 ### CI automation (GitHub Actions)
 
 This repository includes a docs workflow at `.github/workflows/docs.yml`:
@@ -414,3 +577,62 @@ Example (full):
   "response_mode": "full"
 }
 ```
+
+---
+
+## Fixes and validation log
+
+### Bug: `grafana_metrics_query_range` returned HTTP 500
+
+**Root cause:** `start` / `end` values such as `now-15m` and `now` were forwarded
+verbatim to Prometheus via the Grafana datasource proxy.  Prometheus only accepts
+Unix timestamps or RFC 3339 strings — it does not support Grafana-style relative
+expressions.
+
+**Fix:** Added `_resolve_timestamp()` to
+`src/platform_api/infra/grafana/client.py`.  The function converts
+`now`, `now-<N><unit>` (ms / s / m / h / d / w) to integer Unix timestamps
+before the Grafana proxy call.  RFC 3339 strings and plain Unix timestamps pass
+through unchanged.
+
+```python
+# examples
+_resolve_timestamp("now")      → "1782836058"
+_resolve_timestamp("now-15m")  → "1782835158"
+_resolve_timestamp("now-6h")   → "1782814458"
+_resolve_timestamp("2026-01-01T00:00:00Z")  → "2026-01-01T00:00:00Z"  # passthrough
+```
+
+### Bug: `grafana_list_dashboards` returned 0 results
+
+**Root cause:** Tokens created with `incidentflow-mcp token create` did not
+accept a `--workspace-id` flag, so every PAT was stored with
+`workspace_id: null`.  The platform-api `/internal/integrations/grafana/allowed-dashboards`
+endpoint requires a workspace UUID to look up the allow-list.
+
+**Fix:** Added `--workspace-id UUID` option to `token create` and updated
+`token list` to show the workspace column.
+
+### Grafana tools — end-to-end smoke test results
+
+All 7 Grafana MCP tools verified against the local smoke stack
+(`docker compose --profile grafana-smoke`, dashboard `Node Exporter Full` / uid `rYdddlPWk`):
+
+| Tool | Result |
+|---|---|
+| `grafana_list_dashboards` | ✅ 1 dashboard returned |
+| `grafana_get_dashboard` | ✅ 31 panels, metadata correct |
+| `grafana_extract_panel_queries` | ✅ 284 PromQL expressions extracted |
+| `grafana_metrics_query` | ✅ instant query — 2 series, both UP |
+| `grafana_metrics_query_range` | ✅ 16 samples over 15 m — fixed by `_resolve_timestamp` |
+
+```
+up{} — last 15 min (step 60s)
+1.0 ┤ ●──●──●──●──●──●──●──●──●──●──●──●──●──●──●──● node-exporter:9100
+    │ ○──○──○──○──○──○──○──○──○──○──○──○──○──○──○──○ prometheus:9090
+0.0 ┤
+    └──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬
+      -15  -14  -13  -12  -11  -10  -9  -8  -7  -6  -5  -4  -3  -2  -1   0 min
+```
+| `analyze_dashboard_health` | ✅ 284 panels, 0 errors, 124 rejected by guardrails |
+| `analyze_dns_dashboard` | ✅ 0 DNS panels (expected — Node Exporter is not a DNS dashboard) |

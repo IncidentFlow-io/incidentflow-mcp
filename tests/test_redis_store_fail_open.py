@@ -19,7 +19,9 @@ class _FailingRedisClient:
 
 @pytest.mark.asyncio
 async def test_take_token_fails_open_on_backend_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("incidentflow_mcp.rate_limit.redis_store.from_url", lambda *a, **k: _FailingRedisClient())
+    monkeypatch.setattr(
+        "incidentflow_mcp.rate_limit.redis_store.from_url", lambda *a, **k: _FailingRedisClient()
+    )
     store = RedisRateLimitStore("redis://example")
 
     result = await store.take_token(scope="http:mcp", identity_key="ip:127.0.0.1", limit_per_min=10)
@@ -31,7 +33,9 @@ async def test_take_token_fails_open_on_backend_error(monkeypatch: pytest.Monkey
 
 @pytest.mark.asyncio
 async def test_concurrency_fails_open_on_backend_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("incidentflow_mcp.rate_limit.redis_store.from_url", lambda *a, **k: _FailingRedisClient())
+    monkeypatch.setattr(
+        "incidentflow_mcp.rate_limit.redis_store.from_url", lambda *a, **k: _FailingRedisClient()
+    )
     store = RedisRateLimitStore("redis://example")
 
     acquired = await store.acquire_concurrency(
@@ -40,6 +44,8 @@ async def test_concurrency_fails_open_on_backend_error(monkeypatch: pytest.Monke
         limit=1,
         ttl_ms=60_000,
     )
-    await store.release_concurrency(scope="tool-concurrency:incident_summary", identity_key="user:u1")
+    await store.release_concurrency(
+        scope="tool-concurrency:incident_summary", identity_key="user:u1"
+    )
 
     assert acquired is True

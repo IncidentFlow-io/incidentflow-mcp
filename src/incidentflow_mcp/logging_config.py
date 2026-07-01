@@ -50,6 +50,7 @@ class _TraceContextFilter(logging.Filter):
         span_id = ""
         try:
             from opentelemetry import trace
+
             ctx = trace.get_current_span().get_span_context()
             if ctx.is_valid:
                 trace_id = format(ctx.trace_id, "032x")
@@ -77,7 +78,10 @@ def configure_logging(level: str = "info", library_level: str = "warning") -> No
     handler.addFilter(_TraceContextFilter())
 
     fmt = logging.Formatter(
-        fmt="%(asctime)s  %(levelname)-8s  %(name)s  trace_id=%(trace_id)s span_id=%(span_id)s  %(message)s",
+        fmt=(
+            "%(asctime)s  %(levelname)-8s  %(name)s  "
+            "trace_id=%(trace_id)s span_id=%(span_id)s  %(message)s"
+        ),
         datefmt="%Y-%m-%dT%H:%M:%S",
     )
     handler.setFormatter(fmt)

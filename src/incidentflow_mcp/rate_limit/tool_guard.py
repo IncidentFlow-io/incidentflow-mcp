@@ -169,7 +169,9 @@ def parse_tool_call_payload(payload: Any) -> MCPToolCall | None:
     return MCPToolCall(request_id=payload.get("id"), tool_name=tool_name_raw.strip())
 
 
-def build_transport_rate_limit_headers(*, limit: int, remaining: int, reset_after_ms: int) -> dict[str, str]:
+def build_transport_rate_limit_headers(
+    *, limit: int, remaining: int, reset_after_ms: int
+) -> dict[str, str]:
     retry_after_seconds = max(1, math.ceil(reset_after_ms / 1000))
     reset_epoch = int(time.time()) + retry_after_seconds
     return {

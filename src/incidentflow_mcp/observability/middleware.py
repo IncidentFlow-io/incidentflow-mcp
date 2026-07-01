@@ -11,7 +11,6 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response
 
 from incidentflow_mcp.config import Settings
-from incidentflow_mcp.observability.tracing import get_tracer
 from incidentflow_mcp.observability.metrics import (
     SessionTracker,
     classify_outcome,
@@ -37,6 +36,7 @@ from incidentflow_mcp.observability.metrics import (
     pod_label_values,
     status_class_from_code,
 )
+from incidentflow_mcp.observability.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,7 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
             if _otel_span is not None:
                 try:
                     from opentelemetry.trace import StatusCode
+
                     if status_code >= 500:
                         _otel_span.set_status(StatusCode.ERROR)
                     else:
@@ -114,6 +115,7 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
             if _otel_span is not None:
                 try:
                     from opentelemetry.trace import StatusCode
+
                     _otel_span.record_exception(exc)
                     _otel_span.set_status(StatusCode.ERROR, str(exc))
                 except Exception:
@@ -231,6 +233,7 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
             if _otel_token is not None:
                 try:
                     import opentelemetry.context as otel_ctx
+
                     otel_ctx.detach(_otel_token)
                 except Exception:
                     pass
@@ -354,10 +357,14 @@ def _start_tool_span(
             user_id = auth_ctx.get("user_id") or auth_ctx.get("sub")
             if user_id:
                 import hashlib
-                span.set_attribute("user.id.hash", hashlib.sha256(str(user_id).encode()).hexdigest()[:16])
+
+                span.set_attribute(
+                    "user.id.hash", hashlib.sha256(str(user_id).encode()).hexdigest()[:16]
+                )
 
         # Attach the span as current context so child spans nest under it
         from opentelemetry import trace
+
         ctx = trace.set_span_in_context(span)
         token = otel_ctx.attach(ctx)
         return span, token

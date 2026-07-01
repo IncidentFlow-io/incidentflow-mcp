@@ -7,10 +7,9 @@ before reaching tool logic.
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, model_validator
-
 
 # ---------------------------------------------------------------------------
 # Shared enums
@@ -39,9 +38,13 @@ class AlertStatus(StrEnum):
 class IncidentSummaryInput(BaseModel):
     """Input for the incident_summary tool."""
 
-    incident_id: Annotated[str, Field(min_length=1, max_length=128, description="Unique incident identifier")]
+    incident_id: Annotated[
+        str, Field(min_length=1, max_length=128, description="Unique incident identifier")
+    ]
     include_timeline: bool = Field(default=True, description="Include event timeline in summary")
-    include_affected_services: bool = Field(default=True, description="Include impacted service list")
+    include_affected_services: bool = Field(
+        default=True, description="Include impacted service list"
+    )
 
 
 class TimelineEvent(BaseModel):
@@ -86,7 +89,9 @@ class Alert(BaseModel):
 class CorrelateAlertsInput(BaseModel):
     """Input for the correlate_alerts tool."""
 
-    alerts: Annotated[list[Alert], Field(min_length=1, max_length=500, description="List of alerts to correlate")]
+    alerts: Annotated[
+        list[Alert], Field(min_length=1, max_length=500, description="List of alerts to correlate")
+    ]
     window_minutes: int = Field(
         default=60,
         ge=1,

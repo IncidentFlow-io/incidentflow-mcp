@@ -76,9 +76,7 @@ class TestAuthInvalid:
         # Auth passes, so the response must NOT be 401.
         # The MCP sub-app may return any non-401 status (404/405/500)
         # because GET is not a valid MCP transport method.
-        resp = auth_client.get(
-            "/mcp", headers={"Authorization": "BEARER test-secret-token"}
-        )
+        resp = auth_client.get("/mcp", headers={"Authorization": "BEARER test-secret-token"})
         assert resp.status_code != 401
 
     def test_oauth_jwks_timeout_returns_503_not_500(
@@ -191,16 +189,12 @@ class TestAuthSuccess:
 class TestRepoAuth:
     """Tests for structured PAT verification via the token repository."""
 
-    def test_repo_valid_token_passes(
-        self, repo_auth_client: tuple[TestClient, str]
-    ) -> None:
+    def test_repo_valid_token_passes(self, repo_auth_client: tuple[TestClient, str]) -> None:
         client, token = repo_auth_client
         resp = client.get("/mcp", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code != 401
 
-    def test_repo_wrong_secret_returns_401(
-        self, repo_auth_client: tuple[TestClient, str]
-    ) -> None:
+    def test_repo_wrong_secret_returns_401(self, repo_auth_client: tuple[TestClient, str]) -> None:
         client, token = repo_auth_client
         # keep the token_id but corrupt the secret portion
         token_id = token.split(".")[0]  # "if_pat_local_<id>"
@@ -295,6 +289,7 @@ class TestRepoAuth:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from incidentflow_mcp.auth.context import get_current_auth_context
+
         settings = Settings(
             _env_file=None,
             incidentflow_pat=None,
@@ -319,6 +314,7 @@ class TestRepoAuth:
         monkeypatch.setattr("incidentflow_mcp.auth.repository._repo", repo)
 
         app = create_app()
+
         @app.get("/whoami")
         async def whoami() -> dict[str, object]:
             return get_current_auth_context() or {"authenticated": False}
@@ -329,8 +325,8 @@ class TestRepoAuth:
             "/whoami",
             headers={
                 "Authorization": f"Bearer {plaintext}",
-                "x-workspace-id": "spoofed-workspace-id"
-            }
+                "x-workspace-id": "spoofed-workspace-id",
+            },
         )
         assert resp.status_code == 200
         body = resp.json()
@@ -375,27 +371,21 @@ class TestScopeEnforcement:
 
     # --- enforcement enabled (production) ---
 
-    def test_missing_scope_returns_401_when_enforced(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_scope_returns_401_when_enforced(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Token has only mcp:read; /mcp requires mcp:read → should pass
         # But a token with NO scopes at all should get 403
         client, token = self._make_client_with_scopes(monkeypatch, scopes=[], enforce=True)
         resp = client.get("/mcp", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
-        assert "scope=\"mcp:read\"" in resp.headers["WWW-Authenticate"]
+        assert 'scope="mcp:read"' in resp.headers["WWW-Authenticate"]
 
-    def test_401_header_contains_required_scope(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_401_header_contains_required_scope(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client, token = self._make_client_with_scopes(monkeypatch, scopes=[], enforce=True)
         resp = client.get("/mcp", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
-        assert "scope=\"mcp:read\"" in resp.headers["WWW-Authenticate"]
+        assert 'scope="mcp:read"' in resp.headers["WWW-Authenticate"]
 
-    def test_sufficient_scope_passes_enforcement(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_sufficient_scope_passes_enforcement(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client, token = self._make_client_with_scopes(
             monkeypatch, scopes=["mcp:read", "mcp:tools:run"], enforce=True
         )
@@ -412,23 +402,19 @@ class TestScopeEnforcement:
         )
         resp = client.post("/mcp/tools", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
-        assert "scope=\"mcp:tools:run\"" in resp.headers["WWW-Authenticate"]
+        assert 'scope="mcp:tools:run"' in resp.headers["WWW-Authenticate"]
 
-    def test_admin_scope_required_for_admin_path(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_admin_scope_required_for_admin_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         client, token = self._make_client_with_scopes(
             monkeypatch, scopes=["mcp:read", "mcp:tools:run"], enforce=True
         )
         resp = client.get("/admin/tokens", headers={"Authorization": f"Bearer {token}"})
         assert resp.status_code == 401
-        assert "scope=\"admin\"" in resp.headers["WWW-Authenticate"]
+        assert 'scope="admin"' in resp.headers["WWW-Authenticate"]
 
     # --- enforcement disabled (dev mode) ---
 
-    def test_missing_scope_passes_when_not_enforced(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_scope_passes_when_not_enforced(self, monkeypatch: pytest.MonkeyPatch) -> None:
         # Token has no scopes but enforcement is off → middleware lets it through
         client, token = self._make_client_with_scopes(monkeypatch, scopes=[], enforce=False)
         resp = client.get("/mcp", headers={"Authorization": f"Bearer {token}"})

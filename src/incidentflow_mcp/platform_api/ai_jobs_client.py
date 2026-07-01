@@ -6,7 +6,10 @@ from typing import Any
 import httpx
 
 from incidentflow_mcp.config import Settings
-from incidentflow_mcp.observability.metrics import mcp_platform_api_jobs_errors_total, pod_label_values
+from incidentflow_mcp.observability.metrics import (
+    mcp_platform_api_jobs_errors_total,
+    pod_label_values,
+)
 from incidentflow_mcp.observability.tracing import inject_trace_headers
 
 logger = logging.getLogger(__name__)

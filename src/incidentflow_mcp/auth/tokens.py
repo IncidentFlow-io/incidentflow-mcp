@@ -42,8 +42,8 @@ def generate_pat() -> tuple[str, str, str]:
     The plaintext_token MUST be shown to the user exactly once and NEVER
     stored.  Only token_id and token_hash should be persisted.
     """
-    token_id = secrets.token_hex(4)        # 8 hex chars — short, safe for lookup
-    secret = secrets.token_urlsafe(32)     # 43 url-safe base64 chars
+    token_id = secrets.token_hex(4)  # 8 hex chars — short, safe for lookup
+    secret = secrets.token_urlsafe(32)  # 43 url-safe base64 chars
     token = f"{PREFIX}{token_id}.{secret}"
     token_hash = _hash_token(token)
     return token, token_id, token_hash
@@ -103,7 +103,7 @@ def parse_token_id(token: str) -> str | None:
     """
     if not token.startswith(PREFIX):
         return None
-    rest = token[len(PREFIX):]
+    rest = token[len(PREFIX) :]
     parts = rest.split(".", 1)
     if len(parts) != 2 or not parts[0] or not parts[1]:
         return None

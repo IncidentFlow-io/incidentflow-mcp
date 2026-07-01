@@ -22,7 +22,9 @@ from incidentflow_mcp.config import Settings, get_settings
 from incidentflow_mcp.mcp.resources import register_resources
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
+from incidentflow_mcp.platform_api.grafana_client import PlatformGrafanaClient
 from incidentflow_mcp.platform_api.slack_client import PlatformSlackAPIError, PlatformSlackClient
+from incidentflow_mcp.tools import grafana as _grafana_tools
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -59,7 +61,6 @@ class IncidentThreadAlertContext(BaseModel):
         default=None,
         description="Alert labels copied from Grafana, Alertmanager, or IncidentFlow.",
     )
-
 
 
 _VALID_EXECUTION_MODES = {"auto", "sync", "async"}
@@ -473,9 +474,7 @@ def _is_ready_pod(pod: dict[str, Any]) -> bool:
     if not isinstance(containers, list) or not containers:
         return False
     return all(
-        bool(container.get("ready"))
-        for container in containers
-        if isinstance(container, dict)
+        bool(container.get("ready")) for container in containers if isinstance(container, dict)
     )
 
 
@@ -531,9 +530,7 @@ def _classify_warning_event(
 def _warning_event_summary(events: list[Any], pods: list[Any]) -> dict[str, Any]:
     now = datetime.now(UTC)
     pods_by_name = {
-        str(pod.get("name")): pod
-        for pod in pods
-        if isinstance(pod, dict) and pod.get("name")
+        str(pod.get("name")): pod for pod in pods if isinstance(pod, dict) and pod.get("name")
     }
     classified = [
         _classify_warning_event(event, pods_by_name=pods_by_name, now=now)
@@ -541,11 +538,7 @@ def _warning_event_summary(events: list[Any], pods: list[Any]) -> dict[str, Any]
         if isinstance(event, dict)
     ]
     active = [event for event in classified if event["classification"] == "active_warning"]
-    stale = [
-        event
-        for event in classified
-        if event["classification"] == "stale_rollout_warning"
-    ]
+    stale = [event for event in classified if event["classification"] == "stale_rollout_warning"]
     return {
         "active_warning_events": len(active),
         "stale_rollout_warning_events": len(stale),
@@ -1109,9 +1102,7 @@ def _filter_workload_pods(
     )
     if deployment is not None:
         selector = _deployment_selector(deployment)
-        matched = [
-            pod for pod in candidates if _labels_match_selector(_pod_labels(pod), selector)
-        ]
+        matched = [pod for pod in candidates if _labels_match_selector(_pod_labels(pod), selector)]
         if matched:
             return matched
 
@@ -1126,6 +1117,7 @@ def _workload_from_pod_name(pod_name: str) -> str:
     standalone-pod                     ->  standalone-pod (unchanged)
     """
     import re as _re
+
     # ReplicaSet pods: {deployment}-{rs-hash~10}-{pod-hash~5}
     m = _re.match(r"^(.+?)-[a-z0-9]{9,10}-[a-z0-9]{5}$", pod_name)
     if m:
@@ -1165,11 +1157,13 @@ def _deduplicate_events(events: list[Any]) -> list[dict[str, Any]]:
 
 def _sort_events_for_display(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Sort events: warnings first, then newest first within each group."""
+
     def _key(e: dict[str, Any]) -> tuple[int, float]:
         type_order = 0 if str(e.get("type") or "").lower() == "warning" else 1
         last_seen = e.get("last_seen") or e.get("lastSeen") or e.get("lastTimestamp") or ""
         ts = _parse_k8s_timestamp(str(last_seen))
         return (type_order, -ts.timestamp() if ts is not None else 0.0)
+
     return sorted(events, key=_key)
 
 
@@ -1269,11 +1263,13 @@ def _diagnose_pod(
         recommendations.append("Node may be unreachable — check node status")
 
     if not_ready and not issues and phase == "running":
-        issues.append({
-            "type": "ContainersNotReady",
-            "containers": [c.get("name") for c in not_ready],
-            "severity": "warning",
-        })
+        issues.append(
+            {
+                "type": "ContainersNotReady",
+                "containers": [c.get("name") for c in not_ready],
+                "severity": "warning",
+            }
+        )
         recommendations.append(
             "Containers are not ready — check readiness probe and application startup"
         )
@@ -1394,27 +1390,36 @@ def _diagnose_pod_from_description(
         w_reason = str(waiting.get("reason") or "").lower()
         w_message = str(waiting.get("message") or "").lower()
         if "crashloopbackoff" in w_reason:
-            current_issues.append({
-                "type": "CrashLoopBackOff", "container": name, "severity": "critical",
-            })
+            current_issues.append(
+                {
+                    "type": "CrashLoopBackOff",
+                    "container": name,
+                    "severity": "critical",
+                }
+            )
             recommendations.append(
-                f"Container {name} is crash-looping"
-                " — run k8s_get_pod_logs to find the crash reason"
+                f"Container {name} is crash-looping — run k8s_get_pod_logs to find the crash reason"
             )
         elif "imagepullbackoff" in w_reason or "errimagepull" in w_reason:
-            current_issues.append({
-                "type": "ImagePullBackOff", "container": name, "severity": "critical",
-            })
+            current_issues.append(
+                {
+                    "type": "ImagePullBackOff",
+                    "container": name,
+                    "severity": "critical",
+                }
+            )
             recommendations.append(
                 f"Container {name} cannot pull image"
                 " — check image name, tag, and registry credentials"
             )
         elif w_reason and "containercreat" not in w_reason:
-            current_issues.append({
-                "type": f"ContainerWaiting:{w_reason}",
-                "container": name,
-                "severity": "warning",
-            })
+            current_issues.append(
+                {
+                    "type": f"ContainerWaiting:{w_reason}",
+                    "container": name,
+                    "severity": "warning",
+                }
+            )
             if w_message:
                 recommendations.append(f"Container {name} waiting: {w_message[:120]}")
 
@@ -1424,29 +1429,32 @@ def _diagnose_pod_from_description(
         last_term = (last_state.get("terminated") or {}) if isinstance(last_state, dict) else {}
         if str(last_term.get("reason") or "").lower() == "oomkilled":
             if restart_count > 0 or not ready or phase != "running":
-                current_issues.append({
-                    "type": "OOMKilled", "container": name, "severity": "critical",
-                })
+                current_issues.append(
+                    {
+                        "type": "OOMKilled",
+                        "container": name,
+                        "severity": "critical",
+                    }
+                )
                 recommendations.append(
                     f"Container {name} was OOMKilled"
                     " — increase resources.limits.memory or fix memory leak"
                 )
             else:
-                historical_warnings.append({
-                    "type": "OOMKilled",
-                    "container": name,
-                    "note": "Pod recovered and is now Ready",
-                })
+                historical_warnings.append(
+                    {
+                        "type": "OOMKilled",
+                        "container": name,
+                        "note": "Pod recovered and is now Ready",
+                    }
+                )
 
     # Pod is currently stable if Running+Ready with no container waiting states
     pod_currently_ok = (
         phase == "running"
         and ready
         and total_restarts == 0
-        and not any(
-            i["type"] in {"CrashLoopBackOff", "ImagePullBackOff"}
-            for i in current_issues
-        )
+        and not any(i["type"] in {"CrashLoopBackOff", "ImagePullBackOff"} for i in current_issues)
     )
 
     # Event-based issues — collect per-reason metadata from events
@@ -1480,10 +1488,12 @@ def _diagnose_pod_from_description(
             current_issues.append({"type": "FailedScheduling", "severity": "warning"})
             recommendations.append("Check node resources and pod resource requests/taints")
         else:
-            historical_warnings.append({
-                "type": "FailedScheduling",
-                "note": "Pod eventually scheduled and is now Running",
-            })
+            historical_warnings.append(
+                {
+                    "type": "FailedScheduling",
+                    "note": "Pod eventually scheduled and is now Running",
+                }
+            )
 
     if probe_events:
         probe_type_map = {
@@ -1495,12 +1505,14 @@ def _diagnose_pod_from_description(
             issue_type = probe_type_map.get(probe, f"{probe.title()}ProbeFailure")
             if pod_currently_ok:
                 # Pod is now healthy — probe failures are rollout/startup noise
-                historical_warnings.append({
-                    "type": issue_type,
-                    "reason": f"{probe.title()} probe failed during startup/rollout",
-                    "last_seen": info.get("last_seen"),
-                    "count": info.get("count"),
-                })
+                historical_warnings.append(
+                    {
+                        "type": issue_type,
+                        "reason": f"{probe.title()} probe failed during startup/rollout",
+                        "last_seen": info.get("last_seen"),
+                        "count": info.get("count"),
+                    }
+                )
             else:
                 current_issues.append({"type": issue_type, "severity": "warning"})
                 if probe == "readiness":
@@ -1508,9 +1520,7 @@ def _diagnose_pod_from_description(
                         "Check readiness probe endpoint and application startup time"
                     )
                 elif probe == "liveness":
-                    recommendations.append(
-                        "Check liveness probe — container may be restarting"
-                    )
+                    recommendations.append("Check liveness probe — container may be restarting")
                 elif probe == "startup":
                     recommendations.append(
                         "Startup probe failed — consider increasing initialDelaySeconds"
@@ -1531,16 +1541,15 @@ def _diagnose_pod_from_description(
         recommendations.append("Node may be unreachable — check node status")
 
     # Containers not ready with no specific cause yet detected
-    not_ready = [
-        c.get("name") for c in containers
-        if isinstance(c, dict) and not c.get("ready")
-    ]
+    not_ready = [c.get("name") for c in containers if isinstance(c, dict) and not c.get("ready")]
     if not_ready and not current_issues and phase == "running":
-        current_issues.append({
-            "type": "ContainersNotReady",
-            "containers": not_ready,
-            "severity": "warning",
-        })
+        current_issues.append(
+            {
+                "type": "ContainersNotReady",
+                "containers": not_ready,
+                "severity": "warning",
+            }
+        )
         recommendations.append(
             "Containers are not ready — check readiness probe and application startup"
         )
@@ -1585,14 +1594,13 @@ def _build_describe_response(desc: dict[str, Any]) -> dict[str, Any]:
                 "✓ Pod is Running and Ready",
                 f"✓ {total_restarts} restarts",
             ] + [
-                "~ Historical: " + w["type"]
+                "~ Historical: "
+                + w["type"]
                 + (f" ({w.get('reason', '')})" if w.get("reason") else "")
                 for w in historical
             ]
         else:
-            summary = (
-                f"Pod {pod_name} is {phase}, all containers ready, {total_restarts} restarts"
-            )
+            summary = f"Pod {pod_name} is {phase}, all containers ready, {total_restarts} restarts"
             findings = ["✓ Pod is healthy"]
     else:
         issue_types = [i["type"] for i in diagnosis["current_issues"]]
@@ -2011,9 +2019,7 @@ def _compact_provider_status(provider_status: dict[str, Any]) -> dict[str, Any]:
     incidents_raw = provider_status.get("incidents")
     incidents_list = incidents_raw if isinstance(incidents_raw, list) else []
     compact_incidents = [_compact_incident(item) for item in incidents_list[:20]]
-    active_incidents = [
-        incident for incident in compact_incidents if _incident_is_active(incident)
-    ]
+    active_incidents = [incident for incident in compact_incidents if _incident_is_active(incident)]
     all_historical_incidents = [
         incident for incident in compact_incidents if not _incident_is_active(incident)
     ]
@@ -2820,8 +2826,11 @@ def create_mcp_server() -> FastMCP:
 
         if detail_level == "summary":
             return json.dumps(
-                {"status": payload.get("status", "unknown"), "data": {"pod": sanitized},
-                 "error": payload.get("error")},
+                {
+                    "status": payload.get("status", "unknown"),
+                    "data": {"pod": sanitized},
+                    "error": payload.get("error"),
+                },
                 indent=2,
             )
 
@@ -2942,9 +2951,7 @@ def create_mcp_server() -> FastMCP:
         deduped = _deduplicate_events(events)
         sorted_events = _sort_events_for_display(deduped)
         capped = sorted_events[: max(1, min(limit, 200))]
-        warning_count = sum(
-            1 for e in capped if str(e.get("type") or "").lower() == "warning"
-        )
+        warning_count = sum(1 for e in capped if str(e.get("type") or "").lower() == "warning")
         return json.dumps(
             {
                 "status": payload.get("status", "unknown"),
@@ -3059,9 +3066,7 @@ def create_mcp_server() -> FastMCP:
             else ["✓ No unhealthy pods"]
         )
         recommendations: list[str] = list(
-            dict.fromkeys(
-                e["recommendation"] for e in unhealthy_entries if e.get("recommendation")
-            )
+            dict.fromkeys(e["recommendation"] for e in unhealthy_entries if e.get("recommendation"))
         )
         return json.dumps(
             {
@@ -3190,6 +3195,100 @@ def create_mcp_server() -> FastMCP:
             indent=2,
         )
 
+    def _grafana_client(workspace_id: str | None) -> PlatformGrafanaClient:
+        resolved_workspace_id = _resolve_job_workspace_id(
+            workspace_id,
+            token_workspace_id=_current_token_workspace_id(),
+            default_workspace_id=settings.mcp_default_workspace_id,
+        )
+        return PlatformGrafanaClient(settings, workspace_id=resolved_workspace_id)
+
+    @mcp.tool(**_tool_metadata(_specs["grafana_list_dashboards"]))
+    async def grafana_list_dashboards(workspace_id: str | None = None) -> str:
+        result = await _grafana_tools.grafana_list_dashboards(_grafana_client(workspace_id))
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["grafana_get_dashboard"]))
+    async def grafana_get_dashboard(dashboard_uid: str, workspace_id: str | None = None) -> str:
+        result = await _grafana_tools.grafana_get_dashboard(
+            _grafana_client(workspace_id), dashboard_uid=dashboard_uid
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["grafana_extract_panel_queries"]))
+    async def grafana_extract_panel_queries(
+        dashboard_uid: str, workspace_id: str | None = None
+    ) -> str:
+        result = await _grafana_tools.grafana_extract_panel_queries(
+            _grafana_client(workspace_id), dashboard_uid=dashboard_uid
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["grafana_metrics_query"]))
+    async def grafana_metrics_query(
+        datasource_uid: str,
+        query: str,
+        time: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        result = await _grafana_tools.grafana_metrics_query(
+            _grafana_client(workspace_id), datasource_uid=datasource_uid, query=query, time=time
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["grafana_metrics_query_range"]))
+    async def grafana_metrics_query_range(
+        datasource_uid: str,
+        query: str,
+        start: str,
+        end: str,
+        step: str,
+        workspace_id: str | None = None,
+    ) -> str:
+        result = await _grafana_tools.grafana_metrics_query_range(
+            _grafana_client(workspace_id),
+            datasource_uid=datasource_uid,
+            query=query,
+            start=start,
+            end=end,
+            step=step,
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["analyze_dashboard_health"]))
+    async def analyze_dashboard_health(
+        dashboard_uid: str,
+        start: str = "now-6h",
+        end: str = "now",
+        step: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        result = await _grafana_tools.analyze_dashboard_health(
+            _grafana_client(workspace_id),
+            dashboard_uid=dashboard_uid,
+            start=start,
+            end=end,
+            step=step,
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["analyze_dns_dashboard"]))
+    async def analyze_dns_dashboard(
+        dashboard_uid: str,
+        start: str = "now-6h",
+        end: str = "now",
+        step: str | None = None,
+        workspace_id: str | None = None,
+    ) -> str:
+        result = await _grafana_tools.analyze_dns_dashboard(
+            _grafana_client(workspace_id),
+            dashboard_uid=dashboard_uid,
+            start=start,
+            end=end,
+            step=step,
+        )
+        return result.model_dump_json(indent=2)
+
     @mcp.tool(**_tool_metadata(_specs["k8s_describe_pod"]))
     async def k8s_describe_pod(
         namespace: str,
@@ -3236,13 +3335,20 @@ def create_mcp_server() -> FastMCP:
 
         describe_str, logs_raw_str = await asyncio.gather(
             _send_k8s_agent_command(
-                settings=settings, cluster_id=cluster_id, environment=environment,
-                cluster_name=cluster_name, action="k8s.describe_pod",
-                params={"namespace": namespace, "pod": pod}, timeout_seconds=timeout_seconds,
+                settings=settings,
+                cluster_id=cluster_id,
+                environment=environment,
+                cluster_name=cluster_name,
+                action="k8s.describe_pod",
+                params={"namespace": namespace, "pod": pod},
+                timeout_seconds=timeout_seconds,
             ),
             _send_k8s_agent_command(
-                settings=settings, cluster_id=cluster_id, environment=environment,
-                cluster_name=cluster_name, action="k8s.get_pod_logs",
+                settings=settings,
+                cluster_id=cluster_id,
+                environment=environment,
+                cluster_name=cluster_name,
+                action="k8s.get_pod_logs",
                 params={"namespace": namespace, "pod": pod, "tail_lines": tail_lines},
                 timeout_seconds=timeout_seconds,
             ),
@@ -3261,7 +3367,7 @@ def create_mcp_server() -> FastMCP:
         logs_data = _compact_log_payload(
             logs_payload, level=None, contains=None, exclude=None, compact=True
         )
-        log_lines = (logs_data.get("data") or {})
+        log_lines = logs_data.get("data") or {}
         highlighted = log_lines.get("highlighted") or []
         recent_lines = log_lines.get("lines") or []
 
@@ -3272,8 +3378,11 @@ def create_mcp_server() -> FastMCP:
             workload_name = _workload_from_pod_name(pod)
             try:
                 rollout_str = await _send_k8s_agent_command(
-                    settings=settings, cluster_id=cluster_id, environment=environment,
-                    cluster_name=cluster_name, action="k8s.get_rollout_status",
+                    settings=settings,
+                    cluster_id=cluster_id,
+                    environment=environment,
+                    cluster_name=cluster_name,
+                    action="k8s.get_rollout_status",
                     params={"namespace": namespace, "deployment": workload_name},
                     timeout_seconds=timeout_seconds,
                 )
@@ -3292,16 +3401,21 @@ def create_mcp_server() -> FastMCP:
 
         total_restarts = int(pod_status.get("restart_count") or 0)
         pod_ready = bool(pod_status.get("ready"))
-        log_error_count = len([
-            line for line in (recent_lines or [])
-            if isinstance(line, str) and any(
-                kw in line.lower() for kw in ("error", "exception", "fatal", "panic")
-            )
-        ])
-        log_warning_count = len([
-            line for line in (recent_lines or [])
-            if isinstance(line, str) and "warn" in line.lower()
-        ])
+        log_error_count = len(
+            [
+                line
+                for line in (recent_lines or [])
+                if isinstance(line, str)
+                and any(kw in line.lower() for kw in ("error", "exception", "fatal", "panic"))
+            ]
+        )
+        log_warning_count = len(
+            [
+                line
+                for line in (recent_lines or [])
+                if isinstance(line, str) and "warn" in line.lower()
+            ]
+        )
 
         # Latest warning event age in minutes
         latest_warning_age_minutes: int | None = None
@@ -3318,9 +3432,7 @@ def create_mcp_server() -> FastMCP:
                 " with errors/warnings"
             )
         elif recent_lines:
-            findings.append(
-                f"✓ No error/warning patterns in {len(recent_lines)} sampled log lines"
-            )
+            findings.append(f"✓ No error/warning patterns in {len(recent_lines)} sampled log lines")
         if rollout_complete is True:
             findings.append("✓ Deployment rollout is complete")
         elif rollout_complete is False:

@@ -79,6 +79,7 @@ class PlatformAPIMemoryClient:
             except Exception as exc:
                 try:
                     from opentelemetry.trace import StatusCode
+
                     span.record_exception(exc)
                     span.set_status(StatusCode.ERROR, str(exc))
                 except Exception:
@@ -121,6 +122,7 @@ class PlatformAPIMemoryClient:
             except Exception as exc:
                 try:
                     from opentelemetry.trace import StatusCode
+
                     span.record_exception(exc)
                     span.set_status(StatusCode.ERROR, str(exc))
                 except Exception:

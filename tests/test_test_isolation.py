@@ -4,7 +4,7 @@ from incidentflow_mcp.auth.repository import InMemoryTokenRepository, get_token_
 from incidentflow_mcp.config import Settings
 
 
-def test_settings_can_ignore_env_file_and_env_vars(monkeypatch) -> None:  # noqa: ANN001
+def test_settings_can_ignore_env_file_and_env_vars(monkeypatch) -> None:
     monkeypatch.setenv("PLATFORM_API_BASE_URL", "http://should-not-be-used:9999")
     settings = Settings(
         _env_file=None,

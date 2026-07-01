@@ -18,7 +18,6 @@ from incidentflow_mcp.rate_limit.identity import ResolvedIdentity
 from incidentflow_mcp.rate_limit.policy import DefaultPolicyResolver
 from incidentflow_mcp.rate_limit.tool_guard import MCPToolCall, ToolInvocationGuard
 
-
 MCP_TOOL_REQUEST = {
     "jsonrpc": "2.0",
     "id": 1,
@@ -88,7 +87,9 @@ class TestTransportRateLimiting:
         assert client.post("/mcp", headers=headers, json={**req, "id": 2}).status_code != 429
         assert client.post("/mcp", headers=headers, json={**req, "id": 3}).status_code == 429
 
-    def test_multi_instance_shares_same_store_where_practical(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_multi_instance_shares_same_store_where_practical(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         settings = Settings(
             _env_file=None,
             incidentflow_pat="test-secret-token",
@@ -104,7 +105,11 @@ class TestTransportRateLimiting:
         client_one = TestClient(create_app(), raise_server_exceptions=False)
         client_two = TestClient(create_app(), raise_server_exceptions=False)
 
-        headers = {"Authorization": "Bearer test-secret-token", "x-user-id": "u1", "x-workspace-id": "w1"}
+        headers = {
+            "Authorization": "Bearer test-secret-token",
+            "x-user-id": "u1",
+            "x-workspace-id": "w1",
+        }
         req = {"jsonrpc": "2.0", "method": "tools/list", "params": {}}
 
         first = client_one.post("/mcp", headers=headers, json={**req, "id": 1})
@@ -129,7 +134,11 @@ class TestToolRateLimiting:
         )
         client = _make_client(monkeypatch, settings)
 
-        headers = {"Authorization": "Bearer test-secret-token", "x-workspace-id": "ws-1", "x-user-id": "u-1"}
+        headers = {
+            "Authorization": "Bearer test-secret-token",
+            "x-workspace-id": "ws-1",
+            "x-user-id": "u-1",
+        }
 
         first = client.post("/mcp", headers=headers, json=MCP_TOOL_REQUEST)
         assert first.status_code != 429
@@ -160,7 +169,7 @@ class TestToolGuardUnit:
         return Request(scope, receive)
 
     @pytest.mark.asyncio
-    async def test_concurrency_limit_enforced(self, rate_limit_store) -> None:  # noqa: ANN001
+    async def test_concurrency_limit_enforced(self, rate_limit_store) -> None:
         settings = Settings(
             _env_file=None,
             redis_url="redis://test-only",
@@ -215,7 +224,7 @@ class TestToolGuardUnit:
         assert body["error"]["message"] == "Too many concurrent tool invocations"
 
     @pytest.mark.asyncio
-    async def test_timeout_behavior(self, rate_limit_store) -> None:  # noqa: ANN001
+    async def test_timeout_behavior(self, rate_limit_store) -> None:
         settings = Settings(
             _env_file=None,
             redis_url="redis://test-only",

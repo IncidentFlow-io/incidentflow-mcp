@@ -13,7 +13,9 @@ from typing import Any
 import yaml
 
 try:
-    from openapi_spec_validator import validate_spec as _validate_spec  # type: ignore[import-not-found]
+    from openapi_spec_validator import (
+        validate_spec as _validate_spec,  # type: ignore[import-not-found]
+    )
 except Exception:  # pragma: no cover - optional dependency path
     _validate_spec = None
 
@@ -38,7 +40,10 @@ def _offline_validate(spec: dict[str, Any]) -> None:
     _assert(not missing, f"Missing required paths: {sorted(missing)}")
 
     mcp_ops = spec["paths"]["/mcp"]
-    _assert(all(method in mcp_ops for method in ("get", "post", "options")), "/mcp must define GET/POST/OPTIONS")
+    _assert(
+        all(method in mcp_ops for method in ("get", "post", "options")),
+        "/mcp must define GET/POST/OPTIONS",
+    )
 
     components = spec.get("components", {})
     _assert(isinstance(components, dict), "components must be an object")

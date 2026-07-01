@@ -157,9 +157,7 @@ def analyze_replies(replies: list[ThreadReplyAnalysis]) -> ThreadAggregateAnalys
     if resolution_signal:
         summary_parts.append("resolution signal present")
     summary = (
-        ", ".join(summary_parts)
-        if summary_parts
-        else "No actionable thread signals detected."
+        ", ".join(summary_parts) if summary_parts else "No actionable thread signals detected."
     )
 
     return ThreadAggregateAnalysis(
@@ -218,9 +216,7 @@ def summarize_thread_for_sre(
     status = "unknown"
     if analysis.resolution_signal:
         status = (
-            "mitigated"
-            if analysis.resolution_confidence in {"medium", "high"}
-            else "investigating"
+            "mitigated" if analysis.resolution_confidence in {"medium", "high"} else "investigating"
         )
     elif analysis.engineer_hypotheses or analysis.commands_found:
         status = "investigating"

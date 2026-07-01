@@ -114,13 +114,9 @@ def correlate_alerts(input_data: CorrelateAlertsInput) -> CorrelateAlertsOutput:
         clustered_ids.update(a.alert_id for a in members)
 
     # Alerts not placed in any qualifying cluster
-    uncorrelated = [
-        a.alert_id for a in firing if a.alert_id not in clustered_ids
-    ]
+    uncorrelated = [a.alert_id for a in firing if a.alert_id not in clustered_ids]
     # Include resolved/pending alerts as uncorrelated (they weren't considered)
-    uncorrelated += [
-        a.alert_id for a in input_data.alerts if a.status != AlertStatus.FIRING
-    ]
+    uncorrelated += [a.alert_id for a in input_data.alerts if a.status != AlertStatus.FIRING]
 
     summary = _build_summary(len(input_data.alerts), clusters, uncorrelated)
 

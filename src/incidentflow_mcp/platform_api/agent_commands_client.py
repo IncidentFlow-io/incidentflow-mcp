@@ -43,6 +43,7 @@ class PlatformAPIAgentCommandsClient:
             except Exception as exc:
                 try:
                     from opentelemetry.trace import StatusCode
+
                     span.record_exception(exc)
                     span.set_status(StatusCode.ERROR, str(exc))
                 except Exception:
@@ -59,6 +60,7 @@ class PlatformAPIAgentCommandsClient:
         timeout_seconds: int | None = None,
     ) -> dict[str, Any]:
         import json as _json
+
         tracer = get_tracer()
         _span_name = "platform_api." + action.replace(".", "_")
         with tracer.start_as_current_span(_span_name) as span:
@@ -106,6 +108,7 @@ class PlatformAPIAgentCommandsClient:
                         span.set_attribute("response.items", len(items))
                 try:
                     from opentelemetry.trace import StatusCode
+
                     if status == "succeeded":
                         span.set_status(StatusCode.OK)
                     else:
@@ -116,6 +119,7 @@ class PlatformAPIAgentCommandsClient:
             except Exception as exc:
                 try:
                     from opentelemetry.trace import StatusCode
+
                     span.record_exception(exc)
                     span.set_status(StatusCode.ERROR, str(exc))
                 except Exception:

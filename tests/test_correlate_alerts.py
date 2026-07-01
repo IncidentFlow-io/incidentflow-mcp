@@ -2,9 +2,10 @@
 Unit tests for the correlate_alerts tool.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts
 from incidentflow_mcp.tools.schemas import (
@@ -14,12 +15,11 @@ from incidentflow_mcp.tools.schemas import (
     Severity,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def _alert(
@@ -169,14 +169,14 @@ class TestCorrelateAlertsResolvedAlerts:
 class TestCorrelateAlertsInputValidation:
     def test_no_firing_alerts_raises(self) -> None:
         alerts = [_alert("a1", "svc", status=AlertStatus.RESOLVED)]
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CorrelateAlertsInput(alerts=alerts)
 
     def test_empty_alerts_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CorrelateAlertsInput(alerts=[])
 
     def test_negative_window_raises(self) -> None:
         alerts = [_alert("a1", "svc")]
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CorrelateAlertsInput(alerts=alerts, window_minutes=-1)

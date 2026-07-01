@@ -133,9 +133,7 @@ async def test_get_service_context_uses_service_as_query_when_no_query() -> None
         return resp
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
-        result = await memory_get_service_context(
-            s, workspace_id="ws-1", service="orders-service"
-        )
+        result = await memory_get_service_context(s, workspace_id="ws-1", service="orders-service")
 
     assert "orders-service" in captured[0]["query"]
     assert result["service"] == "orders-service"

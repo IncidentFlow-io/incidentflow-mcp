@@ -56,16 +56,8 @@ def test_probe_and_business_traffic_are_labeled_separately(
 
     assert healthz_probe in payload
     assert readyz_probe in payload
-    assert (
-        mcp_200 in payload
-        or mcp_202 in payload
-        or mcp_500 in payload
-    )
-    assert (
-        mcp_type_200 in payload
-        or mcp_type_202 in payload
-        or mcp_type_500 in payload
-    )
+    assert mcp_200 in payload or mcp_202 in payload or mcp_500 in payload
+    assert mcp_type_200 in payload or mcp_type_202 in payload or mcp_type_500 in payload
     assert 'route="/metrics"' not in payload
 
 
@@ -102,7 +94,7 @@ def test_call_tool_without_name_uses_unknown_tool(
     )
 
     payload = auth_client.get("/metrics").text
-    assert 'mcp_tool_requests_total{' in payload
+    assert "mcp_tool_requests_total{" in payload
     assert 'tool="unknown"' in payload
 
 
@@ -187,4 +179,4 @@ def test_tool_duration_and_error_metrics_recorded_on_error(
         r'mcp_tool_request_duration_seconds_count\{[^}]*method="CallToolRequest"[^}]*outcome="error"[^}]*\}',
         payload,
     )
-    assert 'mcp_tool_errors_total{' in payload
+    assert "mcp_tool_errors_total{" in payload
