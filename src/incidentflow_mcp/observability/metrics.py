@@ -42,6 +42,21 @@ _SESSION_DURATION_BUCKETS = (
     14400.0,
 )
 
+# Practical latency buckets shared by the clean, service-scoped latency metrics.
+_LATENCY_BUCKETS = (
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+)
+
 _MCP_METHOD_TO_REQUEST_TYPE = {
     "initialize": "InitializeRequest",
     "ping": "PingRequest",
@@ -164,6 +179,20 @@ mcp_platform_api_jobs_errors_total = Counter(
     "mcp_platform_api_jobs_errors_total",
     "Total platform-api async jobs client errors by operation and status code.",
     ("namespace", "pod", "operation", "status_code", "error_type"),
+)
+
+# Clean, low-cardinality latency histograms (service-scoped names, no prefix).
+tool_duration_seconds = Histogram(
+    "tool_duration_seconds",
+    "MCP tool execution latency in seconds by tool and outcome.",
+    ("tool", "status"),
+    buckets=_LATENCY_BUCKETS,
+)
+mcp_request_duration_seconds = Histogram(
+    "mcp_request_duration_seconds",
+    "Full MCP request latency in seconds from HTTP entrypoint to response.",
+    ("endpoint", "method"),
+    buckets=_LATENCY_BUCKETS,
 )
 
 
