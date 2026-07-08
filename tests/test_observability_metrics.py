@@ -25,6 +25,8 @@ def test_metrics_endpoint_exposes_observability_metrics(auth_client: TestClient)
     assert "mcp_tool_request_duration_seconds" in payload
     assert "mcp_tool_requests_in_flight" in payload
     assert "mcp_tool_errors_total" in payload
+    assert "mcp_request_duration_seconds" in payload
+    assert "tool_duration_seconds" in payload
 
 
 def test_probe_and_business_traffic_are_labeled_separately(
@@ -81,6 +83,13 @@ def test_call_tool_request_captures_tool_labels(
     assert re.search(r'mcp_tool_requests_total\{[^}]*tool="incident_summary"[^}]*\}', payload)
     assert re.search(r'mcp_tool_requests_total\{[^}]*method="CallToolRequest"[^}]*\}', payload)
     assert re.search(r'mcp_tool_requests_total\{[^}]*traffic_type="business"[^}]*\}', payload)
+    # Clean per-tool latency metric records the bounded tool + status labels.
+    assert re.search(
+        r'tool_duration_seconds_count\{[^}]*tool="incident_summary"[^}]*\}', payload
+    )
+    assert re.search(r'tool_duration_seconds_count\{[^}]*status="(success|error)"[^}]*\}', payload)
+    # Full MCP request latency is labeled by endpoint + method only.
+    assert re.search(r'mcp_request_duration_seconds_count\{endpoint="/mcp",method="POST"\}', payload)
 
 
 def test_call_tool_without_name_uses_unknown_tool(
@@ -96,6 +105,10 @@ def test_call_tool_without_name_uses_unknown_tool(
     payload = auth_client.get("/metrics").text
     assert "mcp_tool_requests_total{" in payload
     assert 'tool="unknown"' in payload
+    # The clean per-tool latency metric must never record the "unknown" placeholder.
+    for line in payload.splitlines():
+        if line.startswith("tool_duration_seconds"):
+            assert 'tool="unknown"' not in line
 
 
 def test_headerless_request_increments_inferred_session_start(

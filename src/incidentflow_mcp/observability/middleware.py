@@ -23,6 +23,7 @@ from incidentflow_mcp.observability.metrics import (
     http_requests_in_flight,
     http_requests_total,
     mcp_connections_active,
+    mcp_request_duration_seconds,
     mcp_request_type_duration_seconds,
     mcp_request_type_total,
     mcp_session_duration_seconds,
@@ -35,6 +36,7 @@ from incidentflow_mcp.observability.metrics import (
     normalize_route,
     pod_label_values,
     status_class_from_code,
+    tool_duration_seconds,
 )
 from incidentflow_mcp.observability.tracing import get_tracer
 
@@ -154,6 +156,10 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                 status_code=status_code_str,
                 traffic=traffic,
             ).observe(elapsed)
+            mcp_request_duration_seconds.labels(
+                endpoint=route,
+                method=method,
+            ).observe(elapsed)
 
             if classify_status(status_code) in {"4xx", "5xx"}:
                 http_request_errors_total.labels(
@@ -192,6 +198,10 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                         outcome=outcome,
                         traffic_type=traffic,
                     ).observe(elapsed)
+                    if tool_name != "unknown":
+                        tool_duration_seconds.labels(tool=tool_name, status=outcome).observe(
+                            elapsed
+                        )
                     if outcome == "error":
                         mcp_tool_errors_total.labels(
                             namespace=self._namespace,
