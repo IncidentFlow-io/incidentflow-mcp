@@ -190,7 +190,10 @@ _TOOL_SPECS: list[ToolSpec] = [
             "properties": {
                 "incident_id": {
                     "type": "string",
-                    "description": "Unique incident identifier (e.g. INC-001)",
+                    "description": (
+                        "Unique incident identifier (e.g. INC-001). Required unless check_id "
+                        "is provided to poll an existing async job."
+                    ),
                 },
                 "include_timeline": {
                     "type": "boolean",
@@ -207,18 +210,36 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "enum": ["auto", "sync", "async"],
                     "default": "auto",
                     "description": (
-                        "Execution strategy. auto and sync run the read-only correlator inline; "
-                        "async is reserved for a future persisted correlation runner."
+                        "Execution strategy. sync runs the read-only correlator inline and "
+                        "returns the summary immediately; async dispatches a runner job and "
+                        "returns a job_id to poll via check_id; auto picks async when async "
+                        "tools are enabled, else sync."
+                    ),
+                },
+                "wait_for_result": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "When polling with check_id: if true (default), polls until the job "
+                        "completes; if false, returns the current job status immediately."
+                    ),
+                },
+                "check_id": {
+                    "type": "string",
+                    "description": (
+                        "Existing async job_id to poll. When provided, MCP fetches this job's "
+                        "result instead of creating a new summary (incident_id not required)."
                     ),
                 },
                 "workspace_id": {
                     "type": "string",
                     "description": (
-                        "Reserved for future async orchestration. Ignored for sync correlation."
+                        "Workspace scope for async orchestration. Optional when the token has "
+                        "workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured."
                     ),
                 },
             },
-            "required": ["incident_id"],
+            "required": [],
         },
         annotations=_read_only_annotations(),
     ),

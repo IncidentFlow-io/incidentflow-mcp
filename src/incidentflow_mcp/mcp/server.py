@@ -2167,6 +2167,34 @@ def _normalize_polled_external_status_job(
     )
 
 
+def _normalize_polled_incident_summary_job(
+    *,
+    job_id: str,
+    job: dict[str, Any],
+    poll_after_seconds: int,
+) -> str:
+    status = str(job.get("status", "unknown"))
+    if status in _TERMINAL_JOB_STATUSES:
+        payload: dict[str, Any] = {
+            "mode": "completed",
+            "job_id": job_id,
+            "status": status,
+            "result": job.get("result"),
+            "error": job.get("error"),
+            "artifact_refs": job.get("artifact_refs", []),
+            "usage": job.get("usage"),
+            "updated_at": job.get("updated_at"),
+        }
+        return json.dumps(payload, indent=2)
+
+    # Still in flight (admitted/queued/dispatched/running or unknown) — report status.
+    return _build_async_result(
+        job_id=job_id,
+        status=status,
+        poll_after_seconds=poll_after_seconds,
+    )
+
+
 async def _poll_until_done(
     client: Any,
     job_id: str,
@@ -2293,12 +2321,34 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool(**_tool_metadata(_specs["incident_summary"]))
     async def incident_summary(
-        incident_id: str,
+        incident_id: str = "",
         include_timeline: bool = True,
         include_affected_services: bool = True,
         execution_mode: str = "auto",
         workspace_id: str | None = None,
+        check_id: str | None = None,
+        wait_for_result: bool = True,
     ) -> str:
+        # Poll/fetch an existing async summary job instead of creating a new one.
+        if check_id:
+            client = PlatformAPIJobsClient(settings)
+            job = await client.get_job(check_id)
+            if wait_for_result and str(job.get("status", "")) not in _TERMINAL_JOB_STATUSES:
+                job = await _poll_until_done(
+                    client=client,
+                    job_id=check_id,
+                    initial_delay=settings.platform_api_ai_poll_after_seconds,
+                    max_wait_seconds=45,
+                )
+            return _normalize_polled_incident_summary_job(
+                job_id=check_id,
+                job=job,
+                poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
+            )
+
+        if not incident_id.strip():
+            raise ValueError("incident_id is required unless check_id is provided")
+
         mode = _resolve_execution_mode(settings, execution_mode)
         input_data = IncidentSummaryInput(
             incident_id=incident_id,
