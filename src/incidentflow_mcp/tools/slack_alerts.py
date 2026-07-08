@@ -12,10 +12,18 @@ from incidentflow_mcp.slack.thread_analyzer import (
     ThreadReplyAnalysis,
     analyze_replies,
     analyze_reply,
+    extract_commands,
     summarize_thread_for_sre,
 )
 
 ThreadMode = Literal["none", "metadata", "full"]
+
+_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+def _redact_ips(text: str) -> str:
+    """Mask IPv4 addresses so compact responses do not leak pod/node IPs."""
+    return _IPV4_RE.sub("[redacted-ip]", text)
 
 
 class SlackAlertContext(BaseModel):
@@ -58,6 +66,9 @@ class SlackAlertMessage(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
     summary: str
     raw_text: str | None = None
+    # Commands (kubectl/helm/curl/...) extracted from the message when raw_text
+    # is omitted (include_raw=False), so the compact response stays actionable.
+    extracted_commands: list[str] = Field(default_factory=list)
     slack: SlackAlertContext | None = None
     thread: SlackThreadContext | None = None
 
@@ -298,6 +309,13 @@ def _parse_alert_message(
         if value
     }
 
+    # Compact mode (default): drop raw_text, surface commands separately and
+    # redact IPs so the response stays small and safe for LLM safety layers.
+    extracted_commands: list[str] = []
+    if not include_raw:
+        extracted_commands = extract_commands(text)
+        summary = _redact_ips(summary)
+
     return SlackAlertMessage(
         alert_id=f"slack-{ts}" if ts else None,
         name=alert_name,
@@ -320,6 +338,7 @@ def _parse_alert_message(
         labels=labels,
         summary=summary,
         raw_text=text if include_raw else None,
+        extracted_commands=extracted_commands,
         slack=SlackAlertContext(
             channel_id=channel_id,
             channel_name=channel_name,
@@ -405,6 +424,7 @@ async def fetch_slack_alert_thread(
     channel_id: str,
     message_ts: str,
     include_root: bool = True,
+    include_raw: bool = False,
     max_replies: int = 50,
     client: Any | None = None,
 ) -> SlackAlertThreadOutput:
@@ -429,7 +449,7 @@ async def fetch_slack_alert_thread(
             channel_id=channel_id,
             channel_name=None,
             permalink=root_permalink,
-            include_raw=include_root,
+            include_raw=include_raw,
             thread_permalink=root_permalink,
         )
         if root_message is not None and include_root

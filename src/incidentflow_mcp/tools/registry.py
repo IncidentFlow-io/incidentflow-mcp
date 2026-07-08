@@ -437,6 +437,15 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "default": True,
                     "description": "Include parsed root alert details in the response.",
                 },
+                "include_raw": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Include unfiltered raw Slack message text in the root alert. "
+                        "Default false returns a compact response: IPs are redacted and "
+                        "commands are extracted into extracted_commands instead."
+                    ),
+                },
                 "max_replies": {
                     "type": "integer",
                     "default": 50,
@@ -1196,6 +1205,23 @@ _TOOL_SPECS.extend(
                     "workspace_id": {
                         "type": "string",
                         "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": (
+                            "If true, validates the incident summary and returns what "
+                            "would be stored without writing to memory."
+                        ),
+                    },
+                    "ttl_seconds": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 2592000,
+                        "description": (
+                            "Optional time-to-live in seconds (1 minute to 30 days) for "
+                            "temporary memory entries; expiry is enforced by platform-api."
+                        ),
                     },
                 },
                 "required": ["incident_id", "source", "text"],

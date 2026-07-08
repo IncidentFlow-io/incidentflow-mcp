@@ -93,8 +93,17 @@ class PlatformAPIMemoryClient:
         incident_id: str,
         source: str,
         text: str,
+        dry_run: bool = False,
+        ttl_seconds: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        """Upsert an incident memory document via platform-api.
+
+        With ``dry_run=True`` the payload is validated locally and returned
+        without any HTTP call, so nothing is written to semantic memory.
+        ``ttl_seconds`` is forwarded in the request body; actual expiry is
+        enforced by platform-api (no-op until the backend supports it).
+        """
         tracer = get_tracer()
         with tracer.start_as_current_span("qdrant.upsert") as span:
             span.set_attribute("memory.operation", "upsert")
@@ -108,6 +117,33 @@ class PlatformAPIMemoryClient:
                 "text": text,
                 **{k: v for k, v in kwargs.items() if v is not None},
             }
+            if ttl_seconds is not None:
+                body["ttl_seconds"] = ttl_seconds
+
+            if dry_run:
+                span.set_attribute("memory.dry_run", True)
+                missing = [
+                    field
+                    for field, value in (
+                        ("workspace_id", workspace_id),
+                        ("incident_id", incident_id),
+                        ("source", source),
+                        ("text", text),
+                    )
+                    if not (value or "").strip()
+                ]
+                if missing:
+                    raise ValueError(
+                        f"dry_run validation failed: empty fields: {', '.join(missing)}"
+                    )
+                return {
+                    "stored": False,
+                    "dry_run": True,
+                    "validated": True,
+                    "point_id": None,
+                    "would_write": body,
+                }
+
             headers = self._headers()
             inject_trace_headers(headers)
             try:
@@ -203,6 +239,8 @@ async def memory_upsert_incident_summary(
     cluster: str | None = None,
     namespace: str | None = None,
     started_at: str | None = None,
+    dry_run: bool = False,
+    ttl_seconds: int | None = None,
 ) -> dict[str, Any]:
     client = PlatformAPIMemoryClient(settings)
     try:
@@ -217,7 +255,19 @@ async def memory_upsert_incident_summary(
             cluster=cluster,
             namespace=namespace,
             started_at=started_at,
+            dry_run=dry_run,
+            ttl_seconds=ttl_seconds,
         )
+        if dry_run:
+            return {
+                "stored": False,
+                "dry_run": True,
+                "validated": bool(result.get("validated")),
+                "incident_id": incident_id,
+                "source": source,
+                "point_id": None,
+                "would_write": result.get("would_write"),
+            }
         return {
             "stored": True,
             "incident_id": incident_id,

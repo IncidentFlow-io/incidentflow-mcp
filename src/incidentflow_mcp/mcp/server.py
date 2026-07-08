@@ -2454,6 +2454,7 @@ def create_mcp_server() -> FastMCP:
         channel_id: str,
         message_ts: str,
         include_root: bool = True,
+        include_raw: bool = False,
         max_replies: int = 50,
         workspace_id: str | None = None,
     ) -> str:
@@ -2475,6 +2476,7 @@ def create_mcp_server() -> FastMCP:
                 channel_id=channel_id,
                 message_ts=message_ts,
                 include_root=include_root,
+                include_raw=include_raw,
                 max_replies=max_replies,
                 client=platform_client,
             )
@@ -3556,6 +3558,8 @@ def create_mcp_server() -> FastMCP:
         namespace: str | None = None,
         started_at: str | None = None,
         workspace_id: str | None = None,
+        dry_run: bool = False,
+        ttl_seconds: int | None = None,
     ) -> str:
         try:
             result = await memory_upsert_incident_summary(
@@ -3570,6 +3574,8 @@ def create_mcp_server() -> FastMCP:
                 cluster=cluster,
                 namespace=namespace,
                 started_at=started_at,
+                dry_run=dry_run,
+                ttl_seconds=ttl_seconds,
             )
             return json.dumps(result, indent=2)
         except MemoryAPIError as exc:

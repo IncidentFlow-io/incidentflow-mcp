@@ -455,3 +455,71 @@ def test_thread_mode_aliases_normalize_to_full() -> None:
 def test_unknown_thread_mode_still_raises() -> None:
     with pytest.raises(ValueError, match="none, metadata, full"):
         _normalize_slack_thread_mode("deep")
+
+
+# ──────────────────────────────────────────────
+# include_raw compact/redacted behavior
+# ──────────────────────────────────────────────
+
+RAW_ROOT = {
+    "ts": "1710000000.000100",
+    "text": (
+        "[FIRING:1] PodUnreachable\nCluster: incidentflow\nNamespace: default\n"
+        "Description: critical - pod 10.0.5.42 unreachable\n"
+        "kubectl describe pod api-0 -n default"
+    ),
+    "reply_count": 0,
+    "reply_users": [],
+}
+
+
+class RawTextFakeSlackClient(FakeSlackClient):
+    async def thread_replies(
+        self,
+        *,
+        channel_id: str,
+        thread_ts: str,
+        max_replies: int,
+        include_root: bool = False,
+    ) -> SlackThreadFetchResult:
+        return SlackThreadFetchResult(root=RAW_ROOT, replies=[], messages=[RAW_ROOT])
+
+
+@pytest.mark.asyncio
+async def test_thread_get_default_omits_raw_and_extracts_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", RawTextFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alert_thread(
+        token="x",
+        channel_id="C12345678",
+        message_ts="1710000000.000100",
+    )
+
+    root = result.root_alert
+    assert root is not None
+    assert root.raw_text is None
+    assert root.extracted_commands == ["kubectl describe pod api-0 -n default"]
+    assert "10.0.5.42" not in root.summary
+    assert "[redacted-ip]" in root.summary
+
+
+@pytest.mark.asyncio
+async def test_thread_get_include_raw_returns_raw_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", RawTextFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alert_thread(
+        token="x",
+        channel_id="C12345678",
+        message_ts="1710000000.000100",
+        include_raw=True,
+    )
+
+    root = result.root_alert
+    assert root is not None
+    assert root.raw_text is not None
+    assert "10.0.5.42" in root.raw_text
+    assert root.extracted_commands == []
