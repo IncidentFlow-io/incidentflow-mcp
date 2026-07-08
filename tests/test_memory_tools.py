@@ -247,3 +247,70 @@ async def test_find_runbook_enriches_query_with_runbook_prefix() -> None:
         await memory_find_runbook(s, workspace_id="ws-1", query="redis restart")
 
     assert captured[0]["query"].startswith("runbook:")
+
+
+# ──────────────────────────────────────────────
+# dry_run + ttl_seconds
+# ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_upsert_dry_run_validates_without_post() -> None:
+    s = _make_settings()
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+        result = await memory_upsert_incident_summary(
+            s,
+            workspace_id="ws-1",
+            incident_id="INC-042",
+            source="incident_summary",
+            text="Test summary for dry-run.",
+            dry_run=True,
+        )
+
+    post.assert_not_awaited()
+    assert result["stored"] is False
+    assert result["dry_run"] is True
+    assert result["validated"] is True
+    assert result["point_id"] is None
+    assert result["would_write"]["incident_id"] == "INC-042"
+
+
+@pytest.mark.asyncio
+async def test_upsert_dry_run_rejects_empty_text() -> None:
+    s = _make_settings()
+
+    with (
+        patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post,
+        pytest.raises(MemoryAPIError, match="empty fields: text"),
+    ):
+        await memory_upsert_incident_summary(
+            s,
+            workspace_id="ws-1",
+            incident_id="INC-042",
+            source="incident_summary",
+            text="   ",
+            dry_run=True,
+        )
+
+    post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_upsert_ttl_seconds_included_in_body() -> None:
+    s = _make_settings()
+    resp = _resp({"point_id": "uuid-123", "text_hash": "deadbeef"})
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp) as post:
+        result = await memory_upsert_incident_summary(
+            s,
+            workspace_id="ws-1",
+            incident_id="INC-042",
+            source="incident_summary",
+            text="Temporary test entry.",
+            ttl_seconds=3600,
+        )
+
+    assert result["stored"] is True
+    body = post.call_args.kwargs["json"]
+    assert body["ttl_seconds"] == 3600
