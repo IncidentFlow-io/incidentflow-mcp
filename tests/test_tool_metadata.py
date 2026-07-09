@@ -33,11 +33,26 @@ EXPECTED_TOOL_NAMES = {
     "grafana_metrics_query",
     "grafana_metrics_query_range",
     "analyze_dashboard_health",
-    "analyze_dns_dashboard",
     "memory_search_similar_incidents",
     "memory_get_service_context",
-    "memory_upsert_incident_summary",
     "memory_find_runbook",
+    # Typed knowledge-memory tools (Phase 6)
+    "memory_upsert_runbook",
+    "memory_upsert_rca",
+    "memory_upsert_postmortem",
+    "memory_upsert_knowledge",
+    "memory_upsert_incident",
+    "memory_find_rca",
+    "memory_find_knowledge",
+}
+
+# Write tools legitimately set readOnlyHint=False; everything else must be read-only.
+WRITE_TOOL_NAMES = {
+    "memory_upsert_runbook",
+    "memory_upsert_rca",
+    "memory_upsert_postmortem",
+    "memory_upsert_knowledge",
+    "memory_upsert_incident",
 }
 
 REQUIRED_BOOLEAN_ANNOTATIONS = {
@@ -61,7 +76,7 @@ def test_all_registry_tools_have_submission_metadata() -> None:
             value = spec.annotations.get(annotation_name)
             assert isinstance(value, bool), f"{spec.name} {annotation_name} must be a boolean"
 
-        if spec.name != "memory_upsert_incident_summary":
+        if spec.name not in WRITE_TOOL_NAMES:
             assert spec.annotations["readOnlyHint"] is True, f"{spec.name} should be read-only"
         assert spec.annotations["openWorldHint"] is False
         assert spec.annotations["destructiveHint"] is False
@@ -86,7 +101,7 @@ async def test_fastmcp_tools_publish_submission_metadata() -> None:
             value = getattr(tool.annotations, annotation_name)
             assert isinstance(value, bool), f"{tool.name} {annotation_name} must be a boolean"
 
-        if tool.name != "memory_upsert_incident_summary":
+        if tool.name not in WRITE_TOOL_NAMES:
             assert tool.annotations.readOnlyHint is True, f"{tool.name} should be read-only"
         assert tool.annotations.openWorldHint is False
         assert tool.annotations.destructiveHint is False

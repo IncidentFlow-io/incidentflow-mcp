@@ -45,6 +45,12 @@ class PlatformAPIMemoryClient:
         workspace_id: str,
         query: str,
         service: str | None = None,
+        types: list[str] | None = None,
+        tags: list[str] | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        exclude_status: list[str] | None = None,
+        include_text: bool = False,
         limit: int = 5,
         score_threshold: float | None = None,
     ) -> dict[str, Any]:
@@ -55,10 +61,24 @@ class PlatformAPIMemoryClient:
             span.set_attribute("memory.limit", limit)
             if service:
                 span.set_attribute("memory.service", service)
+            if types:
+                span.set_attribute("memory.types", ",".join(types))
 
             body: dict[str, Any] = {"workspace_id": workspace_id, "query": query, "limit": limit}
             if service:
                 body["service"] = service
+            if types:
+                body["types"] = types
+            if tags:
+                body["tags"] = tags
+            if cluster:
+                body["cluster"] = cluster
+            if namespace:
+                body["namespace"] = namespace
+            if exclude_status:
+                body["exclude_status"] = exclude_status
+            if include_text:
+                body["include_text"] = True
             if score_threshold is not None:
                 body["score_threshold"] = score_threshold
 
@@ -171,6 +191,7 @@ async def memory_search_similar_incidents(
     workspace_id: str,
     query: str,
     service: str | None = None,
+    types: list[str] | None = None,
     limit: int = 5,
 ) -> dict[str, Any]:
     client = PlatformAPIMemoryClient(settings)
@@ -179,6 +200,8 @@ async def memory_search_similar_incidents(
             workspace_id=workspace_id,
             query=query,
             service=service,
+            types=types,
+            include_text=True,
             limit=limit,
         )
         matches = result.get("matches", [])
@@ -210,13 +233,20 @@ async def memory_get_service_context(
             workspace_id=workspace_id,
             query=effective_query,
             service=service,
+            include_text=True,
             limit=limit,
             score_threshold=0.3,
         )
         matches = result.get("matches", [])
+        # Group results by document type so callers get a structured service picture
+        # (runbooks vs rca vs incidents vs …) instead of a flat list.
+        by_type: dict[str, list[dict[str, Any]]] = {}
+        for m in matches:
+            by_type.setdefault(m.get("type") or m.get("source") or "unknown", []).append(m)
         return {
             "service": service,
             "total_entries": len(matches),
+            "by_type": by_type,
             "context": matches,
         }
     except httpx.HTTPStatusError as exc:
@@ -227,82 +257,43 @@ async def memory_get_service_context(
         raise MemoryAPIError(f"Service context error: {exc}") from exc
 
 
-async def memory_upsert_incident_summary(
-    settings: Settings,
-    workspace_id: str,
-    incident_id: str,
-    source: str,
-    text: str,
-    service: str | None = None,
-    severity: str | None = None,
-    status: str | None = None,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    started_at: str | None = None,
-    dry_run: bool = False,
-    ttl_seconds: int | None = None,
-) -> dict[str, Any]:
-    client = PlatformAPIMemoryClient(settings)
-    try:
-        result = await client.upsert(
-            workspace_id=workspace_id,
-            incident_id=incident_id,
-            source=source,
-            text=text,
-            service=service,
-            severity=severity,
-            status=status,
-            cluster=cluster,
-            namespace=namespace,
-            started_at=started_at,
-            dry_run=dry_run,
-            ttl_seconds=ttl_seconds,
-        )
-        if dry_run:
-            return {
-                "stored": False,
-                "dry_run": True,
-                "validated": bool(result.get("validated")),
-                "incident_id": incident_id,
-                "source": source,
-                "point_id": None,
-                "would_write": result.get("would_write"),
-            }
-        return {
-            "stored": True,
-            "incident_id": incident_id,
-            "source": source,
-            "point_id": result.get("point_id"),
-            "text_hash": result.get("text_hash"),
-        }
-    except httpx.HTTPStatusError as exc:
-        raise MemoryAPIError(f"Memory upsert failed: HTTP {exc.response.status_code}") from exc
-    except Exception as exc:
-        raise MemoryAPIError(f"Memory upsert error: {exc}") from exc
-
-
 async def memory_find_runbook(
     settings: Settings,
     workspace_id: str,
     query: str,
     service: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    tags: list[str] | None = None,
     limit: int = 3,
 ) -> dict[str, Any]:
     client = PlatformAPIMemoryClient(settings)
-    # Constrain search to runbook source by enriching the query
-    runbook_query = f"runbook: {query}"
     try:
+        # Server-side type filter; archived runbooks are excluded by default.
         result = await client.search(
             workspace_id=workspace_id,
-            query=runbook_query,
+            query=query,
             service=service,
+            cluster=cluster,
+            namespace=namespace,
+            tags=tags,
+            types=["runbook"],
+            exclude_status=["archived"],
+            include_text=True,
             limit=limit,
         )
-        matches = result.get("matches", [])
-        # Filter to runbook sources if the collection has mixed sources
-        runbooks = [m for m in matches if m.get("source") in ("runbook", "rca")]
+        runbooks = result.get("matches", [])
         if not runbooks:
-            runbooks = matches  # fall back to all results if no runbooks stored yet
+            # Fall back to related operational docs (rca) if no runbook exists yet.
+            fallback = await client.search(
+                workspace_id=workspace_id,
+                query=query,
+                service=service,
+                types=["rca"],
+                include_text=True,
+                limit=limit,
+            )
+            runbooks = fallback.get("matches", [])
         return {
             "query": query,
             "total_runbooks": len(runbooks),
@@ -312,3 +303,79 @@ async def memory_find_runbook(
         raise MemoryAPIError(f"Runbook search failed: HTTP {exc.response.status_code}") from exc
     except Exception as exc:
         raise MemoryAPIError(f"Runbook search error: {exc}") from exc
+
+
+# ──────────────────────────────────────────────
+# consult-memory (Phase 9) — used by diagnostic tools to enrich their answers
+# ──────────────────────────────────────────────
+
+# Maps document type → the bucket key surfaced in a tool's memory_context.
+_CONSULT_TYPE_BUCKETS = {
+    "runbook": "runbooks",
+    "rca": "rcas",
+    "incident": "similar_incidents",
+    "postmortem": "postmortems",
+}
+
+
+def _group_matches(matches: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Group raw search matches by document type into compact memory_context buckets."""
+    buckets: dict[str, list[dict[str, Any]]] = {v: [] for v in _CONSULT_TYPE_BUCKETS.values()}
+    for m in matches:
+        bucket = _CONSULT_TYPE_BUCKETS.get(m.get("type") or m.get("source"))
+        if not bucket:
+            continue
+        buckets[bucket].append(
+            {
+                "id": m.get("incident_id"),
+                "title": m.get("title"),
+                "score": m.get("score"),
+                "service": m.get("service"),
+                "summary": m.get("summary"),
+            }
+        )
+    return buckets
+
+
+async def memory_consult(
+    settings: Settings,
+    workspace_id: str,
+    query: str,
+    *,
+    service: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    tags: list[str] | None = None,
+    limit: int = 6,
+) -> dict[str, Any] | None:
+    """Single semantic lookup across knowledge types for diagnostic enrichment.
+
+    Returns a memory_context dict (query + non-empty type buckets) or None when there
+    is nothing relevant. Raises MemoryAPIError on transport failure so the caller can
+    decide to swallow it.
+    """
+    client = PlatformAPIMemoryClient(settings)
+    try:
+        result = await client.search(
+            workspace_id=workspace_id,
+            query=query,
+            service=service,
+            cluster=cluster,
+            namespace=namespace,
+            tags=tags,
+            types=list(_CONSULT_TYPE_BUCKETS.keys()),
+            exclude_status=["archived"],
+            include_text=False,
+            limit=limit,
+        )
+    except httpx.HTTPStatusError as exc:
+        raise MemoryAPIError(f"Memory consult failed: HTTP {exc.response.status_code}") from exc
+    except Exception as exc:
+        raise MemoryAPIError(f"Memory consult error: {exc}") from exc
+
+    buckets = _group_matches(result.get("matches", []))
+    non_empty = {k: v for k, v in buckets.items() if v}
+    total = sum(len(v) for v in non_empty.values())
+    if total == 0:
+        return None
+    return {"query": query, "total": total, **non_empty}

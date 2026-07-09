@@ -84,12 +84,12 @@ def test_call_tool_request_captures_tool_labels(
     assert re.search(r'mcp_tool_requests_total\{[^}]*method="CallToolRequest"[^}]*\}', payload)
     assert re.search(r'mcp_tool_requests_total\{[^}]*traffic_type="business"[^}]*\}', payload)
     # Clean per-tool latency metric records the bounded tool + status labels.
-    assert re.search(
-        r'tool_duration_seconds_count\{[^}]*tool="incident_summary"[^}]*\}', payload
-    )
+    assert re.search(r'tool_duration_seconds_count\{[^}]*tool="incident_summary"[^}]*\}', payload)
     assert re.search(r'tool_duration_seconds_count\{[^}]*status="(success|error)"[^}]*\}', payload)
     # Full MCP request latency is labeled by endpoint + method only.
-    assert re.search(r'mcp_request_duration_seconds_count\{endpoint="/mcp",method="POST"\}', payload)
+    assert re.search(
+        r'mcp_request_duration_seconds_count\{endpoint="/mcp",method="POST"\}', payload
+    )
 
 
 def test_call_tool_without_name_uses_unknown_tool(
