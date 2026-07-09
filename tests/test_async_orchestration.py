@@ -17,6 +17,7 @@ from incidentflow_mcp.mcp.server import (
     _k8s_rbac_check_payload,
     _normalize_correlation_alerts,
     _normalize_polled_external_status_job,
+    _normalize_polled_incident_summary_job,
     _overview_payload,
     _resolve_correlation_mode,
     _resolve_execution_mode,
@@ -138,6 +139,15 @@ def test_select_workload_pod_prefers_exact_then_prefix() -> None:
     assert (
         _select_workload_pod([{"name": "checkout-api-abc"}], "checkout-api") == "checkout-api-abc"
     )
+
+
+def test_incident_summary_schema_supports_check_id_polling() -> None:
+    spec = next(s for s in get_tool_specs() if s.name == "incident_summary")
+    properties = spec.input_schema["properties"]
+    assert "check_id" in properties
+    assert "wait_for_result" in properties
+    # incident_id must no longer be strictly required — polling uses check_id instead.
+    assert spec.input_schema["required"] == []
 
 
 def test_external_status_check_schema_contains_response_mode_and_check_id_polling_hint() -> None:
@@ -795,6 +805,56 @@ async def test_platform_api_jobs_client_submit_includes_internal_key(
     assert captured["url"] == "http://platform.test/api/v1/ai/jobs"
     assert captured["key"] == "secret-key"
     assert captured["job_type"] == "incident.summary.generate"
+
+
+def test_normalize_polled_incident_summary_job_running_returns_async() -> None:
+    output = _normalize_polled_incident_summary_job(
+        job_id="sum_1",
+        job={"status": "running"},
+        poll_after_seconds=2,
+    )
+    payload = json.loads(output)
+
+    assert payload["mode"] == "async"
+    assert payload["job_id"] == "sum_1"
+    assert payload["status"] == "running"
+    assert payload["poll_after_seconds"] == 2
+
+
+def test_normalize_polled_incident_summary_job_terminal_returns_completed_payload() -> None:
+    output = _normalize_polled_incident_summary_job(
+        job_id="sum_2",
+        job={
+            "status": "succeeded",
+            "result": {"title": "DB outage", "severity": "sev1"},
+            "artifact_refs": ["artifact_1"],
+            "usage": {"tokens": 42},
+            "updated_at": "2026-07-08T18:00:00Z",
+        },
+        poll_after_seconds=2,
+    )
+    payload = json.loads(output)
+
+    assert payload["mode"] == "completed"
+    assert payload["job_id"] == "sum_2"
+    assert payload["status"] == "succeeded"
+    assert payload["result"] == {"title": "DB outage", "severity": "sev1"}
+    assert payload["artifact_refs"] == ["artifact_1"]
+    assert payload["usage"] == {"tokens": 42}
+    assert payload["updated_at"] == "2026-07-08T18:00:00Z"
+
+
+def test_normalize_polled_incident_summary_job_failed_returns_error() -> None:
+    output = _normalize_polled_incident_summary_job(
+        job_id="sum_3",
+        job={"status": "failed", "error": "runner crashed"},
+        poll_after_seconds=2,
+    )
+    payload = json.loads(output)
+
+    assert payload["mode"] == "completed"
+    assert payload["status"] == "failed"
+    assert payload["error"] == "runner crashed"
 
 
 def test_normalize_polled_external_status_job_running_returns_async() -> None:
