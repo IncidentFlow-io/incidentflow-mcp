@@ -1045,40 +1045,6 @@ _TOOL_SPECS: list[ToolSpec] = [
             "openWorldHint": False,
         },
     ),
-    ToolSpec(
-        name="analyze_dns_dashboard",
-        title="Analyze DNS Dashboard",
-        description=(
-            "Use this when investigating DNS health from an allow-listed Grafana dashboard. "
-            "Runs the dashboard health analysis, then highlights DNS-related panels and "
-            "NXDOMAIN/SERVFAIL-style response-code series when present."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
-                "start": {
-                    "type": "string",
-                    "default": "now-6h",
-                    "description": "Window start (default now-6h).",
-                },
-                "end": {
-                    "type": "string",
-                    "default": "now",
-                    "description": "Window end (default now).",
-                },
-                "step": {"type": "string", "description": "Optional step; server picks a default."},
-                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
-            },
-            "required": ["dashboard_uid"],
-        },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-        },
-    ),
 ]
 
 
@@ -1119,6 +1085,14 @@ _TOOL_SPECS.extend(
                     "service": {
                         "type": "string",
                         "description": "Optional service name to narrow the search scope.",
+                    },
+                    "types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": (
+                            "Optional document types to filter to, e.g. ['incident']. "
+                            "Omit to search across all types."
+                        ),
                     },
                     "limit": {
                         "type": "integer",
@@ -1178,86 +1152,6 @@ _TOOL_SPECS.extend(
             annotations=_read_only_annotations(),
         ),
         ToolSpec(
-            name="memory_upsert_incident_summary",
-            title="Save Incident Summary to Memory",
-            description=(
-                "Persists an incident summary, Slack thread summary, or RCA into IncidentFlow's "
-                "semantic memory so future incidents can find it via similarity search. "
-                f"{_MEMORY_WRITE_JUSTIFICATION}"
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "incident_id": {
-                        "type": "string",
-                        "description": "Incident identifier, e.g. INC-001.",
-                    },
-                    "source": {
-                        "type": "string",
-                        "enum": [
-                            "incident_summary",
-                            "slack_thread",
-                            "rca",
-                            "runbook",
-                            "alert_pattern",
-                        ],
-                        "description": "Type of document being stored.",
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": (
-                            "Free-text summary to embed. Should be concise and factual, "
-                            "e.g. the RCA or resolution steps."
-                        ),
-                    },
-                    "service": {"type": "string", "description": "Affected service name."},
-                    "severity": {
-                        "type": "string",
-                        "enum": ["critical", "high", "medium", "low", "info"],
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["open", "investigating", "mitigating", "resolved"],
-                    },
-                    "cluster": {"type": "string", "description": "Kubernetes cluster name."},
-                    "namespace": {"type": "string", "description": "Kubernetes namespace."},
-                    "started_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "description": "Incident start time as ISO 8601.",
-                    },
-                    "workspace_id": {
-                        "type": "string",
-                        "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
-                    },
-                    "dry_run": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": (
-                            "If true, validates the incident summary and returns what "
-                            "would be stored without writing to memory."
-                        ),
-                    },
-                    "ttl_seconds": {
-                        "type": "integer",
-                        "minimum": 60,
-                        "maximum": 2592000,
-                        "description": (
-                            "Optional time-to-live in seconds (1 minute to 30 days) for "
-                            "temporary memory entries; expiry is enforced by platform-api."
-                        ),
-                    },
-                },
-                "required": ["incident_id", "source", "text"],
-            },
-            annotations={
-                "readOnlyHint": False,
-                "openWorldHint": False,
-                "destructiveHint": False,
-                "idempotentHint": True,
-            },
-        ),
-        ToolSpec(
             name="memory_find_runbook",
             title="Find Runbook from Memory",
             description=(
@@ -1280,6 +1174,13 @@ _TOOL_SPECS.extend(
                         "type": "string",
                         "description": "Optional service name to filter runbooks.",
                     },
+                    "cluster": {"type": "string", "description": "Optional cluster filter."},
+                    "namespace": {"type": "string", "description": "Optional namespace filter."},
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional tags to filter runbooks.",
+                    },
                     "limit": {
                         "type": "integer",
                         "default": 3,
@@ -1290,6 +1191,242 @@ _TOOL_SPECS.extend(
                         "type": "string",
                         "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
                     },
+                },
+                "required": ["query"],
+            },
+            annotations=_read_only_annotations(),
+        ),
+    ]
+)
+
+
+# ──────────────────────────────────────────────
+# Typed knowledge-memory tools (runbook / rca / postmortem / knowledge / incident)
+# ──────────────────────────────────────────────
+
+_KNOWLEDGE_WRITE_ANNOTATIONS = {
+    "readOnlyHint": False,
+    "openWorldHint": False,
+    "destructiveHint": False,
+    "idempotentHint": True,
+}
+
+_DRY_RUN_PROP = {
+    "type": "boolean",
+    "default": False,
+    "description": "If true, validate and return what would be stored without writing.",
+}
+_WORKSPACE_PROP = {
+    "type": "string",
+    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",
+}
+_TAGS_PROP = {
+    "type": "array",
+    "items": {"type": "string"},
+    "description": "Keyword tags for filtering, e.g. ['kubernetes', 'startupProbe'].",
+}
+
+_TOOL_SPECS.extend(
+    [
+        ToolSpec(
+            name="memory_upsert_runbook",
+            title="Save Runbook to Memory",
+            description=(
+                "Persist or update a runbook in IncidentFlow semantic memory so future "
+                "incidents can retrieve proven remediation steps by similarity search. "
+                "Re-saving the same runbook_id/title updates the existing record. "
+                f"{_MEMORY_WRITE_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Runbook title."},
+                    "text": {
+                        "type": "string",
+                        "description": (
+                            "Runbook body. Prefer the standard template: Symptoms / First "
+                            "checks / Commands / Decision / Resolution / Escalation."
+                        ),
+                    },
+                    "runbook_id": {
+                        "type": "string",
+                        "description": "Stable id; generated from the title when omitted.",
+                    },
+                    "service": {"type": "string"},
+                    "cluster": {"type": "string"},
+                    "namespace": {"type": "string"},
+                    "severity": {"type": "string", "enum": ["info", "warning", "critical"]},
+                    "tags": _TAGS_PROP,
+                    "status": {
+                        "type": "string",
+                        "enum": ["active", "draft", "archived"],
+                        "default": "active",
+                    },
+                    "dry_run": _DRY_RUN_PROP,
+                    "workspace_id": _WORKSPACE_PROP,
+                },
+                "required": ["title", "text"],
+            },
+            annotations=_KNOWLEDGE_WRITE_ANNOTATIONS,
+        ),
+        ToolSpec(
+            name="memory_upsert_rca",
+            title="Save RCA to Memory",
+            description=(
+                "Persist or update a root-cause analysis in IncidentFlow semantic memory. "
+                f"{_MEMORY_WRITE_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "text": {"type": "string", "description": "RCA narrative and findings."},
+                    "incident_id": {
+                        "type": "string",
+                        "description": "Related incident id; generated from title when omitted.",
+                    },
+                    "service": {"type": "string"},
+                    "cluster": {"type": "string"},
+                    "namespace": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "high", "medium", "low", "info"],
+                    },
+                    "tags": _TAGS_PROP,
+                    "dry_run": _DRY_RUN_PROP,
+                    "workspace_id": _WORKSPACE_PROP,
+                },
+                "required": ["title", "text"],
+            },
+            annotations=_KNOWLEDGE_WRITE_ANNOTATIONS,
+        ),
+        ToolSpec(
+            name="memory_upsert_postmortem",
+            title="Save Postmortem to Memory",
+            description=(
+                "Persist or update a postmortem in IncidentFlow semantic memory. "
+                f"{_MEMORY_WRITE_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "text": {"type": "string"},
+                    "incident_id": {
+                        "type": "string",
+                        "description": "Related incident id; generated from title when omitted.",
+                    },
+                    "service": {"type": "string"},
+                    "cluster": {"type": "string"},
+                    "namespace": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "high", "medium", "low", "info"],
+                    },
+                    "tags": _TAGS_PROP,
+                    "dry_run": _DRY_RUN_PROP,
+                    "workspace_id": _WORKSPACE_PROP,
+                },
+                "required": ["title", "text"],
+            },
+            annotations=_KNOWLEDGE_WRITE_ANNOTATIONS,
+        ),
+        ToolSpec(
+            name="memory_upsert_knowledge",
+            title="Save Operational Knowledge to Memory",
+            description=(
+                "Persist or update a general operational knowledge note (how-to, gotcha, "
+                "service fact) in IncidentFlow semantic memory. "
+                f"{_MEMORY_WRITE_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "text": {"type": "string"},
+                    "knowledge_id": {
+                        "type": "string",
+                        "description": "Stable id; generated from the title when omitted.",
+                    },
+                    "service": {"type": "string"},
+                    "cluster": {"type": "string"},
+                    "namespace": {"type": "string"},
+                    "tags": _TAGS_PROP,
+                    "dry_run": _DRY_RUN_PROP,
+                    "workspace_id": _WORKSPACE_PROP,
+                },
+                "required": ["title", "text"],
+            },
+            annotations=_KNOWLEDGE_WRITE_ANNOTATIONS,
+        ),
+        ToolSpec(
+            name="memory_upsert_incident",
+            title="Save Incident to Memory",
+            description=(
+                "Persist or update an incident summary in IncidentFlow semantic memory. "
+                f"{_MEMORY_WRITE_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "incident_id": {"type": "string", "description": "Incident id, e.g. INC-001."},
+                    "title": {"type": "string"},
+                    "text": {"type": "string"},
+                    "service": {"type": "string"},
+                    "cluster": {"type": "string"},
+                    "namespace": {"type": "string"},
+                    "severity": {
+                        "type": "string",
+                        "enum": ["critical", "high", "medium", "low", "info"],
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["open", "investigating", "mitigating", "resolved"],
+                    },
+                    "started_at": {"type": "string", "format": "date-time"},
+                    "tags": _TAGS_PROP,
+                    "dry_run": _DRY_RUN_PROP,
+                    "workspace_id": _WORKSPACE_PROP,
+                },
+                "required": ["incident_id", "title", "text"],
+            },
+            annotations=_KNOWLEDGE_WRITE_ANNOTATIONS,
+        ),
+        ToolSpec(
+            name="memory_find_rca",
+            title="Find RCA from Memory",
+            description=(
+                "Searches IncidentFlow semantic memory for past root-cause analyses matching "
+                f"the current problem. {_MEMORY_READ_ONLY_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Describe the problem/symptoms."},
+                    "service": {"type": "string"},
+                    "tags": _TAGS_PROP,
+                    "limit": {"type": "integer", "default": 3, "minimum": 1, "maximum": 10},
+                    "workspace_id": _WORKSPACE_PROP,
+                },
+                "required": ["query"],
+            },
+            annotations=_read_only_annotations(),
+        ),
+        ToolSpec(
+            name="memory_find_knowledge",
+            title="Find Operational Knowledge from Memory",
+            description=(
+                "Searches IncidentFlow semantic memory for operational knowledge notes matching "
+                f"the query. {_MEMORY_READ_ONLY_JUSTIFICATION}"
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "service": {"type": "string"},
+                    "tags": _TAGS_PROP,
+                    "limit": {"type": "integer", "default": 3, "minimum": 1, "maximum": 10},
+                    "workspace_id": _WORKSPACE_PROP,
                 },
                 "required": ["query"],
             },

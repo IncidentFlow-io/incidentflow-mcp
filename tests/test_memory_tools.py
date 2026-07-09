@@ -14,7 +14,6 @@ from incidentflow_mcp.tools.memory_tools import (
     memory_find_runbook,
     memory_get_service_context,
     memory_search_similar_incidents,
-    memory_upsert_incident_summary,
 )
 
 
@@ -158,62 +157,29 @@ async def test_get_service_context_uses_provided_query() -> None:
 
 
 # ──────────────────────────────────────────────
-# memory_upsert_incident_summary
-# ──────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_upsert_incident_summary_ok() -> None:
-    s = _make_settings()
-    resp = _resp({"point_id": "uuid-123", "text_hash": "deadbeef"})
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp):
-        result = await memory_upsert_incident_summary(
-            s,
-            workspace_id="ws-1",
-            incident_id="INC-042",
-            source="incident_summary",
-            text="The service crashed due to OOM.",
-            service="billing-service",
-            severity="critical",
-        )
-
-    assert result["stored"] is True
-    assert result["point_id"] == "uuid-123"
-    assert result["text_hash"] == "deadbeef"
-    assert result["incident_id"] == "INC-042"
-
-
-@pytest.mark.asyncio
-async def test_upsert_incident_summary_http_error() -> None:
-    s = _make_settings()
-    resp = _resp({}, status=500)
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp):
-        with pytest.raises(MemoryAPIError, match="HTTP 500"):
-            await memory_upsert_incident_summary(
-                s, workspace_id="ws-1", incident_id="INC-042", source="rca", text="crash"
-            )
-
-
-# ──────────────────────────────────────────────
 # memory_find_runbook
 # ──────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_find_runbook_filters_runbook_source() -> None:
+async def test_find_runbook_uses_server_side_type_filter() -> None:
     s = _make_settings()
+    captured: list[dict[str, Any]] = []
     matches = [
-        {"incident_id": "INC-1", "source": "runbook", "summary": "Restart service"},
-        {"incident_id": "INC-2", "source": "incident_summary", "summary": "Something else"},
+        {"incident_id": "INC-1", "type": "runbook", "source": "runbook", "summary": "Restart"},
     ]
     resp = _resp({"matches": matches})
 
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp):
+    async def fake_post(url: str, **kwargs: Any) -> MagicMock:
+        captured.append(kwargs.get("json", {}))
+        return resp
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
         result = await memory_find_runbook(s, workspace_id="ws-1", query="restart procedure")
 
-    # Should filter to runbook/rca sources only
+    # Filtering happens server-side: request carries the type filter and excludes archived.
+    assert captured[0]["types"] == ["runbook"]
+    assert captured[0]["exclude_status"] == ["archived"]
     assert result["total_runbooks"] == 1
     assert result["runbooks"][0]["source"] == "runbook"
 
@@ -234,7 +200,7 @@ async def test_find_runbook_falls_back_to_all_when_no_runbooks() -> None:
 
 
 @pytest.mark.asyncio
-async def test_find_runbook_enriches_query_with_runbook_prefix() -> None:
+async def test_find_runbook_sends_plain_query_and_type_filter() -> None:
     s = _make_settings()
     captured: list[dict[str, Any]] = []
     resp = _resp({"matches": []})
@@ -246,7 +212,9 @@ async def test_find_runbook_enriches_query_with_runbook_prefix() -> None:
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
         await memory_find_runbook(s, workspace_id="ws-1", query="redis restart")
 
-    assert captured[0]["query"].startswith("runbook:")
+    # Query is passed verbatim (no "runbook:" prefix); the type filter does the scoping.
+    assert captured[0]["query"] == "redis restart"
+    assert captured[0]["types"] == ["runbook"]
 
 
 # ──────────────────────────────────────────────
@@ -257,10 +225,10 @@ async def test_find_runbook_enriches_query_with_runbook_prefix() -> None:
 @pytest.mark.asyncio
 async def test_upsert_dry_run_validates_without_post() -> None:
     s = _make_settings()
+    client = PlatformAPIMemoryClient(s)
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
-        result = await memory_upsert_incident_summary(
-            s,
+        result = await client.upsert(
             workspace_id="ws-1",
             incident_id="INC-042",
             source="incident_summary",
@@ -279,13 +247,13 @@ async def test_upsert_dry_run_validates_without_post() -> None:
 @pytest.mark.asyncio
 async def test_upsert_dry_run_rejects_empty_text() -> None:
     s = _make_settings()
+    client = PlatformAPIMemoryClient(s)
 
     with (
         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post,
-        pytest.raises(MemoryAPIError, match="empty fields: text"),
+        pytest.raises(ValueError, match="empty fields: text"),
     ):
-        await memory_upsert_incident_summary(
-            s,
+        await client.upsert(
             workspace_id="ws-1",
             incident_id="INC-042",
             source="incident_summary",
@@ -299,11 +267,11 @@ async def test_upsert_dry_run_rejects_empty_text() -> None:
 @pytest.mark.asyncio
 async def test_upsert_ttl_seconds_included_in_body() -> None:
     s = _make_settings()
+    client = PlatformAPIMemoryClient(s)
     resp = _resp({"point_id": "uuid-123", "text_hash": "deadbeef"})
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp) as post:
-        result = await memory_upsert_incident_summary(
-            s,
+        result = await client.upsert(
             workspace_id="ws-1",
             incident_id="INC-042",
             source="incident_summary",
@@ -311,6 +279,6 @@ async def test_upsert_ttl_seconds_included_in_body() -> None:
             ttl_seconds=3600,
         )
 
-    assert result["stored"] is True
+    assert result["point_id"] == "uuid-123"
     body = post.call_args.kwargs["json"]
     assert body["ttl_seconds"] == 3600
