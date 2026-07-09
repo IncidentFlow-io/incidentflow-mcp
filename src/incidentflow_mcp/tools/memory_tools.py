@@ -357,3 +357,79 @@ async def memory_find_runbook(
         raise MemoryAPIError(f"Runbook search failed: HTTP {exc.response.status_code}") from exc
     except Exception as exc:
         raise MemoryAPIError(f"Runbook search error: {exc}") from exc
+
+
+# ──────────────────────────────────────────────
+# consult-memory (Phase 9) — used by diagnostic tools to enrich their answers
+# ──────────────────────────────────────────────
+
+# Maps document type → the bucket key surfaced in a tool's memory_context.
+_CONSULT_TYPE_BUCKETS = {
+    "runbook": "runbooks",
+    "rca": "rcas",
+    "incident": "similar_incidents",
+    "postmortem": "postmortems",
+}
+
+
+def _group_matches(matches: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Group raw search matches by document type into compact memory_context buckets."""
+    buckets: dict[str, list[dict[str, Any]]] = {v: [] for v in _CONSULT_TYPE_BUCKETS.values()}
+    for m in matches:
+        bucket = _CONSULT_TYPE_BUCKETS.get(m.get("type") or m.get("source"))
+        if not bucket:
+            continue
+        buckets[bucket].append(
+            {
+                "id": m.get("incident_id"),
+                "title": m.get("title"),
+                "score": m.get("score"),
+                "service": m.get("service"),
+                "summary": m.get("summary"),
+            }
+        )
+    return buckets
+
+
+async def memory_consult(
+    settings: Settings,
+    workspace_id: str,
+    query: str,
+    *,
+    service: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    tags: list[str] | None = None,
+    limit: int = 6,
+) -> dict[str, Any] | None:
+    """Single semantic lookup across knowledge types for diagnostic enrichment.
+
+    Returns a memory_context dict (query + non-empty type buckets) or None when there
+    is nothing relevant. Raises MemoryAPIError on transport failure so the caller can
+    decide to swallow it.
+    """
+    client = PlatformAPIMemoryClient(settings)
+    try:
+        result = await client.search(
+            workspace_id=workspace_id,
+            query=query,
+            service=service,
+            cluster=cluster,
+            namespace=namespace,
+            tags=tags,
+            types=list(_CONSULT_TYPE_BUCKETS.keys()),
+            exclude_status=["archived"],
+            include_text=False,
+            limit=limit,
+        )
+    except httpx.HTTPStatusError as exc:
+        raise MemoryAPIError(f"Memory consult failed: HTTP {exc.response.status_code}") from exc
+    except Exception as exc:
+        raise MemoryAPIError(f"Memory consult error: {exc}") from exc
+
+    buckets = _group_matches(result.get("matches", []))
+    non_empty = {k: v for k, v in buckets.items() if v}
+    total = sum(len(v) for v in non_empty.values())
+    if total == 0:
+        return None
+    return {"query": query, "total": total, **non_empty}

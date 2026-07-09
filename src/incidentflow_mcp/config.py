@@ -161,6 +161,13 @@ class Settings(BaseSettings):
             "When true, external status tool requests trigger OMS persistence side-effects."
         ),
     )
+    mcp_memory_consult_enabled: bool = Field(
+        default=True,
+        description=(
+            "When true, diagnostic tools consult semantic memory (runbooks/RCAs/similar "
+            "incidents) and attach a memory_context block to their response."
+        ),
+    )
     openai_domain_verification_path: str | None = Field(
         default=None,
         description=(

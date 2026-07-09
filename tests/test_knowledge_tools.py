@@ -14,6 +14,7 @@ from incidentflow_mcp.tools.knowledge_tools import (
     memory_upsert_incident,
     memory_upsert_runbook,
 )
+from incidentflow_mcp.tools.memory_tools import _group_matches, memory_consult
 
 
 def _make_settings() -> Any:
@@ -148,3 +149,74 @@ async def test_find_knowledge_filters_by_type() -> None:
 
     assert captured[0]["types"] == ["knowledge"]
     assert result["total_knowledge"] == 0
+
+
+# ──────────────────────────────────────────────
+# consult-memory (Phase 9)
+# ──────────────────────────────────────────────
+
+
+def test_group_matches_buckets_by_type() -> None:
+    matches = [
+        {"type": "runbook", "incident_id": "rb-1", "title": "RB", "score": 0.9, "service": "redis"},
+        {"type": "rca", "incident_id": "rca-1", "title": "RCA", "score": 0.8},
+        {"type": "incident", "incident_id": "INC-1", "title": "Inc", "score": 0.7},
+        {"type": "postmortem", "incident_id": "pm-1", "title": "PM", "score": 0.6},
+        {"type": "unknown_type", "incident_id": "x", "title": "X"},
+    ]
+    buckets = _group_matches(matches)
+    assert [m["id"] for m in buckets["runbooks"]] == ["rb-1"]
+    assert [m["id"] for m in buckets["rcas"]] == ["rca-1"]
+    assert [m["id"] for m in buckets["similar_incidents"]] == ["INC-1"]
+    assert [m["id"] for m in buckets["postmortems"]] == ["pm-1"]
+    # runbook entries are compacted to the surfaced fields
+    assert buckets["runbooks"][0]["service"] == "redis"
+
+
+def test_group_matches_empty() -> None:
+    buckets = _group_matches([])
+    assert all(v == [] for v in buckets.values())
+
+
+@pytest.mark.asyncio
+async def test_memory_consult_single_search_and_grouping() -> None:
+    s = _make_settings()
+    captured: list[dict[str, Any]] = []
+    resp = _resp(
+        {
+            "matches": [
+                {"type": "runbook", "incident_id": "rb-1", "title": "RB", "score": 0.9},
+                {"type": "rca", "incident_id": "rca-1", "title": "RCA", "score": 0.8},
+            ]
+        }
+    )
+
+    async def fake_post(url: str, **kwargs: Any) -> MagicMock:
+        captured.append(kwargs.get("json", {}))
+        return resp
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
+        ctx = await memory_consult(s, "ws-1", "redis oom", service="redis", namespace="prod")
+
+    # A single search across all knowledge types, archived excluded.
+    assert len(captured) == 1
+    body = captured[0]
+    assert set(body["types"]) == {"runbook", "rca", "incident", "postmortem"}
+    assert body["exclude_status"] == ["archived"]
+    assert body["service"] == "redis"
+    assert body["namespace"] == "prod"
+    assert ctx is not None
+    assert ctx["total"] == 2
+    assert ctx["runbooks"][0]["id"] == "rb-1"
+    assert ctx["rcas"][0]["id"] == "rca-1"
+    # empty buckets are omitted
+    assert "similar_incidents" not in ctx
+
+
+@pytest.mark.asyncio
+async def test_memory_consult_returns_none_when_empty() -> None:
+    s = _make_settings()
+    resp = _resp({"matches": []})
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp):
+        ctx = await memory_consult(s, "ws-1", "nothing relevant")
+    assert ctx is None

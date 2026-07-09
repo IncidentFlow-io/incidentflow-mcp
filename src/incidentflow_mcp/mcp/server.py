@@ -2363,7 +2363,13 @@ def create_mcp_server() -> FastMCP:
         )
         if mode == "sync":
             result: IncidentSummaryOutput = _incident_summary_impl(input_data)
-            return result.model_dump_json(indent=2)
+            data = result.model_dump(mode="json")
+            query = f"{result.title} {result.summary}".strip()
+            service = result.affected_services[0] if result.affected_services else None
+            ctx = await _consult_memory(query=query, service=service, workspace_id=workspace_id)
+            if ctx:
+                data["memory_context"] = ctx
+            return json.dumps(data, indent=2)
 
         client = PlatformAPIJobsClient(settings)
         submitted = await client.submit_job(
@@ -2424,9 +2430,21 @@ def create_mcp_server() -> FastMCP:
             min_cluster_size=min_cluster_size,
         )
         _resolve_correlation_mode(execution_mode)
-        _ = workspace_id
         result: CorrelateAlertsOutput = _correlate_alerts_impl(input_data)
-        return result.model_dump_json(indent=2)
+
+        data = result.model_dump(mode="json")
+        # Consult memory using the alert names + dominant service as the signature.
+        if normalized_alerts:
+            names = [a.name for a in normalized_alerts if a.name]
+            services = [a.service for a in normalized_alerts if a.service]
+            dominant_service = max(set(services), key=services.count) if services else None
+            query = " ".join(dict.fromkeys(names)) or "alert correlation"
+            ctx = await _consult_memory(
+                query=query, service=dominant_service, workspace_id=workspace_id
+            )
+            if ctx:
+                data["memory_context"] = ctx
+        return json.dumps(data, indent=2)
 
     @mcp.tool(**_tool_metadata(_specs["external_status_check"]))
     async def external_status_check(
@@ -2588,6 +2606,74 @@ def create_mcp_server() -> FastMCP:
         except Exception:
             # Never block the main response — log and move on
             logger.warning("memory: failed to auto-upsert thread summary", exc_info=True)
+
+    async def _consult_memory(
+        *,
+        query: str,
+        service: str | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        tags: list[str] | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Best-effort semantic memory lookup to enrich a diagnostic tool's response.
+
+        Bounded (single search, wall-clock capped) and non-fatal: returns a
+        memory_context dict to embed in the response, or None when the feature is
+        disabled, memory is unavailable, no workspace resolves, or nothing relevant
+        was found. Never raises — a memory failure must not break the diagnostic.
+        """
+        if not settings.mcp_memory_consult_enabled:
+            return None
+        if not settings.platform_api_base_url:
+            return None
+        if not (query and query.strip()):
+            return None
+        try:
+            wid = _workspace(workspace_id)
+        except ValueError:
+            return None
+        try:
+            from incidentflow_mcp.tools.memory_tools import memory_consult
+
+            return await asyncio.wait_for(
+                memory_consult(
+                    settings,
+                    wid,
+                    query,
+                    service=service,
+                    cluster=cluster,
+                    namespace=namespace,
+                    tags=tags,
+                ),
+                timeout=settings.platform_api_timeout_seconds,
+            )
+        except Exception:
+            logger.warning("memory: consult failed", exc_info=True)
+            return None
+
+    async def _consult_pod_memory(
+        describe: dict[str, Any], *, pod: str, namespace: str
+    ) -> dict[str, Any] | None:
+        """Shared consult for pod-describe results (k8s_describe_pod / k8s_debug_pod).
+
+        Builds the query from the detected failure signature and only consults when the
+        pod actually looks unhealthy (issues present, not ready, or restarting).
+        """
+        data = describe.get("data") or {}
+        diagnosis = data.get("diagnosis") or {}
+        status = data.get("status") or {}
+        issue_types = [
+            str(i.get("type"))
+            for i in (diagnosis.get("current_issues") or [])
+            if isinstance(i, dict) and i.get("type")
+        ]
+        not_ready = not bool(status.get("ready"))
+        restarts = int(status.get("restart_count") or 0)
+        if not (issue_types or not_ready or restarts > 0):
+            return None
+        query = " ".join([*issue_types, pod, namespace]).strip() or f"{pod} {namespace}"
+        return await _consult_memory(query=query, namespace=namespace)
 
     @mcp.tool(**_tool_metadata(_specs["incident_thread_summary"]))
     async def incident_thread_summary(
@@ -3120,26 +3206,31 @@ def create_mcp_server() -> FastMCP:
         recommendations: list[str] = list(
             dict.fromkeys(e["recommendation"] for e in unhealthy_entries if e.get("recommendation"))
         )
-        return json.dumps(
-            {
-                "status": "success",
-                "summary": (
-                    f"{len(unhealthy)} unhealthy pod{'s' if len(unhealthy) != 1 else ''}"
-                    if unhealthy
-                    else "All pods are healthy"
-                ),
-                "findings": findings,
-                "recommendations": recommendations,
-                "data": {
-                    "unhealthy_pods": unhealthy_entries,
-                    "count": len(unhealthy),
-                    "completed_jobs": [_sanitize_pod(p) for p in completed],
-                    "completed_count": len(completed),
-                },
-                "error": None,
+        report: dict[str, Any] = {
+            "status": "success",
+            "summary": (
+                f"{len(unhealthy)} unhealthy pod{'s' if len(unhealthy) != 1 else ''}"
+                if unhealthy
+                else "All pods are healthy"
+            ),
+            "findings": findings,
+            "recommendations": recommendations,
+            "data": {
+                "unhealthy_pods": unhealthy_entries,
+                "count": len(unhealthy),
+                "completed_jobs": [_sanitize_pod(p) for p in completed],
+                "completed_count": len(completed),
             },
-            indent=2,
-        )
+            "error": None,
+        }
+        # Consult memory only when there is a problem to match against.
+        if unhealthy:
+            reasons = list(dict.fromkeys(e["reason"] for e in unhealthy_entries if e.get("reason")))
+            query = " ".join(reasons + ([namespace] if namespace else [])) or "unhealthy pods"
+            ctx = await _consult_memory(query=query, namespace=namespace)
+            if ctx:
+                report["memory_context"] = ctx
+        return json.dumps(report, indent=2)
 
     @mcp.tool(**_tool_metadata(_specs["k8s_analyze_workload"]))
     async def k8s_analyze_workload(
@@ -3226,26 +3317,36 @@ def create_mcp_server() -> FastMCP:
                 timeout_seconds=timeout_seconds,
             )
             logs_data = json.loads(logs).get("data")
-        return json.dumps(
-            {
-                "status": "success",
-                "data": {
-                    "rollout_status": json.loads(rollout).get("data"),
-                    "pods": [_sanitize_pod(p) for p in related_pods if isinstance(p, dict)],
-                    "pods_total": len(related_pods),
-                    "logs": logs_data,
-                    "selected_pod": selected_pod,
-                    "hint": (
-                        "No matching pod was found for logs."
-                        if selected_pod is None
-                        else "Logs are from the selected pod."
-                    ),
-                    "tail_lines": tail_lines,
-                },
-                "error": None,
+        rollout_status = json.loads(rollout).get("data")
+        report: dict[str, Any] = {
+            "status": "success",
+            "data": {
+                "rollout_status": rollout_status,
+                "pods": [_sanitize_pod(p) for p in related_pods if isinstance(p, dict)],
+                "pods_total": len(related_pods),
+                "logs": logs_data,
+                "selected_pod": selected_pod,
+                "hint": (
+                    "No matching pod was found for logs."
+                    if selected_pod is None
+                    else "Logs are from the selected pod."
+                ),
+                "tail_lines": tail_lines,
             },
-            indent=2,
-        )
+            "error": None,
+        }
+        # Consult memory only when the workload looks unhealthy (bad rollout or bad pods).
+        rollout_inner = (rollout_status or {}).get("rollout") or {}
+        unhealthy_related = [
+            p for p in related_pods if isinstance(p, dict) and _is_unhealthy_pod(p)
+        ]
+        if unhealthy_related or rollout_inner.get("complete") is False:
+            ctx = await _consult_memory(
+                query=f"{workload} {namespace} rollout pod failure", namespace=namespace
+            )
+            if ctx:
+                report["memory_context"] = ctx
+        return json.dumps(report, indent=2)
 
     def _grafana_client(workspace_id: str | None) -> PlatformGrafanaClient:
         resolved_workspace_id = _resolve_job_workspace_id(
@@ -3369,7 +3470,11 @@ def create_mcp_server() -> FastMCP:
         if not isinstance(desc, dict):
             return raw_str
 
-        return json.dumps(_build_describe_response(desc), indent=2)
+        describe = _build_describe_response(desc)
+        ctx = await _consult_pod_memory(describe, pod=pod, namespace=namespace)
+        if ctx:
+            describe["memory_context"] = ctx
+        return json.dumps(describe, indent=2)
 
     @mcp.tool(**_tool_metadata(_specs["k8s_debug_pod"]))
     async def k8s_debug_pod(
@@ -3528,16 +3633,17 @@ def create_mcp_server() -> FastMCP:
             ]
             evidence["node"] = pod_meta.get("node")
 
-        return json.dumps(
-            {
-                "status": "success",
-                "summary": describe["summary"],
-                "findings": findings,
-                "recommendations": recommendations,
-                "evidence": evidence,
-            },
-            indent=2,
-        )
+        report: dict[str, Any] = {
+            "status": "success",
+            "summary": describe["summary"],
+            "findings": findings,
+            "recommendations": recommendations,
+            "evidence": evidence,
+        }
+        ctx = await _consult_pod_memory(describe, pod=pod, namespace=namespace)
+        if ctx:
+            report["memory_context"] = ctx
+        return json.dumps(report, indent=2)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Memory tools — semantic incident memory via Qdrant
