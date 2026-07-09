@@ -14,7 +14,6 @@ from incidentflow_mcp.tools.memory_tools import (
     memory_find_runbook,
     memory_get_service_context,
     memory_search_similar_incidents,
-    memory_upsert_incident_summary,
 )
 
 
@@ -158,45 +157,6 @@ async def test_get_service_context_uses_provided_query() -> None:
 
 
 # ──────────────────────────────────────────────
-# memory_upsert_incident_summary
-# ──────────────────────────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_upsert_incident_summary_ok() -> None:
-    s = _make_settings()
-    resp = _resp({"point_id": "uuid-123", "text_hash": "deadbeef"})
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp):
-        result = await memory_upsert_incident_summary(
-            s,
-            workspace_id="ws-1",
-            incident_id="INC-042",
-            source="incident_summary",
-            text="The service crashed due to OOM.",
-            service="billing-service",
-            severity="critical",
-        )
-
-    assert result["stored"] is True
-    assert result["point_id"] == "uuid-123"
-    assert result["text_hash"] == "deadbeef"
-    assert result["incident_id"] == "INC-042"
-
-
-@pytest.mark.asyncio
-async def test_upsert_incident_summary_http_error() -> None:
-    s = _make_settings()
-    resp = _resp({}, status=500)
-
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp):
-        with pytest.raises(MemoryAPIError, match="HTTP 500"):
-            await memory_upsert_incident_summary(
-                s, workspace_id="ws-1", incident_id="INC-042", source="rca", text="crash"
-            )
-
-
-# ──────────────────────────────────────────────
 # memory_find_runbook
 # ──────────────────────────────────────────────
 
@@ -265,10 +225,10 @@ async def test_find_runbook_sends_plain_query_and_type_filter() -> None:
 @pytest.mark.asyncio
 async def test_upsert_dry_run_validates_without_post() -> None:
     s = _make_settings()
+    client = PlatformAPIMemoryClient(s)
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post:
-        result = await memory_upsert_incident_summary(
-            s,
+        result = await client.upsert(
             workspace_id="ws-1",
             incident_id="INC-042",
             source="incident_summary",
@@ -287,13 +247,13 @@ async def test_upsert_dry_run_validates_without_post() -> None:
 @pytest.mark.asyncio
 async def test_upsert_dry_run_rejects_empty_text() -> None:
     s = _make_settings()
+    client = PlatformAPIMemoryClient(s)
 
     with (
         patch("httpx.AsyncClient.post", new_callable=AsyncMock) as post,
-        pytest.raises(MemoryAPIError, match="empty fields: text"),
+        pytest.raises(ValueError, match="empty fields: text"),
     ):
-        await memory_upsert_incident_summary(
-            s,
+        await client.upsert(
             workspace_id="ws-1",
             incident_id="INC-042",
             source="incident_summary",
@@ -307,11 +267,11 @@ async def test_upsert_dry_run_rejects_empty_text() -> None:
 @pytest.mark.asyncio
 async def test_upsert_ttl_seconds_included_in_body() -> None:
     s = _make_settings()
+    client = PlatformAPIMemoryClient(s)
     resp = _resp({"point_id": "uuid-123", "text_hash": "deadbeef"})
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=resp) as post:
-        result = await memory_upsert_incident_summary(
-            s,
+        result = await client.upsert(
             workspace_id="ws-1",
             incident_id="INC-042",
             source="incident_summary",
@@ -319,6 +279,6 @@ async def test_upsert_ttl_seconds_included_in_body() -> None:
             ttl_seconds=3600,
         )
 
-    assert result["stored"] is True
+    assert result["point_id"] == "uuid-123"
     body = post.call_args.kwargs["json"]
     assert body["ttl_seconds"] == 3600

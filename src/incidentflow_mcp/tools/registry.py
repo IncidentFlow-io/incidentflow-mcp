@@ -1045,40 +1045,6 @@ _TOOL_SPECS: list[ToolSpec] = [
             "openWorldHint": False,
         },
     ),
-    ToolSpec(
-        name="analyze_dns_dashboard",
-        title="Analyze DNS Dashboard",
-        description=(
-            "Use this when investigating DNS health from an allow-listed Grafana dashboard. "
-            "Runs the dashboard health analysis, then highlights DNS-related panels and "
-            "NXDOMAIN/SERVFAIL-style response-code series when present."
-        ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
-                "start": {
-                    "type": "string",
-                    "default": "now-6h",
-                    "description": "Window start (default now-6h).",
-                },
-                "end": {
-                    "type": "string",
-                    "default": "now",
-                    "description": "Window end (default now).",
-                },
-                "step": {"type": "string", "description": "Optional step; server picks a default."},
-                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
-            },
-            "required": ["dashboard_uid"],
-        },
-        annotations={
-            "readOnlyHint": True,
-            "destructiveHint": False,
-            "idempotentHint": True,
-            "openWorldHint": False,
-        },
-    ),
 ]
 
 
@@ -1184,86 +1150,6 @@ _TOOL_SPECS.extend(
                 "required": ["service"],
             },
             annotations=_read_only_annotations(),
-        ),
-        ToolSpec(
-            name="memory_upsert_incident_summary",
-            title="Save Incident Summary to Memory",
-            description=(
-                "Persists an incident summary, Slack thread summary, or RCA into IncidentFlow's "
-                "semantic memory so future incidents can find it via similarity search. "
-                f"{_MEMORY_WRITE_JUSTIFICATION}"
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "incident_id": {
-                        "type": "string",
-                        "description": "Incident identifier, e.g. INC-001.",
-                    },
-                    "source": {
-                        "type": "string",
-                        "enum": [
-                            "incident_summary",
-                            "slack_thread",
-                            "rca",
-                            "runbook",
-                            "alert_pattern",
-                        ],
-                        "description": "Type of document being stored.",
-                    },
-                    "text": {
-                        "type": "string",
-                        "description": (
-                            "Free-text summary to embed. Should be concise and factual, "
-                            "e.g. the RCA or resolution steps."
-                        ),
-                    },
-                    "service": {"type": "string", "description": "Affected service name."},
-                    "severity": {
-                        "type": "string",
-                        "enum": ["critical", "high", "medium", "low", "info"],
-                    },
-                    "status": {
-                        "type": "string",
-                        "enum": ["open", "investigating", "mitigating", "resolved"],
-                    },
-                    "cluster": {"type": "string", "description": "Kubernetes cluster name."},
-                    "namespace": {"type": "string", "description": "Kubernetes namespace."},
-                    "started_at": {
-                        "type": "string",
-                        "format": "date-time",
-                        "description": "Incident start time as ISO 8601.",
-                    },
-                    "workspace_id": {
-                        "type": "string",
-                        "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
-                    },
-                    "dry_run": {
-                        "type": "boolean",
-                        "default": False,
-                        "description": (
-                            "If true, validates the incident summary and returns what "
-                            "would be stored without writing to memory."
-                        ),
-                    },
-                    "ttl_seconds": {
-                        "type": "integer",
-                        "minimum": 60,
-                        "maximum": 2592000,
-                        "description": (
-                            "Optional time-to-live in seconds (1 minute to 30 days) for "
-                            "temporary memory entries; expiry is enforced by platform-api."
-                        ),
-                    },
-                },
-                "required": ["incident_id", "source", "text"],
-            },
-            annotations={
-                "readOnlyHint": False,
-                "openWorldHint": False,
-                "destructiveHint": False,
-                "idempotentHint": True,
-            },
         ),
         ToolSpec(
             name="memory_find_runbook",

@@ -3425,23 +3425,6 @@ def create_mcp_server() -> FastMCP:
         )
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(**_tool_metadata(_specs["analyze_dns_dashboard"]))
-    async def analyze_dns_dashboard(
-        dashboard_uid: str,
-        start: str = "now-6h",
-        end: str = "now",
-        step: str | None = None,
-        workspace_id: str | None = None,
-    ) -> str:
-        result = await _grafana_tools.analyze_dns_dashboard(
-            _grafana_client(workspace_id),
-            dashboard_uid=dashboard_uid,
-            start=start,
-            end=end,
-            step=step,
-        )
-        return result.model_dump_json(indent=2)
-
     @mcp.tool(**_tool_metadata(_specs["k8s_describe_pod"]))
     async def k8s_describe_pod(
         namespace: str,
@@ -3662,7 +3645,6 @@ def create_mcp_server() -> FastMCP:
         memory_find_runbook,
         memory_get_service_context,
         memory_search_similar_incidents,
-        memory_upsert_incident_summary,
     )
 
     def _workspace(workspace_id: str | None) -> str:
@@ -3708,41 +3690,6 @@ def create_mcp_server() -> FastMCP:
                 service=service,
                 query=query,
                 limit=limit,
-            )
-            return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
-            return json.dumps({"error": str(exc)})
-
-    @mcp.tool(**_tool_metadata(_specs["memory_upsert_incident_summary"]))
-    async def memory_upsert_incident_summary_tool(
-        incident_id: str,
-        source: str,
-        text: str,
-        service: str | None = None,
-        severity: str | None = None,
-        status: str | None = None,
-        cluster: str | None = None,
-        namespace: str | None = None,
-        started_at: str | None = None,
-        workspace_id: str | None = None,
-        dry_run: bool = False,
-        ttl_seconds: int | None = None,
-    ) -> str:
-        try:
-            result = await memory_upsert_incident_summary(
-                settings=settings,
-                workspace_id=_workspace(workspace_id),
-                incident_id=incident_id,
-                source=source,
-                text=text,
-                service=service,
-                severity=severity,
-                status=status,
-                cluster=cluster,
-                namespace=namespace,
-                started_at=started_at,
-                dry_run=dry_run,
-                ttl_seconds=ttl_seconds,
             )
             return json.dumps(result, indent=2)
         except MemoryAPIError as exc:

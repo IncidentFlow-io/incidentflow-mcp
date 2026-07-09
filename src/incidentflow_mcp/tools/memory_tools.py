@@ -257,60 +257,6 @@ async def memory_get_service_context(
         raise MemoryAPIError(f"Service context error: {exc}") from exc
 
 
-async def memory_upsert_incident_summary(
-    settings: Settings,
-    workspace_id: str,
-    incident_id: str,
-    source: str,
-    text: str,
-    service: str | None = None,
-    severity: str | None = None,
-    status: str | None = None,
-    cluster: str | None = None,
-    namespace: str | None = None,
-    started_at: str | None = None,
-    dry_run: bool = False,
-    ttl_seconds: int | None = None,
-) -> dict[str, Any]:
-    client = PlatformAPIMemoryClient(settings)
-    try:
-        result = await client.upsert(
-            workspace_id=workspace_id,
-            incident_id=incident_id,
-            source=source,
-            text=text,
-            service=service,
-            severity=severity,
-            status=status,
-            cluster=cluster,
-            namespace=namespace,
-            started_at=started_at,
-            dry_run=dry_run,
-            ttl_seconds=ttl_seconds,
-        )
-        if dry_run:
-            return {
-                "stored": False,
-                "dry_run": True,
-                "validated": bool(result.get("validated")),
-                "incident_id": incident_id,
-                "source": source,
-                "point_id": None,
-                "would_write": result.get("would_write"),
-            }
-        return {
-            "stored": True,
-            "incident_id": incident_id,
-            "source": source,
-            "point_id": result.get("point_id"),
-            "text_hash": result.get("text_hash"),
-        }
-    except httpx.HTTPStatusError as exc:
-        raise MemoryAPIError(f"Memory upsert failed: HTTP {exc.response.status_code}") from exc
-    except Exception as exc:
-        raise MemoryAPIError(f"Memory upsert error: {exc}") from exc
-
-
 async def memory_find_runbook(
     settings: Settings,
     workspace_id: str,

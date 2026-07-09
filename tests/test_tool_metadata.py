@@ -33,10 +33,8 @@ EXPECTED_TOOL_NAMES = {
     "grafana_metrics_query",
     "grafana_metrics_query_range",
     "analyze_dashboard_health",
-    "analyze_dns_dashboard",
     "memory_search_similar_incidents",
     "memory_get_service_context",
-    "memory_upsert_incident_summary",
     "memory_find_runbook",
     # Typed knowledge-memory tools (Phase 6)
     "memory_upsert_runbook",
@@ -50,7 +48,6 @@ EXPECTED_TOOL_NAMES = {
 
 # Write tools legitimately set readOnlyHint=False; everything else must be read-only.
 WRITE_TOOL_NAMES = {
-    "memory_upsert_incident_summary",
     "memory_upsert_runbook",
     "memory_upsert_rca",
     "memory_upsert_postmortem",
