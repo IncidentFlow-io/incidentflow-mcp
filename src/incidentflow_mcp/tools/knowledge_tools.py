@@ -90,9 +90,7 @@ async def _upsert_doc(
             "text_hash": result.get("text_hash"),
         }
     except httpx.HTTPStatusError as exc:
-        raise MemoryAPIError(
-            f"{doc_type} upsert failed: HTTP {exc.response.status_code}"
-        ) from exc
+        raise MemoryAPIError(f"{doc_type} upsert failed: HTTP {exc.response.status_code}") from exc
     except Exception as exc:
         raise MemoryAPIError(f"{doc_type} upsert error: {exc}") from exc
 
@@ -290,9 +288,7 @@ async def _find(
             result_key: matches,
         }
     except httpx.HTTPStatusError as exc:
-        raise MemoryAPIError(
-            f"{doc_type} search failed: HTTP {exc.response.status_code}"
-        ) from exc
+        raise MemoryAPIError(f"{doc_type} search failed: HTTP {exc.response.status_code}") from exc
     except Exception as exc:
         raise MemoryAPIError(f"{doc_type} search error: {exc}") from exc
 
