@@ -3542,6 +3542,15 @@ def create_mcp_server() -> FastMCP:
     # ──────────────────────────────────────────────────────────────────────────
     # Memory tools — semantic incident memory via Qdrant
     # ──────────────────────────────────────────────────────────────────────────
+    from incidentflow_mcp.tools.knowledge_tools import (
+        memory_find_knowledge,
+        memory_find_rca,
+        memory_upsert_incident,
+        memory_upsert_knowledge,
+        memory_upsert_postmortem,
+        memory_upsert_rca,
+        memory_upsert_runbook,
+    )
     from incidentflow_mcp.tools.memory_tools import (
         MemoryAPIError,
         memory_find_runbook,
@@ -3562,6 +3571,7 @@ def create_mcp_server() -> FastMCP:
     async def memory_search_similar_incidents_tool(
         query: str,
         service: str | None = None,
+        types: list[str] | None = None,
         limit: int = 5,
         workspace_id: str | None = None,
     ) -> str:
@@ -3571,6 +3581,7 @@ def create_mcp_server() -> FastMCP:
                 workspace_id=_workspace(workspace_id),
                 query=query,
                 service=service,
+                types=types,
                 limit=limit,
             )
             return json.dumps(result, indent=2)
@@ -3635,6 +3646,9 @@ def create_mcp_server() -> FastMCP:
     async def memory_find_runbook_tool(
         query: str,
         service: str | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        tags: list[str] | None = None,
         limit: int = 3,
         workspace_id: str | None = None,
     ) -> str:
@@ -3644,6 +3658,214 @@ def create_mcp_server() -> FastMCP:
                 workspace_id=_workspace(workspace_id),
                 query=query,
                 service=service,
+                cluster=cluster,
+                namespace=namespace,
+                tags=tags,
+                limit=limit,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── Typed knowledge-memory write tools ──────────────────────────────────
+
+    @mcp.tool(**_tool_metadata(_specs["memory_upsert_runbook"]))
+    async def memory_upsert_runbook_tool(
+        title: str,
+        text: str,
+        runbook_id: str | None = None,
+        service: str | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        severity: str | None = None,
+        tags: list[str] | None = None,
+        status: str = "active",
+        dry_run: bool = False,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_upsert_runbook(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                title=title,
+                text=text,
+                runbook_id=runbook_id,
+                service=service,
+                cluster=cluster,
+                namespace=namespace,
+                severity=severity,
+                tags=tags,
+                status=status,
+                dry_run=dry_run,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["memory_upsert_rca"]))
+    async def memory_upsert_rca_tool(
+        title: str,
+        text: str,
+        incident_id: str | None = None,
+        service: str | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        severity: str | None = None,
+        tags: list[str] | None = None,
+        dry_run: bool = False,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_upsert_rca(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                title=title,
+                text=text,
+                incident_id=incident_id,
+                service=service,
+                cluster=cluster,
+                namespace=namespace,
+                severity=severity,
+                tags=tags,
+                dry_run=dry_run,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["memory_upsert_postmortem"]))
+    async def memory_upsert_postmortem_tool(
+        title: str,
+        text: str,
+        incident_id: str | None = None,
+        service: str | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        severity: str | None = None,
+        tags: list[str] | None = None,
+        dry_run: bool = False,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_upsert_postmortem(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                title=title,
+                text=text,
+                incident_id=incident_id,
+                service=service,
+                cluster=cluster,
+                namespace=namespace,
+                severity=severity,
+                tags=tags,
+                dry_run=dry_run,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["memory_upsert_knowledge"]))
+    async def memory_upsert_knowledge_tool(
+        title: str,
+        text: str,
+        knowledge_id: str | None = None,
+        service: str | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        tags: list[str] | None = None,
+        dry_run: bool = False,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_upsert_knowledge(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                title=title,
+                text=text,
+                knowledge_id=knowledge_id,
+                service=service,
+                cluster=cluster,
+                namespace=namespace,
+                tags=tags,
+                dry_run=dry_run,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["memory_upsert_incident"]))
+    async def memory_upsert_incident_tool(
+        incident_id: str,
+        title: str,
+        text: str,
+        service: str | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        severity: str | None = None,
+        status: str | None = None,
+        started_at: str | None = None,
+        tags: list[str] | None = None,
+        dry_run: bool = False,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_upsert_incident(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                incident_id=incident_id,
+                title=title,
+                text=text,
+                service=service,
+                cluster=cluster,
+                namespace=namespace,
+                severity=severity,
+                status=status,
+                started_at=started_at,
+                tags=tags,
+                dry_run=dry_run,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    # ── Typed knowledge-memory read tools ───────────────────────────────────
+
+    @mcp.tool(**_tool_metadata(_specs["memory_find_rca"]))
+    async def memory_find_rca_tool(
+        query: str,
+        service: str | None = None,
+        tags: list[str] | None = None,
+        limit: int = 3,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_find_rca(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                query=query,
+                service=service,
+                tags=tags,
+                limit=limit,
+            )
+            return json.dumps(result, indent=2)
+        except MemoryAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["memory_find_knowledge"]))
+    async def memory_find_knowledge_tool(
+        query: str,
+        service: str | None = None,
+        tags: list[str] | None = None,
+        limit: int = 3,
+        workspace_id: str | None = None,
+    ) -> str:
+        try:
+            result = await memory_find_knowledge(
+                settings=settings,
+                workspace_id=_workspace(workspace_id),
+                query=query,
+                service=service,
+                tags=tags,
                 limit=limit,
             )
             return json.dumps(result, indent=2)

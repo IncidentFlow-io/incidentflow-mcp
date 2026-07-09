@@ -45,6 +45,12 @@ class PlatformAPIMemoryClient:
         workspace_id: str,
         query: str,
         service: str | None = None,
+        types: list[str] | None = None,
+        tags: list[str] | None = None,
+        cluster: str | None = None,
+        namespace: str | None = None,
+        exclude_status: list[str] | None = None,
+        include_text: bool = False,
         limit: int = 5,
         score_threshold: float | None = None,
     ) -> dict[str, Any]:
@@ -55,10 +61,24 @@ class PlatformAPIMemoryClient:
             span.set_attribute("memory.limit", limit)
             if service:
                 span.set_attribute("memory.service", service)
+            if types:
+                span.set_attribute("memory.types", ",".join(types))
 
             body: dict[str, Any] = {"workspace_id": workspace_id, "query": query, "limit": limit}
             if service:
                 body["service"] = service
+            if types:
+                body["types"] = types
+            if tags:
+                body["tags"] = tags
+            if cluster:
+                body["cluster"] = cluster
+            if namespace:
+                body["namespace"] = namespace
+            if exclude_status:
+                body["exclude_status"] = exclude_status
+            if include_text:
+                body["include_text"] = True
             if score_threshold is not None:
                 body["score_threshold"] = score_threshold
 
@@ -171,6 +191,7 @@ async def memory_search_similar_incidents(
     workspace_id: str,
     query: str,
     service: str | None = None,
+    types: list[str] | None = None,
     limit: int = 5,
 ) -> dict[str, Any]:
     client = PlatformAPIMemoryClient(settings)
@@ -179,6 +200,8 @@ async def memory_search_similar_incidents(
             workspace_id=workspace_id,
             query=query,
             service=service,
+            types=types,
+            include_text=True,
             limit=limit,
         )
         matches = result.get("matches", [])
@@ -210,13 +233,20 @@ async def memory_get_service_context(
             workspace_id=workspace_id,
             query=effective_query,
             service=service,
+            include_text=True,
             limit=limit,
             score_threshold=0.3,
         )
         matches = result.get("matches", [])
+        # Group results by document type so callers get a structured service picture
+        # (runbooks vs rca vs incidents vs …) instead of a flat list.
+        by_type: dict[str, list[dict[str, Any]]] = {}
+        for m in matches:
+            by_type.setdefault(m.get("type") or m.get("source") or "unknown", []).append(m)
         return {
             "service": service,
             "total_entries": len(matches),
+            "by_type": by_type,
             "context": matches,
         }
     except httpx.HTTPStatusError as exc:
@@ -286,23 +316,38 @@ async def memory_find_runbook(
     workspace_id: str,
     query: str,
     service: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    tags: list[str] | None = None,
     limit: int = 3,
 ) -> dict[str, Any]:
     client = PlatformAPIMemoryClient(settings)
-    # Constrain search to runbook source by enriching the query
-    runbook_query = f"runbook: {query}"
     try:
+        # Server-side type filter; archived runbooks are excluded by default.
         result = await client.search(
             workspace_id=workspace_id,
-            query=runbook_query,
+            query=query,
             service=service,
+            cluster=cluster,
+            namespace=namespace,
+            tags=tags,
+            types=["runbook"],
+            exclude_status=["archived"],
+            include_text=True,
             limit=limit,
         )
-        matches = result.get("matches", [])
-        # Filter to runbook sources if the collection has mixed sources
-        runbooks = [m for m in matches if m.get("source") in ("runbook", "rca")]
+        runbooks = result.get("matches", [])
         if not runbooks:
-            runbooks = matches  # fall back to all results if no runbooks stored yet
+            # Fall back to related operational docs (rca) if no runbook exists yet.
+            fallback = await client.search(
+                workspace_id=workspace_id,
+                query=query,
+                service=service,
+                types=["rca"],
+                include_text=True,
+                limit=limit,
+            )
+            runbooks = fallback.get("matches", [])
         return {
             "query": query,
             "total_runbooks": len(runbooks),
