@@ -29,6 +29,29 @@ _PACKAGED_WIDGET_DIST = _PACKAGE_ROOT / "assets" / "grafana-panel-widget" / "ind
 _WIDGET_FALLBACK = _PACKAGE_ROOT / "assets" / "grafana-panel.html"
 
 
+def _grafana_widget_meta(grafana_public_base_url: str) -> dict:
+    grafana_origin = grafana_public_base_url.rstrip("/")
+    resource_domains = ["https://persistent.oaistatic.com", grafana_origin]
+    return {
+        "ui": {
+            "prefersBorder": True,
+            "csp": {
+                "connectDomains": [],
+                "resourceDomains": resource_domains,
+            },
+        },
+        "openai/widgetDescription": (
+            "Interactive Grafana panel view with zoom, legend, and interval selection."
+        ),
+        "openai/widgetPrefersBorder": True,
+        "openai/widgetAccessible": True,
+        "openai/widgetCSP": {
+            "connect_domains": [],
+            "resource_domains": resource_domains,
+        },
+    }
+
+
 def register_resources(mcp: FastMCP) -> None:
     """Register all MCP resources on the given FastMCP instance."""
     settings = get_settings()
@@ -124,24 +147,7 @@ def register_resources(mcp: FastMCP) -> None:
         name="grafana_panel_widget",
         description="Interactive Grafana timeseries panel widget for ChatGPT Apps SDK.",
         mime_type="text/html",
-        meta={
-            "ui": {
-                "prefersBorder": True,
-                "csp": {
-                    "connectDomains": [settings.grafana_public_base_url.rstrip("/")],
-                    "resourceDomains": ["https://persistent.oaistatic.com"],
-                },
-            },
-            "openai/widgetDescription": (
-                "Interactive Grafana panel view with zoom, legend, and interval selection."
-            ),
-            "openai/widgetPrefersBorder": True,
-            "openai/widgetAccessible": True,
-            "openai/widgetCSP": {
-                "connect_domains": [settings.grafana_public_base_url.rstrip("/")],
-                "resource_domains": ["https://persistent.oaistatic.com"],
-            },
-        },
+        meta=_grafana_widget_meta(settings.grafana_public_base_url),
     )
     def grafana_panel_widget() -> str:
         if _LOCAL_WIDGET_DIST.exists():

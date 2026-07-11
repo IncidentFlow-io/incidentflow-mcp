@@ -132,4 +132,40 @@ describe("grafanaPanelViewSchema", () => {
 
     expect(result.success).toBe(true);
   });
+
+  it("accepts sparse annotations with nullable bounds", () => {
+    const result = grafanaPanelViewSchema.safeParse({
+      ...memoryBasicPanelView,
+      annotations: [
+        {
+          id: "spike-series_1-1783798200000",
+          type: "spike",
+          timestamp: 1783798200000,
+          from: null,
+          to: null,
+          label: "Spike",
+          value: null
+        }
+      ]
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts Grafana panels with nullable optional text metadata", () => {
+    const result = grafanaPanelViewSchema.safeParse({
+      ...validPanelView,
+      panel: {
+        ...validPanelView.panel,
+        description: null,
+        unit: null
+      },
+      series: validPanelView.series.map((series) => ({
+        ...series,
+        unit: null
+      }))
+    });
+
+    expect(result.success).toBe(true);
+  });
 });

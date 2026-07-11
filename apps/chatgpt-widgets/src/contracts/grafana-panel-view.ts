@@ -7,9 +7,9 @@ export const grafanaPanelViewSchema = z.object({
   panel: z.object({
     id: z.number().int(),
     title: z.string(),
-    description: z.string().optional(),
+    description: z.string().nullable().optional(),
     type: z.literal("timeseries"),
-    unit: z.string().optional()
+    unit: z.string().nullable().optional()
   }),
   dashboard: z.object({
     uid: z.string(),
@@ -34,7 +34,7 @@ export const grafanaPanelViewSchema = z.object({
     z.object({
       key: z.string(),
       name: z.string(),
-      unit: z.string().optional(),
+      unit: z.string().nullable().optional(),
       color: z.string().nullable().optional()
     })
   ),
@@ -43,11 +43,11 @@ export const grafanaPanelViewSchema = z.object({
     z.object({
       id: z.string(),
       type: z.union([z.literal("spike"), z.literal("deployment"), z.literal("note")]),
-      timestamp: z.number().int().optional(),
-      from: z.number().int().optional(),
-      to: z.number().int().optional(),
+      timestamp: z.number().int().nullable().optional(),
+      from: z.number().int().nullable().optional(),
+      to: z.number().int().nullable().optional(),
       label: z.string(),
-      value: z.number().optional()
+      value: z.number().nullable().optional()
     })
   ),
   links: z.object({

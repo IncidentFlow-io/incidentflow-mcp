@@ -11,7 +11,7 @@ export function formatTimestamp(value: number): string {
   }).format(new Date(value));
 }
 
-export function formatValue(value: number | null | undefined, unit?: string): string {
+export function formatValue(value: number | null | undefined, unit?: string | null): string {
   if (value == null || Number.isNaN(value)) {
     return "n/a";
   }

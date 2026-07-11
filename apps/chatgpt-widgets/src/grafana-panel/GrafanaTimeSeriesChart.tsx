@@ -71,7 +71,10 @@ export function GrafanaTimeSeriesChart({
             />
           ) : null}
           {panelView.annotations
-            .filter((annotation) => annotation.type === "spike" && annotation.timestamp)
+            .filter(
+              (annotation): annotation is typeof annotation & { timestamp: number } =>
+                annotation.type === "spike" && typeof annotation.timestamp === "number"
+            )
             .map((annotation) => (
               <ReferenceLine
                 key={annotation.id}
