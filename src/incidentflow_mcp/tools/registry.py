@@ -181,6 +181,22 @@ def _k8s_schema(
 
 _TOOL_SPECS: list[ToolSpec] = [
     ToolSpec(
+        name="incidentflow_capabilities",
+        title="List IncidentFlow Capabilities",
+        description=(
+            "Returns the canonical IncidentFlow MCP capability inventory from the tool "
+            "registry, grouped by operational category with tool names, descriptions, and "
+            "safety metadata. Use this for deterministic tool discovery without search "
+            f"ranking or result limits. {_READ_ONLY_LOCAL_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
         name="incident_summary",
         title="Summarize Incident",
         description=(

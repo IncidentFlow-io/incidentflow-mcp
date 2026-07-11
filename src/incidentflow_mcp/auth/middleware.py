@@ -34,8 +34,11 @@ _PUBLIC_PATHS: frozenset[str] = frozenset(
         "/.well-known/oauth-authorization-server",
         "/.well-known/openid-configuration",
         "/.well-known/jwks.json",
+        "/authorize",
+        "/token",
         "/register",
         "/oauth/register",
+        "/revoke",
     }
 )
 
