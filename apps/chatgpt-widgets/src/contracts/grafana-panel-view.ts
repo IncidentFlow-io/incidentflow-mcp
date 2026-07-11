@@ -35,7 +35,7 @@ export const grafanaPanelViewSchema = z.object({
       key: z.string(),
       name: z.string(),
       unit: z.string().optional(),
-      color: z.string().optional()
+      color: z.string().nullable().optional()
     })
   ),
   data: z.array(z.object({ timestamp: z.number().int() }).catchall(z.number().nullable())),
