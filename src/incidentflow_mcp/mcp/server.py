@@ -367,6 +367,155 @@ def _json(data: dict[str, Any]) -> str:
     return json.dumps(data, indent=2)
 
 
+_CAPABILITIES_TOOL_NAME = "incidentflow_capabilities"
+_CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        "kubernetes",
+        "Kubernetes",
+        (
+            "k8s_agent_status",
+            "k8s_connection_health",
+            "k8s_cluster_overview",
+            "k8s_namespace_overview",
+            "k8s_list_namespaces",
+            "k8s_list_pods",
+            "k8s_show_unhealthy_pods",
+            "k8s_get_pod",
+            "k8s_describe_pod",
+            "k8s_debug_pod",
+            "k8s_get_pod_logs",
+            "k8s_list_events",
+            "k8s_list_deployments",
+            "k8s_get_rollout_status",
+            "k8s_analyze_workload",
+            "k8s_list_services",
+            "k8s_rbac_check",
+        ),
+    ),
+    (
+        "grafana_prometheus",
+        "Grafana / Prometheus",
+        (
+            "grafana_list_dashboards",
+            "grafana_get_dashboard",
+            "grafana_extract_panel_queries",
+            "grafana_metrics_query",
+            "grafana_metrics_query_range",
+            "analyze_dashboard_health",
+        ),
+    ),
+    (
+        "slack_incidents",
+        "Slack / Incidents",
+        (
+            "slack_alerts_list",
+            "slack_alert_thread_get",
+            "incident_thread_summary",
+            "incident_summary",
+            "correlate_alerts",
+            "external_status_check",
+        ),
+    ),
+    (
+        "semantic_memory_read",
+        "Semantic Memory — Read",
+        (
+            "memory_search_similar_incidents",
+            "memory_find_rca",
+            "memory_find_runbook",
+            "memory_find_knowledge",
+            "memory_get_service_context",
+        ),
+    ),
+    (
+        "semantic_memory_write",
+        "Semantic Memory — Write",
+        (
+            "memory_upsert_incident",
+            "memory_upsert_rca",
+            "memory_upsert_runbook",
+            "memory_upsert_postmortem",
+            "memory_upsert_knowledge",
+        ),
+    ),
+)
+
+
+def _capability_tool_entry(spec: Any) -> dict[str, Any]:
+    read_only = bool(spec.annotations.get("readOnlyHint"))
+    return {
+        "canonical_name": spec.name,
+        "title": spec.title,
+        "description": spec.description,
+        "read_only": read_only,
+        "write_memory_only": spec.name.startswith("memory_upsert_"),
+        "annotations": {
+            "readOnlyHint": read_only,
+            "openWorldHint": bool(spec.annotations.get("openWorldHint")),
+            "destructiveHint": bool(spec.annotations.get("destructiveHint")),
+        },
+    }
+
+
+def _incidentflow_capabilities_payload() -> dict[str, Any]:
+    specs_by_name = {spec.name: spec for spec in get_tool_specs()}
+    operational_specs = {
+        name: spec for name, spec in specs_by_name.items() if name != _CAPABILITIES_TOOL_NAME
+    }
+
+    categories = []
+    categorized_names: set[str] = set()
+    for category_id, label, names in _CAPABILITY_CATEGORIES:
+        tools = [_capability_tool_entry(operational_specs[name]) for name in names]
+        categorized_names.update(names)
+        categories.append(
+            {
+                "id": category_id,
+                "label": label,
+                "total": len(tools),
+                "tools": tools,
+            }
+        )
+
+    uncategorized = sorted(set(operational_specs) - categorized_names)
+    if uncategorized:
+        categories.append(
+            {
+                "id": "uncategorized",
+                "label": "Uncategorized",
+                "total": len(uncategorized),
+                "tools": [
+                    _capability_tool_entry(operational_specs[name]) for name in uncategorized
+                ],
+            }
+        )
+
+    read_only_count = sum(
+        1 for spec in operational_specs.values() if spec.annotations.get("readOnlyHint") is True
+    )
+    write_memory_only_count = sum(
+        1 for name in operational_specs if name.startswith("memory_upsert_")
+    )
+    return {
+        "name": "incidentflow",
+        "source": "incidentflow-mcp",
+        "summary": (
+            "This inventory is canonical for this IncidentFlow MCP server. Use these "
+            "canonical_name values and categories as the authoritative runtime tool list."
+        ),
+        "total": len(operational_specs),
+        "read_only": read_only_count,
+        "write_memory_only": write_memory_only_count,
+        "categories": categories,
+        "notes": [
+            "This inventory is generated from the MCP tool registry.",
+            "Use this inventory instead of cached docs, stale submission metadata, or search-ranked discovery when a complete tool list is needed.",
+            "The incidentflow_capabilities meta-tool is excluded from total and categories.",
+        ],
+        "checked_at": _checked_at(),
+    }
+
+
 def _command_ok(response: dict[str, Any]) -> bool:
     return str(response.get("status") or "") == "succeeded" and response.get("error") is None
 
@@ -2318,6 +2467,10 @@ def create_mcp_server() -> FastMCP:
     )
 
     _specs = {s.name: s for s in get_tool_specs()}
+
+    @mcp.tool(**_tool_metadata(_specs["incidentflow_capabilities"]))
+    async def incidentflow_capabilities() -> str:
+        return _json(_incidentflow_capabilities_payload())
 
     @mcp.tool(**_tool_metadata(_specs["incident_summary"]))
     async def incident_summary(

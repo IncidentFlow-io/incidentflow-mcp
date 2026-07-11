@@ -1,9 +1,13 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from incidentflow_mcp.mcp.server import create_mcp_server
 from incidentflow_mcp.tools.registry import get_tool_specs
 
 EXPECTED_TOOL_NAMES = {
+    "incidentflow_capabilities",
     "incident_summary",
     "correlate_alerts",
     "external_status_check",
@@ -61,6 +65,26 @@ REQUIRED_BOOLEAN_ANNOTATIONS = {
     "destructiveHint",
 }
 
+REQUIRED_SUBMISSION_JUSTIFICATIONS = {
+    "read_only_justification",
+    "open_world_justification",
+    "destructive_justification",
+}
+
+EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
+    "kubernetes": 17,
+    "grafana_prometheus": 6,
+    "slack_incidents": 6,
+    "semantic_memory_read": 5,
+    "semantic_memory_write": 5,
+}
+
+
+def _load_submission_tools() -> dict:
+    submission_path = Path(__file__).resolve().parents[1] / "chatgpt-app-submission.json"
+    payload = json.loads(submission_path.read_text())
+    return payload["tools"]
+
 
 def test_all_registry_tools_have_submission_metadata() -> None:
     specs = get_tool_specs()
@@ -80,6 +104,25 @@ def test_all_registry_tools_have_submission_metadata() -> None:
             assert spec.annotations["readOnlyHint"] is True, f"{spec.name} should be read-only"
         assert spec.annotations["openWorldHint"] is False
         assert spec.annotations["destructiveHint"] is False
+
+
+def test_chatgpt_app_submission_tools_match_registry() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+    submission_tools = _load_submission_tools()
+
+    assert set(submission_tools) == EXPECTED_TOOL_NAMES
+    assert set(submission_tools) == set(specs)
+
+    for name, submission_tool in submission_tools.items():
+        annotations = submission_tool["annotations"]
+        for annotation_name in REQUIRED_BOOLEAN_ANNOTATIONS:
+            assert annotations[annotation_name] == specs[name].annotations[annotation_name]
+
+        justifications = submission_tool["justifications"]
+        for justification_name in REQUIRED_SUBMISSION_JUSTIFICATIONS:
+            assert justifications[justification_name].strip(), (
+                f"{name} is missing {justification_name}"
+            )
 
 
 @pytest.mark.asyncio
@@ -105,6 +148,40 @@ async def test_fastmcp_tools_publish_submission_metadata() -> None:
             assert tool.annotations.readOnlyHint is True, f"{tool.name} should be read-only"
         assert tool.annotations.openWorldHint is False
         assert tool.annotations.destructiveHint is False
+
+
+@pytest.mark.asyncio
+async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
+    mcp = create_mcp_server()
+    tool_manager = mcp._tool_manager  # noqa: SLF001
+    result = await tool_manager.call_tool("incidentflow_capabilities", {})
+    payload = json.loads(result)
+
+    operational_names = EXPECTED_TOOL_NAMES - {"incidentflow_capabilities"}
+    assert payload["total"] == 39
+    assert payload["total"] == len(operational_names)
+    assert payload["read_only"] == 34
+    assert payload["write_memory_only"] == 5
+    assert "canonical" in payload["summary"]
+    assert "authoritative runtime tool list" in payload["summary"]
+    assert any("cached docs" in note for note in payload["notes"])
+
+    categories = {category["id"]: category for category in payload["categories"]}
+    assert set(categories) == set(EXPECTED_CAPABILITY_CATEGORY_TOTALS)
+    for category_id, expected_total in EXPECTED_CAPABILITY_CATEGORY_TOTALS.items():
+        assert categories[category_id]["total"] == expected_total
+
+    returned_names = {
+        tool["canonical_name"]
+        for category in payload["categories"]
+        for tool in category["tools"]
+    }
+    assert returned_names == operational_names
+    assert "incidentflow_capabilities" not in returned_names
+
+    memory_write = categories["semantic_memory_write"]["tools"]
+    assert all(tool["write_memory_only"] for tool in memory_write)
+    assert all(tool["read_only"] is False for tool in memory_write)
 
 
 @pytest.mark.asyncio
