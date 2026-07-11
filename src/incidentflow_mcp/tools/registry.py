@@ -938,7 +938,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "dashboard_uid": {
+                    "type": "string",
+                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                },
                 "workspace_id": {"type": "string", "description": "Optional workspace scope."},
             },
             "required": ["dashboard_uid"],
@@ -962,7 +965,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "dashboard_uid": {
+                    "type": "string",
+                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                },
                 "workspace_id": {"type": "string", "description": "Optional workspace scope."},
             },
             "required": ["dashboard_uid"],
@@ -1040,7 +1046,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "dashboard_uid": {
+                    "type": "string",
+                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                },
                 "start": {
                     "type": "string",
                     "default": "now-6h",
@@ -1075,7 +1084,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "dashboard_uid": {
+                    "type": "string",
+                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                },
                 "panel_id": {"type": "integer", "minimum": 1, "description": "Grafana panel id."},
                 "start": {
                     "type": "string",
