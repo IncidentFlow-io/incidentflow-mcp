@@ -1,0 +1,11 @@
+.git
+.venv
+.uv-cache
+.ruff_cache
+.pytest_cache
+__pycache__
+*.pyc
+
+apps/chatgpt-widgets/node_modules
+apps/chatgpt-widgets/dist
+

@@ -155,6 +155,30 @@ class TestQueryMethods:
 
         assert json.loads(captured[0].content)["step"] == "30s"
 
+    async def test_panel_view_posts_body(self) -> None:
+        captured: list[httpx.Request] = []
+        client = _client(_json({"version": "1"}), captured)
+        await client.get_panel_view(
+            dashboard_uid="platform",
+            panel_id=7,
+            start="now-1h",
+            end="now",
+            variables={"service": "api"},
+            max_points=200,
+        )
+        import json
+
+        assert captured[0].url.path == "/internal/integrations/grafana/panel-view"
+        assert json.loads(captured[0].content) == {
+            "workspace_id": WORKSPACE_ID,
+            "dashboard_uid": "platform",
+            "panel_id": 7,
+            "from": "now-1h",
+            "to": "now",
+            "variables": {"service": "api"},
+            "maxPoints": 200,
+        }
+
 
 class TestErrors:
     async def test_http_error_raises(self) -> None:
