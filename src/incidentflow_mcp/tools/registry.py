@@ -1129,6 +1129,7 @@ _TOOL_SPECS: list[ToolSpec] = [
         meta={
             "ui": {"resourceUri": "ui://incidentflow/grafana-panel.html"},
             "openai/outputTemplate": "ui://incidentflow/grafana-panel.html",
+            "openai/widgetAccessible": True,
             "openai/toolInvocation/invoking": "Loading Grafana panel...",
             "openai/toolInvocation/invoked": "Grafana panel loaded",
         },

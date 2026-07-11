@@ -128,12 +128,18 @@ def register_resources(mcp: FastMCP) -> None:
             "ui": {
                 "prefersBorder": True,
                 "csp": {
-                    "connectDomains": [],
+                    "connectDomains": [settings.grafana_public_base_url.rstrip("/")],
                     "resourceDomains": ["https://persistent.oaistatic.com"],
                 },
             },
+            "openai/widgetDescription": (
+                "Interactive Grafana panel view with zoom, legend, and interval selection."
+            ),
+            "openai/widgetPrefersBorder": True,
+            "openai/widgetAccessible": True,
             "openai/widgetCSP": {
-                "redirect_domains": [settings.grafana_public_base_url.rstrip("/")],
+                "connect_domains": [settings.grafana_public_base_url.rstrip("/")],
+                "resource_domains": ["https://persistent.oaistatic.com"],
             },
         },
     )
