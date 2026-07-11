@@ -2,81 +2,15 @@ import { useEffect, useState } from "react";
 import { grafanaPanelViewSchema } from "./contracts/grafana-panel-view";
 import { GrafanaPanel } from "./GrafanaPanel";
 import { PanelEmptyState } from "./grafana-panel/PanelEmptyState";
+import {
+  getPanelPayload,
+  getToolOutputFromGlobals,
+  isRecord,
+  looksLikePanelView,
+  selectPanelPayload,
+  type OpenAiGlobals
+} from "./grafana-panel/payload";
 import { useOpenAiGlobal } from "./grafana-panel/useOpenAiGlobal";
-
-type ToolOutputEnvelope = {
-  structuredContent?: unknown;
-  result?: unknown;
-  data?: unknown;
-};
-
-type OpenAiGlobals = Record<string, unknown>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
-}
-
-function parseJsonIfString(value: unknown): unknown {
-  if (typeof value !== "string") {
-    return value;
-  }
-  try {
-    return JSON.parse(value) as unknown;
-  } catch {
-    return value;
-  }
-}
-
-function getPanelPayload(toolOutput: unknown): unknown {
-  const normalized = parseJsonIfString(toolOutput);
-
-  if (normalized && typeof normalized === "object") {
-    const envelope = normalized as ToolOutputEnvelope;
-
-    if ("structuredContent" in envelope) {
-      return parseJsonIfString(envelope.structuredContent);
-    }
-    if ("result" in envelope) {
-      const result = parseJsonIfString(envelope.result);
-      if (result && typeof result === "object" && "structuredContent" in result) {
-        return parseJsonIfString((result as ToolOutputEnvelope).structuredContent);
-      }
-      return result;
-    }
-    if ("data" in envelope) {
-      return parseJsonIfString(envelope.data);
-    }
-  }
-
-  return normalized;
-}
-
-function getToolOutputFromGlobals(globals: unknown): unknown {
-  if (!isRecord(globals)) return undefined;
-
-  const priorityKeys = ["toolOutput", "output", "result", "toolResult", "structuredContent", "data"];
-  for (const key of priorityKeys) {
-    if (key in globals) return globals[key];
-  }
-
-  const queue: unknown[] = Object.values(globals);
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!isRecord(current)) continue;
-    if (
-      "structuredContent" in current ||
-      "toolOutput" in current ||
-      "output" in current ||
-      "result" in current ||
-      "data" in current
-    ) {
-      return current;
-    }
-    queue.push(...Object.values(current));
-  }
-
-  return undefined;
-}
 
 /**
  * VS Code Copilot Chat does not inject window.openai — it passes tool output
@@ -112,16 +46,17 @@ function usePostMessagePayload(): { payload: unknown; messages: string[] } {
         msg["output"],
         msg["result"],
         msg["structuredContent"],
-        msg["data"],
-        msg["payload"],
         msg["mcpToolResult"],
+        msg["payload"],
+        msg["data"],
         isRecord(msg["body"]) ? msg["body"] : undefined,
         isRecord(msg["content"]) ? msg["content"] : undefined,
       ];
 
       for (const candidate of candidates) {
-        if (candidate !== undefined) {
-          setPayload(candidate);
+        const panelPayload = getPanelPayload(candidate);
+        if (looksLikePanelView(panelPayload)) {
+          setPayload(panelPayload);
           return;
         }
       }
@@ -150,15 +85,15 @@ export function App() {
   const postMessagePayload = postMessageResult.payload;
   const postMessages = postMessageResult.messages;
 
-  const toolOutput =
-    toolOutputGlobal ??
-    outputGlobal ??
-    resultGlobal ??
-    toolResultGlobal ??
-    globalFallback ??
-    postMessagePayload;
-
-  const panelPayload = getPanelPayload(toolOutput);
+  const { panelPayload, rawToolOutput: toolOutput } = selectPanelPayload([
+    toolOutputGlobal,
+    outputGlobal,
+    resultGlobal,
+    toolResultGlobal,
+    globalFallback,
+    postMessagePayload,
+    openAiGlobals
+  ]);
   const parsed = grafanaPanelViewSchema.safeParse(panelPayload);
 
   useEffect(() => {
