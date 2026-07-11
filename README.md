@@ -102,18 +102,33 @@ Check failing pods in staging
 
 Available read-only tools include:
 
+- `k8s_agent_status`
+- `k8s_connection_health`
+- `k8s_cluster_overview`
+- `k8s_namespace_overview`
 - `k8s_list_namespaces`
 - `k8s_list_pods`
+- `k8s_show_unhealthy_pods`
 - `k8s_get_pod`
+- `k8s_describe_pod`
+- `k8s_debug_pod`
 - `k8s_get_pod_logs`
 - `k8s_list_events`
 - `k8s_list_deployments`
-- `k8s_list_services`
 - `k8s_get_rollout_status`
-- `k8s_show_namespaces`
-- `k8s_show_pods`
-- `k8s_show_unhealthy_pods`
 - `k8s_analyze_workload`
+- `k8s_list_services`
+- `k8s_rbac_check`
+
+To inspect the canonical tool metadata exported by this package:
+
+```bash
+uv run incidentflow-mcp tools list --json-output
+```
+
+Agents can call `incidentflow_capabilities` for a deterministic in-band
+inventory of the 39 operational tools grouped by category, without search
+ranking or result limits.
 
 Cluster selection behavior:
 
@@ -153,7 +168,6 @@ Available tools:
 - grafana_metrics_query
 - grafana_metrics_query_range
 - analyze_dashboard_health
-- analyze_dns_dashboard
 
 Typical workflows:
 
@@ -164,7 +178,6 @@ Extract dashboard queries: grafana_extract_panel_queries {"dashboard_uid":"dns"}
 Run instant PromQL: grafana_metrics_query {"datasource_uid":"prometheus", "query":"sum(rate(http_requests_total[5m]))"}
 Run range PromQL: grafana_metrics_query_range {"datasource_uid":"prometheus", "query":"sum(rate(http_requests_total[5m]))", "start":"now-1h", "end":"now", "step":"30s"}
 Inspect full dashboard health: analyze_dashboard_health {"dashboard_uid":"dns", "start":"now-6h", "end":"now", "step":"60s"}
-DNS-focused analysis: analyze_dns_dashboard {"dashboard_uid":"dns"}
 ```
 
 Production/dev prerequisites:
