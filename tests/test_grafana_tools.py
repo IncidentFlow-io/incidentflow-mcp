@@ -8,6 +8,7 @@ from incidentflow_mcp.tools.grafana import (
     analyze_dashboard_health,
     grafana_extract_panel_queries,
     grafana_get_dashboard,
+    grafana_get_panel_view,
     grafana_list_dashboards,
     grafana_metrics_query,
     grafana_metrics_query_range,
@@ -70,6 +71,31 @@ class FakeClient:
             ("analyze", {"dashboard_uid": dashboard_uid, "start": start, "end": end, "step": step})
         )
         return self._payloads.get("analyze", {})
+
+    async def get_panel_view(
+        self,
+        *,
+        dashboard_uid: str,
+        panel_id: int,
+        start: str = "now-1h",
+        end: str = "now",
+        variables: dict[str, str | list[str]] | None = None,
+        max_points: int = 300,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "get_panel_view",
+                {
+                    "dashboard_uid": dashboard_uid,
+                    "panel_id": panel_id,
+                    "start": start,
+                    "end": end,
+                    "variables": variables or {},
+                    "max_points": max_points,
+                },
+            )
+        )
+        return self._payloads.get("get_panel_view", {})
 
 
 class TestListDashboards:
@@ -203,3 +229,44 @@ class TestAnalyze:
         )
         # Tools serialize via model_dump_json in the server layer.
         assert '"dashboard_uid":"dns"' in out.model_dump_json()
+
+
+class TestPanelView:
+    async def test_panel_view_maps_and_forwards(self) -> None:
+        client = FakeClient(
+            get_panel_view={
+                "version": "1",
+                "panel": {"id": 7, "title": "Request rate", "type": "timeseries"},
+                "dashboard": {"uid": "platform", "title": "Platform"},
+                "source": {"type": "grafana", "datasourceUid": "prom"},
+                "visualization": {
+                    "type": "line",
+                    "stacked": False,
+                    "showLegend": True,
+                    "showTooltip": True,
+                },
+                "timeRange": {"from": 1000, "to": 2000},
+                "variables": {"service": "platform-api"},
+                "series": [{"key": "series_0", "name": "api"}],
+                "data": [{"timestamp": 1000, "series_0": 1.0}],
+                "annotations": [],
+                "links": {"grafana": "https://grafana.test/d/platform/platform?viewPanel=7"},
+                "warnings": [],
+            }
+        )
+
+        out = await grafana_get_panel_view(
+            client,
+            dashboard_uid="platform",
+            panel_id=7,
+            start="now-1h",
+            end="now",
+            variables={"service": "platform-api"},
+            max_points=200,
+        )
+
+        assert out.panel["title"] == "Request rate"
+        assert out.source["datasourceUid"] == "prom"
+        assert out.data[0].model_extra == {"series_0": 1.0}
+        assert client.calls[0][0] == "get_panel_view"
+        assert client.calls[0][1]["max_points"] == 200
