@@ -3,11 +3,13 @@ from pathlib import Path
 
 import pytest
 
+from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import create_mcp_server
 from incidentflow_mcp.tools.registry import get_tool_specs
 
 EXPECTED_TOOL_NAMES = {
     "incidentflow_capabilities",
+    "incidentflow_version",
     "incident_summary",
     "correlate_alerts",
     "external_status_check",
@@ -158,8 +160,8 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     result = await tool_manager.call_tool("incidentflow_capabilities", {})
     payload = json.loads(result)
 
-    operational_names = EXPECTED_TOOL_NAMES - {"incidentflow_capabilities"}
-    assert payload["total"] == 40
+    operational_names = EXPECTED_TOOL_NAMES - {"incidentflow_capabilities", "incidentflow_version"}
+    assert payload["total"] == 39
     assert payload["total"] == len(operational_names)
     assert payload["read_only"] == 35
     assert payload["write_memory_only"] == 5
@@ -179,10 +181,69 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     }
     assert returned_names == operational_names
     assert "incidentflow_capabilities" not in returned_names
+    assert "incidentflow_version" not in returned_names
 
     memory_write = categories["semantic_memory_write"]["tools"]
     assert all(tool["write_memory_only"] for tool in memory_write)
     assert all(tool["read_only"] is False for tool in memory_write)
+
+
+@pytest.mark.asyncio
+async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "incidentflow_mcp.config._settings",
+        Settings(
+            _env_file=None,
+            incidentflow_pat="test-secret-token",
+            environment="production",
+            mcp_build_service="incidentflow-mcp",
+            mcp_build_version="dev-v1.0.0",
+            mcp_build_tag="dev-v1.0.0",
+            mcp_build_commit="8b2e7f1",
+            mcp_build_built_at="2026-07-13T12:40:18Z",
+            mcp_build_environment="dev",
+            redis_url="redis://test-only",
+        ),
+    )
+    mcp = create_mcp_server()
+    tool_manager = mcp._tool_manager
+    result = await tool_manager.call_tool("incidentflow_version", {})
+    payload = json.loads(result)
+
+    assert payload["service"] == "incidentflow-mcp"
+    assert payload["version"] == "1.0.0"
+    assert payload["tag"] == "dev-v1.0.0"
+    assert payload["commit"] == "8b2e7f1"
+    assert payload["built_at"] == "2026-07-13T12:40:18Z"
+    assert payload["environment"] == "dev"
+    assert payload["tools"] == {
+        "registered": len(EXPECTED_TOOL_NAMES),
+        "operational": 39,
+        "meta": 2,
+    }
+    assert "HTTP-based MCP server" in payload["description"]
+
+
+@pytest.mark.asyncio
+async def test_incidentflow_version_normalizes_prod_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "incidentflow_mcp.config._settings",
+        Settings(
+            _env_file=None,
+            incidentflow_pat="test-secret-token",
+            environment="production",
+            mcp_build_version="v1.0.0",
+            mcp_build_tag="v1.0.0",
+            redis_url="redis://test-only",
+        ),
+    )
+    mcp = create_mcp_server()
+    tool_manager = mcp._tool_manager
+    result = await tool_manager.call_tool("incidentflow_version", {})
+    payload = json.loads(result)
+
+    assert payload["version"] == "1.0.0"
+    assert payload["environment"] == "prod"
 
 
 @pytest.mark.asyncio

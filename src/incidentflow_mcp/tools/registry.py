@@ -199,6 +199,21 @@ _TOOL_SPECS: list[ToolSpec] = [
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
+        name="incidentflow_version",
+        title="Show IncidentFlow MCP Version",
+        description=(
+            "Returns IncidentFlow MCP server identity, release build metadata, deployment "
+            "environment, registered tool counts, and a short server description. "
+            f"{_READ_ONLY_LOCAL_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
         name="incident_summary",
         title="Summarize Incident",
         description=(

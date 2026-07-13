@@ -37,6 +37,8 @@ jobs:
       environment: ${{ steps.release.outputs.environment }}
       version: ${{ steps.release.outputs.version }}
       values_file: ${{ steps.release.outputs.values_file }}
+      commit: ${{ steps.release.outputs.commit }}
+      built_at: ${{ steps.release.outputs.built_at }}
     steps:
       - name: Prepare release metadata
         id: release
@@ -64,6 +66,8 @@ jobs:
             environment="prod"
             values_file="${INFRA_VALUES_PROD}"
           fi
+          commit="${GITHUB_SHA::7}"
+          built_at="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
 
           build_matrix=$(printf '{"include":[{"image":"%s","platform":"linux/amd64","runner":"ubuntu-latest"},{"image":"%s","platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}' "$IMAGE" "$IMAGE")
 
@@ -73,6 +77,8 @@ jobs:
           echo "environment=${environment}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "values_file=${values_file}" >> "$GITHUB_OUTPUT"
+          echo "commit=${commit}" >> "$GITHUB_OUTPUT"
+          echo "built_at=${built_at}" >> "$GITHUB_OUTPUT"
 
   build:
     needs:
@@ -112,6 +118,13 @@ jobs:
           file: Dockerfile
           platforms: ${{ matrix.platform }}
           tags: ${{ matrix.image }}
+          build-args: |
+            MCP_BUILD_SERVICE=${{ needs.prepare.outputs.service }}
+            MCP_BUILD_VERSION=${{ needs.prepare.outputs.version }}
+            MCP_BUILD_TAG=${{ needs.prepare.outputs.version }}
+            MCP_BUILD_COMMIT=${{ needs.prepare.outputs.commit }}
+            MCP_BUILD_BUILT_AT=${{ needs.prepare.outputs.built_at }}
+            MCP_BUILD_ENVIRONMENT=${{ needs.prepare.outputs.environment }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest

@@ -373,6 +373,9 @@ def _json(data: dict[str, Any]) -> str:
 
 
 _CAPABILITIES_TOOL_NAME = "incidentflow_capabilities"
+_VERSION_TOOL_NAME = "incidentflow_version"
+_META_TOOL_NAMES = {_CAPABILITIES_TOOL_NAME, _VERSION_TOOL_NAME}
+_SERVER_DESCRIPTION = "HTTP-based MCP server for IncidentFlow AI-powered incident management."
 _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     (
         "kubernetes",
@@ -466,7 +469,7 @@ def _capability_tool_entry(spec: Any) -> dict[str, Any]:
 def _incidentflow_capabilities_payload() -> dict[str, Any]:
     specs_by_name = {spec.name: spec for spec in get_tool_specs()}
     operational_specs = {
-        name: spec for name, spec in specs_by_name.items() if name != _CAPABILITIES_TOOL_NAME
+        name: spec for name, spec in specs_by_name.items() if name not in _META_TOOL_NAMES
     }
 
     categories = []
@@ -522,6 +525,58 @@ def _incidentflow_capabilities_payload() -> dict[str, Any]:
             "The incidentflow_capabilities meta-tool is excluded from total and categories.",
         ],
         "checked_at": _checked_at(),
+    }
+
+
+def _normalize_build_version(raw: str | None, fallback: str) -> str:
+    version = (raw or "").strip() or fallback
+    if version.startswith("dev-v"):
+        return version.removeprefix("dev-v")
+    if version.startswith("v"):
+        return version.removeprefix("v")
+    return version
+
+
+def _environment_from_build_metadata(
+    *,
+    tag: str | None,
+    build_environment: str | None,
+    fallback: str,
+) -> str:
+    explicit_environment = (build_environment or "").strip()
+    if explicit_environment:
+        return explicit_environment
+
+    normalized = (tag or "").strip().lower()
+    if normalized.startswith("dev-"):
+        return "dev"
+    if normalized.startswith("v"):
+        return "prod"
+    return fallback
+
+
+def _incidentflow_version_payload(settings: Settings) -> dict[str, Any]:
+    specs = get_tool_specs()
+    meta_count = sum(1 for spec in specs if spec.name in _META_TOOL_NAMES)
+    tag = (settings.mcp_build_tag or "").strip() or None
+    version_source = settings.mcp_build_version or tag
+    return {
+        "service": settings.mcp_build_service or settings.mcp_server_name,
+        "version": _normalize_build_version(version_source, settings.mcp_server_version),
+        "tag": tag,
+        "commit": (settings.mcp_build_commit or "").strip() or None,
+        "built_at": (settings.mcp_build_built_at or "").strip() or None,
+        "environment": _environment_from_build_metadata(
+            tag=tag,
+            build_environment=settings.mcp_build_environment,
+            fallback=settings.environment,
+        ),
+        "tools": {
+            "registered": len(specs),
+            "operational": len(specs) - meta_count,
+            "meta": meta_count,
+        },
+        "description": _SERVER_DESCRIPTION,
     }
 
 
@@ -2480,6 +2535,10 @@ def create_mcp_server() -> FastMCP:
     @mcp.tool(**_tool_metadata(_specs["incidentflow_capabilities"]))
     async def incidentflow_capabilities() -> str:
         return _json(_incidentflow_capabilities_payload())
+
+    @mcp.tool(**_tool_metadata(_specs["incidentflow_version"]))
+    async def incidentflow_version() -> str:
+        return _json(_incidentflow_version_payload(settings))
 
     @mcp.tool(**_tool_metadata(_specs["incident_summary"]))
     async def incident_summary(
