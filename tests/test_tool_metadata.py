@@ -37,6 +37,7 @@ EXPECTED_TOOL_NAMES = {
     "grafana_metrics_query",
     "grafana_metrics_query_range",
     "analyze_dashboard_health",
+    "grafana_get_panel_view",
     "memory_search_similar_incidents",
     "memory_get_service_context",
     "memory_find_runbook",
@@ -73,7 +74,7 @@ REQUIRED_SUBMISSION_JUSTIFICATIONS = {
 
 EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
     "kubernetes": 17,
-    "grafana_prometheus": 6,
+    "grafana_prometheus": 7,
     "slack_incidents": 6,
     "semantic_memory_read": 5,
     "semantic_memory_write": 5,
@@ -153,14 +154,14 @@ async def test_fastmcp_tools_publish_submission_metadata() -> None:
 @pytest.mark.asyncio
 async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     mcp = create_mcp_server()
-    tool_manager = mcp._tool_manager  # noqa: SLF001
+    tool_manager = mcp._tool_manager
     result = await tool_manager.call_tool("incidentflow_capabilities", {})
     payload = json.loads(result)
 
     operational_names = EXPECTED_TOOL_NAMES - {"incidentflow_capabilities"}
-    assert payload["total"] == 39
+    assert payload["total"] == 40
     assert payload["total"] == len(operational_names)
-    assert payload["read_only"] == 34
+    assert payload["read_only"] == 35
     assert payload["write_memory_only"] == 5
     assert "canonical" in payload["summary"]
     assert "authoritative runtime tool list" in payload["summary"]
@@ -211,3 +212,13 @@ async def test_submission_risky_tool_inputs_are_structured() -> None:
     assert workload_schema["properties"]["workload"]["type"] == "string"
     assert workload_schema["properties"]["namespace"]["type"] == "string"
     assert workload_schema["required"] == ["workload", "namespace"]
+
+
+@pytest.mark.asyncio
+async def test_grafana_panel_view_publishes_apps_sdk_metadata() -> None:
+    mcp = create_mcp_server()
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    panel_tool = tools["grafana_get_panel_view"]
+
+    assert panel_tool.meta["openai/outputTemplate"] == "ui://incidentflow/grafana-panel.html"
+    assert panel_tool.meta["ui"]["resourceUri"] == "ui://incidentflow/grafana-panel.html"
