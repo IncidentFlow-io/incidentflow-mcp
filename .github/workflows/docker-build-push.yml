@@ -250,10 +250,17 @@ jobs:
           values_file="${{ needs.prepare.outputs.values_file }}"
           version="${{ needs.prepare.outputs.version }}"
           environment="${{ needs.prepare.outputs.environment }}"
-          image_ref="${{ needs.merge.outputs.image_ref }}"
+          image_ref="${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.version }}"
           image_digest="${{ needs.merge.outputs.image_digest }}"
           signature_issuer="${{ needs.merge.outputs.signature_issuer }}"
-          signature_identity="${{ needs.merge.outputs.signature_identity }}"
+          signature_identity="https://github.com/${{ github.repository }}/.github/workflows/docker-build-push.yml@${{ github.ref }}"
+
+          for required_name in image_ref image_digest signature_issuer signature_identity; do
+            if [[ -z "${!required_name}" ]]; then
+              echo "Missing required image signature metadata: ${required_name}" >&2
+              exit 1
+            fi
+          done
 
           export version
           export image_ref
