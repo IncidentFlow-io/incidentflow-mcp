@@ -161,7 +161,7 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     payload = json.loads(result)
 
     operational_names = EXPECTED_TOOL_NAMES - {"incidentflow_capabilities", "incidentflow_version"}
-    assert payload["total"] == 39
+    assert payload["total"] == 40
     assert payload["total"] == len(operational_names)
     assert payload["read_only"] == 35
     assert payload["write_memory_only"] == 5
@@ -202,6 +202,15 @@ async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.M
             mcp_build_commit="8b2e7f1",
             mcp_build_built_at="2026-07-13T12:40:18Z",
             mcp_build_environment="dev",
+            mcp_image_ref="ghcr.io/incidentflow-io/incidentflow-mcp:dev-v1.0.0",
+            mcp_image_digest="sha256:abc123",
+            mcp_image_signed=True,
+            mcp_image_signature_verified=True,
+            mcp_image_signature_issuer="https://token.actions.githubusercontent.com",
+            mcp_image_signature_identity=(
+                "https://github.com/IncidentFlow-io/IncidentFlow/.github/workflows/"
+                "docker-build-push.yml@refs/tags/incidentflow-mcp/dev-v1.0.0"
+            ),
             redis_url="redis://test-only",
         ),
     )
@@ -218,8 +227,19 @@ async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.M
     assert payload["environment"] == "dev"
     assert payload["tools"] == {
         "registered": len(EXPECTED_TOOL_NAMES),
-        "operational": 39,
+        "operational": 40,
         "meta": 2,
+    }
+    assert payload["image"] == {
+        "ref": "ghcr.io/incidentflow-io/incidentflow-mcp:dev-v1.0.0",
+        "digest": "sha256:abc123",
+        "signed": True,
+        "signature_verified": True,
+        "signature_issuer": "https://token.actions.githubusercontent.com",
+        "signature_identity": (
+            "https://github.com/IncidentFlow-io/IncidentFlow/.github/workflows/"
+            "docker-build-push.yml@refs/tags/incidentflow-mcp/dev-v1.0.0"
+        ),
     }
     assert "HTTP-based MCP server" in payload["description"]
 

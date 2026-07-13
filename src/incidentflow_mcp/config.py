@@ -166,6 +166,36 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MCP_BUILD_ENVIRONMENT", "BUILD_ENVIRONMENT"),
         description="Release lane embedded at image build time, for example dev or prod.",
     )
+    mcp_image_ref: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_REF", "IMAGE_REF"),
+        description="Container image reference deployed for this server.",
+    )
+    mcp_image_digest: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_DIGEST", "IMAGE_DIGEST"),
+        description="Container image digest deployed for this server.",
+    )
+    mcp_image_signed: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNED", "IMAGE_SIGNED"),
+        description="Whether CI signed the deployed container image.",
+    )
+    mcp_image_signature_verified: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_VERIFIED", "IMAGE_SIGNATURE_VERIFIED"),
+        description="Whether CI verified the deployed container image signature.",
+    )
+    mcp_image_signature_issuer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_ISSUER", "IMAGE_SIGNATURE_ISSUER"),
+        description="OIDC issuer used for the deployed container image signature.",
+    )
+    mcp_image_signature_identity: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_IDENTITY", "IMAGE_SIGNATURE_IDENTITY"),
+        description="OIDC identity used for the deployed container image signature.",
+    )
     mcp_canonical_resource: str = Field(
         default="https://mcp.incidentflow.io/mcp",
         description="Canonical OAuth resource identifier for this MCP server",

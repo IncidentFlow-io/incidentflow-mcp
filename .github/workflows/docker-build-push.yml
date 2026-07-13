@@ -21,6 +21,7 @@ on:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 env:
   IMAGE: ghcr.io/incidentflow-io/incidentflow-mcp
@@ -147,6 +148,11 @@ jobs:
     needs:
       - prepare
       - build
+    outputs:
+      image_ref: ${{ steps.image_metadata.outputs.image_ref }}
+      image_digest: ${{ steps.image_metadata.outputs.image_digest }}
+      signature_issuer: ${{ steps.image_metadata.outputs.signature_issuer }}
+      signature_identity: ${{ steps.image_metadata.outputs.signature_identity }}
     steps:
       - name: Download digests
         uses: actions/download-artifact@v4
@@ -165,6 +171,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         shell: bash
@@ -173,9 +182,29 @@ jobs:
             -t "${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.version }}" \
             $(printf '${{ needs.prepare.outputs.image }}@sha256:%s ' *)
 
-      - name: Inspect image
+      - name: Sign and verify image
+        id: image_metadata
+        env:
+          COSIGN_YES: "true"
+          IMAGE_REF: ${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.version }}
+          SIGNATURE_ISSUER: https://token.actions.githubusercontent.com
+          SIGNATURE_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/docker-build-push.yml@${{ github.ref }}
+        shell: bash
         run: |
-          docker buildx imagetools inspect "${{ needs.prepare.outputs.image }}:${{ needs.prepare.outputs.version }}"
+          set -euo pipefail
+
+          image_digest="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{.Digest}}')"
+          cosign sign "$IMAGE_REF"
+          cosign verify \
+            --certificate-identity "$SIGNATURE_IDENTITY" \
+            --certificate-oidc-issuer "$SIGNATURE_ISSUER" \
+            "$IMAGE_REF"
+
+          echo "image_ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+          echo "image_digest=${image_digest}" >> "$GITHUB_OUTPUT"
+          echo "signature_issuer=${SIGNATURE_ISSUER}" >> "$GITHUB_OUTPUT"
+          echo "signature_identity=${SIGNATURE_IDENTITY}" >> "$GITHUB_OUTPUT"
+          docker buildx imagetools inspect "$IMAGE_REF"
 
   update-infra:
     runs-on: ubuntu-latest
@@ -214,9 +243,23 @@ jobs:
           values_file="${{ needs.prepare.outputs.values_file }}"
           version="${{ needs.prepare.outputs.version }}"
           environment="${{ needs.prepare.outputs.environment }}"
+          image_ref="${{ needs.merge.outputs.image_ref }}"
+          image_digest="${{ needs.merge.outputs.image_digest }}"
+          signature_issuer="${{ needs.merge.outputs.signature_issuer }}"
+          signature_identity="${{ needs.merge.outputs.signature_identity }}"
 
           export version
+          export image_ref
+          export image_digest
+          export signature_issuer
+          export signature_identity
           yq -i '.image.tag = strenv(version)' "$values_file"
+          yq -i '(.extraEnv // []) as $env | .extraEnv = (($env | map(select(.name != "MCP_IMAGE_REF"))) + [{"name":"MCP_IMAGE_REF","value":strenv(image_ref)}])' "$values_file"
+          yq -i '(.extraEnv // []) as $env | .extraEnv = (($env | map(select(.name != "MCP_IMAGE_DIGEST"))) + [{"name":"MCP_IMAGE_DIGEST","value":strenv(image_digest)}])' "$values_file"
+          yq -i '(.extraEnv // []) as $env | .extraEnv = (($env | map(select(.name != "MCP_IMAGE_SIGNED"))) + [{"name":"MCP_IMAGE_SIGNED","value":"true"}])' "$values_file"
+          yq -i '(.extraEnv // []) as $env | .extraEnv = (($env | map(select(.name != "MCP_IMAGE_SIGNATURE_VERIFIED"))) + [{"name":"MCP_IMAGE_SIGNATURE_VERIFIED","value":"true"}])' "$values_file"
+          yq -i '(.extraEnv // []) as $env | .extraEnv = (($env | map(select(.name != "MCP_IMAGE_SIGNATURE_ISSUER"))) + [{"name":"MCP_IMAGE_SIGNATURE_ISSUER","value":strenv(signature_issuer)}])' "$values_file"
+          yq -i '(.extraEnv // []) as $env | .extraEnv = (($env | map(select(.name != "MCP_IMAGE_SIGNATURE_IDENTITY"))) + [{"name":"MCP_IMAGE_SIGNATURE_IDENTITY","value":strenv(signature_identity)}])' "$values_file"
 
           echo "Updated ${values_file}:"
           yq '.image.tag' "$values_file"

@@ -522,7 +522,7 @@ def _incidentflow_capabilities_payload() -> dict[str, Any]:
                 "Use this inventory instead of cached docs, stale submission metadata, "
                 "or search-ranked discovery when a complete tool list is needed."
             ),
-            "The incidentflow_capabilities meta-tool is excluded from total and categories.",
+            "IncidentFlow meta-tools are excluded from total and categories.",
         ],
         "checked_at": _checked_at(),
     }
@@ -575,6 +575,14 @@ def _incidentflow_version_payload(settings: Settings) -> dict[str, Any]:
             "registered": len(specs),
             "operational": len(specs) - meta_count,
             "meta": meta_count,
+        },
+        "image": {
+            "ref": (settings.mcp_image_ref or "").strip() or None,
+            "digest": (settings.mcp_image_digest or "").strip() or None,
+            "signed": settings.mcp_image_signed,
+            "signature_verified": settings.mcp_image_signature_verified,
+            "signature_issuer": (settings.mcp_image_signature_issuer or "").strip() or None,
+            "signature_identity": (settings.mcp_image_signature_identity or "").strip() or None,
         },
         "description": _SERVER_DESCRIPTION,
     }
