@@ -136,6 +136,36 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     mcp_server_name: str = Field(default="incidentflow-mcp", description="MCP server name")
     mcp_server_version: str = Field(default="0.1.0", description="MCP server version")
+    mcp_build_service: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_SERVICE", "BUILD_SERVICE"),
+        description="Service name embedded at image build time.",
+    )
+    mcp_build_version: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_VERSION", "BUILD_VERSION"),
+        description="Release version or image tag embedded at image build time.",
+    )
+    mcp_build_tag: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_TAG", "BUILD_TAG"),
+        description="Git release tag embedded at image build time.",
+    )
+    mcp_build_commit: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_COMMIT", "BUILD_COMMIT"),
+        description="Short git commit SHA embedded at image build time.",
+    )
+    mcp_build_built_at: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_BUILT_AT", "BUILD_BUILT_AT"),
+        description="UTC image build timestamp embedded at image build time.",
+    )
+    mcp_build_environment: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_ENVIRONMENT", "BUILD_ENVIRONMENT"),
+        description="Release lane embedded at image build time, for example dev or prod.",
+    )
     mcp_canonical_resource: str = Field(
         default="https://mcp.incidentflow.io/mcp",
         description="Canonical OAuth resource identifier for this MCP server",

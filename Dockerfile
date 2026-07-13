@@ -23,9 +23,22 @@ RUN uv sync --frozen --no-install-project --no-dev
 # ---------------------------------------------------------------------------
 FROM base AS runtime
 
+ARG MCP_BUILD_SERVICE=incidentflow-mcp
+ARG MCP_BUILD_VERSION=0.1.0
+ARG MCP_BUILD_TAG=
+ARG MCP_BUILD_COMMIT=
+ARG MCP_BUILD_BUILT_AT=
+ARG MCP_BUILD_ENVIRONMENT=development
+
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    MCP_BUILD_SERVICE="${MCP_BUILD_SERVICE}" \
+    MCP_BUILD_VERSION="${MCP_BUILD_VERSION}" \
+    MCP_BUILD_TAG="${MCP_BUILD_TAG}" \
+    MCP_BUILD_COMMIT="${MCP_BUILD_COMMIT}" \
+    MCP_BUILD_BUILT_AT="${MCP_BUILD_BUILT_AT}" \
+    MCP_BUILD_ENVIRONMENT="${MCP_BUILD_ENVIRONMENT}"
 
 WORKDIR /app
 
