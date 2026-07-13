@@ -208,6 +208,10 @@ class Settings(BaseSettings):
         default=None,
         description="Optional OpenAI Apps domain verification token returned as plain text.",
     )
+    grafana_public_base_url: str = Field(
+        default="https://grafana.incidentflow.io",
+        description="Public Grafana origin used by Apps SDK widget redirect CSP.",
+    )
     slack_bot_token: SecretStr | None = Field(
         default=None,
         description="Slack Bot User OAuth Token used by Slack read-only MCP tools.",

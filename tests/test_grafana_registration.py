@@ -12,6 +12,7 @@ GRAFANA_TOOLS = {
     "grafana_metrics_query",
     "grafana_metrics_query_range",
     "analyze_dashboard_health",
+    "grafana_get_panel_view",
 }
 
 
@@ -35,6 +36,10 @@ def test_required_inputs_declared() -> None:
         "start",
         "end",
         "step",
+    ]
+    assert specs["grafana_get_panel_view"].input_schema["required"] == [
+        "dashboard_uid",
+        "panel_id",
     ]
     assert specs["grafana_list_dashboards"].input_schema["required"] == []
 

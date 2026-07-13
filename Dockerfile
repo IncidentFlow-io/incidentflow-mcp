@@ -19,6 +19,19 @@ COPY uv.lock* ./
 RUN uv sync --frozen --no-install-project --no-dev
 
 # ---------------------------------------------------------------------------
+# ChatGPT Apps SDK widget bundle
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS widget
+
+WORKDIR /widget
+
+COPY apps/chatgpt-widgets/package.json apps/chatgpt-widgets/package-lock.json ./
+RUN npm ci
+
+COPY apps/chatgpt-widgets/ ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
 # Runtime image
 # ---------------------------------------------------------------------------
 FROM base AS runtime
@@ -47,6 +60,7 @@ COPY --from=deps /app/.venv /app/.venv
 
 # Copy application source
 COPY src/ ./src/
+COPY --from=widget /widget/dist/index.html ./src/incidentflow_mcp/assets/grafana-panel-widget/index.html
 COPY pyproject.toml ./
 COPY uv.lock* ./
 COPY README.md ./

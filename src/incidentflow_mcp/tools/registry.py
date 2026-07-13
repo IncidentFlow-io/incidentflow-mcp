@@ -21,6 +21,8 @@ class ToolSpec:
     description: str
     input_schema: dict[str, Any]
     annotations: dict[str, Any] = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
+    structured_output: bool | None = None
 
 
 _READ_ONLY_LOCAL_ANNOTATIONS = {
@@ -951,7 +953,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "dashboard_uid": {
+                    "type": "string",
+                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                },
                 "workspace_id": {"type": "string", "description": "Optional workspace scope."},
             },
             "required": ["dashboard_uid"],
@@ -975,7 +980,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "dashboard_uid": {
+                    "type": "string",
+                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                },
                 "workspace_id": {"type": "string", "description": "Optional workspace scope."},
             },
             "required": ["dashboard_uid"],
@@ -1053,7 +1061,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "dashboard_uid": {"type": "string", "description": "Grafana dashboard uid."},
+                "dashboard_uid": {
+                    "type": "string",
+                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                },
                 "start": {
                     "type": "string",
                     "default": "now-6h",
@@ -1075,6 +1086,69 @@ _TOOL_SPECS: list[ToolSpec] = [
             "idempotentHint": True,
             "openWorldHint": False,
         },
+    ),
+    ToolSpec(
+        name="grafana_get_panel_view",
+        title="Get Grafana Panel View",
+        description=(
+            "Use this when the user asks to view one specific allow-listed Grafana "
+            "timeseries panel in ChatGPT. Loads the panel, runs guarded Prometheus range "
+            "queries through platform-api, normalizes the result for an interactive chart, "
+            "and returns a GrafanaPanelView structuredContent payload."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "dashboard_uid": {
+                    "type": "string",
+                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                },
+                "panel_id": {"type": "integer", "minimum": 1, "description": "Grafana panel id."},
+                "start": {
+                    "type": "string",
+                    "default": "now-1h",
+                    "description": "Window start (default now-1h).",
+                },
+                "end": {
+                    "type": "string",
+                    "default": "now",
+                    "description": "Window end (default now).",
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}},
+                        ]
+                    },
+                    "description": "Grafana dashboard variables to apply.",
+                },
+                "max_points": {
+                    "type": "integer",
+                    "default": 300,
+                    "minimum": 1,
+                    "maximum": 500,
+                    "description": "Maximum points per rendered series.",
+                },
+                "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+            },
+            "required": ["dashboard_uid", "panel_id"],
+        },
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        meta={
+            "ui": {"resourceUri": "ui://incidentflow/grafana-panel.html"},
+            "openai/outputTemplate": "ui://incidentflow/grafana-panel.html",
+            "openai/widgetAccessible": True,
+            "openai/toolInvocation/invoking": "Loading Grafana panel...",
+            "openai/toolInvocation/invoked": "Grafana panel loaded",
+        },
+        structured_output=True,
     ),
 ]
 

@@ -106,12 +106,17 @@ _SLACK_THREAD_MODE_ALIASES = {
 
 
 def _tool_metadata(spec: Any) -> dict[str, Any]:
-    return {
+    metadata = {
         "name": spec.name,
         "title": spec.title,
         "description": spec.description,
         "annotations": spec.annotations,
     }
+    if getattr(spec, "meta", None):
+        metadata["meta"] = spec.meta
+    if getattr(spec, "structured_output", None) is not None:
+        metadata["structured_output"] = spec.structured_output
+    return metadata
 
 
 def _resolve_execution_mode(settings: Settings, requested_mode: str) -> str:
@@ -405,6 +410,7 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             "grafana_metrics_query",
             "grafana_metrics_query_range",
             "analyze_dashboard_health",
+            "grafana_get_panel_view",
         ),
     ),
     (
@@ -516,7 +522,7 @@ def _incidentflow_capabilities_payload() -> dict[str, Any]:
                 "Use this inventory instead of cached docs, stale submission metadata, "
                 "or search-ranked discovery when a complete tool list is needed."
             ),
-            "IncidentFlow meta-tools are excluded from total and categories.",
+            "The incidentflow_capabilities meta-tool is excluded from total and categories.",
         ],
         "checked_at": _checked_at(),
     }
@@ -3639,6 +3645,43 @@ def create_mcp_server() -> FastMCP:
             step=step,
         )
         return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["grafana_get_panel_view"]))
+    async def grafana_get_panel_view(
+        dashboard_uid: str,
+        panel_id: int,
+        start: str = "now-1h",
+        end: str = "now",
+        variables: dict[str, str | list[str]] | None = None,
+        max_points: int = 300,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
+        result = await _grafana_tools.grafana_get_panel_view(
+            _grafana_client(workspace_id),
+            dashboard_uid=dashboard_uid,
+            panel_id=panel_id,
+            start=start,
+            end=end,
+            variables=variables or {},
+            max_points=max_points,
+        )
+        panel_view = result.model_dump(mode="json")
+        return {
+            "structuredContent": panel_view,
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        f'Loaded Grafana panel "{panel_view["panel"]["title"]}" '
+                        "for the selected time range."
+                    ),
+                }
+            ],
+            "_meta": {
+                "datasourceUid": panel_view["source"].get("datasourceUid"),
+                "rawPanelType": panel_view["panel"].get("type"),
+            },
+        }
 
     @mcp.tool(**_tool_metadata(_specs["k8s_describe_pod"]))
     async def k8s_describe_pod(

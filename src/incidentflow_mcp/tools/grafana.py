@@ -36,6 +36,16 @@ class GrafanaReadClient(Protocol):
         end: str = "now",
         step: str | None = None,
     ) -> dict[str, Any]: ...
+    async def get_panel_view(
+        self,
+        *,
+        dashboard_uid: str,
+        panel_id: int,
+        start: str = "now-1h",
+        end: str = "now",
+        variables: dict[str, str | list[str]] | None = None,
+        max_points: int = 300,
+    ) -> dict[str, Any]: ...
 
 
 # ---------------------------------------------------------------------------
@@ -115,6 +125,31 @@ class AnalyzeOutput(BaseModel):
     summary_hints: list[str] = Field(default_factory=list)
 
 
+class PanelViewDataPoint(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    timestamp: int
+
+
+class PanelViewOutput(BaseModel):
+    # Platform-api owns the full schema and aliases. MCP validates and relays the
+    # contract without adding raw Grafana responses or secrets.
+    model_config = ConfigDict(extra="allow")
+
+    version: str = "1"
+    panel: dict[str, Any]
+    dashboard: dict[str, Any]
+    source: dict[str, Any]
+    visualization: dict[str, Any]
+    timeRange: dict[str, Any]
+    variables: dict[str, str | list[str]] = Field(default_factory=dict)
+    series: list[dict[str, Any]] = Field(default_factory=list)
+    data: list[PanelViewDataPoint] = Field(default_factory=list)
+    annotations: list[dict[str, Any]] = Field(default_factory=list)
+    links: dict[str, str]
+    warnings: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
@@ -173,3 +208,24 @@ async def analyze_dashboard_health(
 ) -> AnalyzeOutput:
     payload = await client.analyze(dashboard_uid=dashboard_uid, start=start, end=end, step=step)
     return AnalyzeOutput.model_validate(payload)
+
+
+async def grafana_get_panel_view(
+    client: GrafanaReadClient,
+    *,
+    dashboard_uid: str,
+    panel_id: int,
+    start: str = "now-1h",
+    end: str = "now",
+    variables: dict[str, str | list[str]] | None = None,
+    max_points: int = 300,
+) -> PanelViewOutput:
+    payload = await client.get_panel_view(
+        dashboard_uid=dashboard_uid,
+        panel_id=panel_id,
+        start=start,
+        end=end,
+        variables=variables or {},
+        max_points=max_points,
+    )
+    return PanelViewOutput.model_validate(payload)

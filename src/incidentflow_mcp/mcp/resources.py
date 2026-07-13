@@ -13,16 +13,48 @@ real backend (IncidentFlow API, PagerDuty, OpsGenie, etc.).
 """
 
 import logging
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from incidentflow_mcp.config import get_settings
 from incidentflow_mcp.tools.incident_summary import _FAKE_INCIDENTS
 
 logger = logging.getLogger(__name__)
 
+_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
+_MCP_ROOT = _PACKAGE_ROOT.parents[1]
+_LOCAL_WIDGET_DIST = _MCP_ROOT / "apps" / "chatgpt-widgets" / "dist" / "index.html"
+_PACKAGED_WIDGET_DIST = _PACKAGE_ROOT / "assets" / "grafana-panel-widget" / "index.html"
+_WIDGET_FALLBACK = _PACKAGE_ROOT / "assets" / "grafana-panel.html"
+
+
+def _grafana_widget_meta(grafana_public_base_url: str) -> dict:
+    grafana_origin = grafana_public_base_url.rstrip("/")
+    resource_domains = ["https://persistent.oaistatic.com", grafana_origin]
+    return {
+        "ui": {
+            "prefersBorder": True,
+            "csp": {
+                "connectDomains": [],
+                "resourceDomains": resource_domains,
+            },
+        },
+        "openai/widgetDescription": (
+            "Interactive Grafana panel view with zoom, legend, and interval selection."
+        ),
+        "openai/widgetPrefersBorder": True,
+        "openai/widgetAccessible": True,
+        "openai/widgetCSP": {
+            "connect_domains": [],
+            "resource_domains": resource_domains,
+        },
+    }
+
 
 def register_resources(mcp: FastMCP) -> None:
     """Register all MCP resources on the given FastMCP instance."""
+    settings = get_settings()
 
     @mcp.resource(
         "incidents://recent",
@@ -109,3 +141,20 @@ def register_resources(mcp: FastMCP) -> None:
                 for event in data["timeline"]
             ],
         }
+
+    @mcp.resource(
+        "ui://incidentflow/grafana-panel.html",
+        name="grafana_panel_widget",
+        description="Interactive Grafana timeseries panel widget for ChatGPT Apps SDK.",
+        mime_type="text/html",
+        meta=_grafana_widget_meta(settings.grafana_public_base_url),
+    )
+    def grafana_panel_widget() -> str:
+        if _LOCAL_WIDGET_DIST.exists():
+            path = _LOCAL_WIDGET_DIST
+        elif _PACKAGED_WIDGET_DIST.exists():
+            path = _PACKAGED_WIDGET_DIST
+        else:
+            path = _WIDGET_FALLBACK
+        logger.debug("resource:ui://incidentflow/grafana-panel.html path=%s", path)
+        return path.read_text(encoding="utf-8")

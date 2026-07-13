@@ -127,3 +127,27 @@ class PlatformGrafanaClient:
         if step is not None:
             body["step"] = step
         return await self._post(f"{_BASE_PATH}/analyze", body)
+
+    async def get_panel_view(
+        self,
+        *,
+        dashboard_uid: str,
+        panel_id: int,
+        start: str = "now-1h",
+        end: str = "now",
+        variables: dict[str, str | list[str]] | None = None,
+        max_points: int = 300,
+    ) -> dict[str, Any]:
+        """Return a normalized Apps SDK Grafana panel view."""
+        return await self._post(
+            f"{_BASE_PATH}/panel-view",
+            {
+                "workspace_id": self._workspace_id,
+                "dashboard_uid": dashboard_uid,
+                "panel_id": panel_id,
+                "from": start,
+                "to": end,
+                "variables": variables or {},
+                "maxPoints": max_points,
+            },
+        )
