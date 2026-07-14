@@ -1150,6 +1150,160 @@ _TOOL_SPECS: list[ToolSpec] = [
         },
         structured_output=True,
     ),
+    ToolSpec(
+        name="argocd_connection_health",
+        title="Check Argo CD Connection",
+        description=(
+            "Checks the connected Argo CD integration for the current workspace and returns "
+            "read-only health, authentication, RBAC, version, and application-count metadata. "
+            "Access is mediated by platform-api; Argo CD tokens are never exposed."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "integration_id": {
+                    "type": "string",
+                    "description": (
+                        "Optional Argo CD integration id. Omit when only one is connected."
+                    ),
+                },
+            },
+            "required": [],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="argocd_list_applications",
+        title="List Argo CD Applications",
+        description=(
+            "Lists Argo CD applications visible to the current workspace's connected "
+            "read-only integration. Supports filtering by project, namespace, destination, "
+            "health, sync status, and search text."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "integration_id": {"type": "string", "description": "Optional integration id."},
+                "search": {"type": "string", "description": "Case-insensitive app search text."},
+                "project": {"type": "string", "description": "Argo CD project filter."},
+                "namespace": {"type": "string", "description": "Destination namespace filter."},
+                "destination_cluster": {
+                    "type": "string",
+                    "description": "Destination cluster name or server filter.",
+                },
+                "health_status": {"type": "string", "description": "Health status filter."},
+                "sync_status": {"type": "string", "description": "Sync status filter."},
+                "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200},
+            },
+            "required": [],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="argocd_get_application",
+        title="Get Argo CD Application",
+        description=(
+            "Returns normalized read-only Argo CD application details, including project, "
+            "destination, sources, health, sync, recent history, and last operation summary."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Argo CD application name."},
+                "integration_id": {"type": "string", "description": "Optional integration id."},
+            },
+            "required": ["name"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="argocd_get_application_resources",
+        title="Get Argo CD Application Resources",
+        description=(
+            "Returns normalized resource tree metadata for an Argo CD application. Full "
+            "Kubernetes manifests and Secret data are intentionally omitted."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Argo CD application name."},
+                "integration_id": {"type": "string", "description": "Optional integration id."},
+            },
+            "required": ["name"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="argocd_get_sync_history",
+        title="Get Argo CD Sync History",
+        description=(
+            "Returns recent Argo CD deployment/sync history for one application, including "
+            "revision, deployment time, source summary, and initiator metadata."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Argo CD application name."},
+                "integration_id": {"type": "string", "description": "Optional integration id."},
+                "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+            },
+            "required": ["name"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="argocd_get_last_operation",
+        title="Get Argo CD Last Operation",
+        description=(
+            "Returns the latest Argo CD operation state for one application, including "
+            "phase, timing, message, sync revision, and resource result summaries."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Argo CD application name."},
+                "integration_id": {"type": "string", "description": "Optional integration id."},
+            },
+            "required": ["name"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="argocd_find_recent_deployments",
+        title="Find Recent Argo CD Deployments",
+        description=(
+            "Returns recent deployment events across visible Argo CD applications for the "
+            "current workspace, with optional project and namespace filters."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "integration_id": {"type": "string", "description": "Optional integration id."},
+                "project": {"type": "string", "description": "Argo CD project filter."},
+                "namespace": {"type": "string", "description": "Destination namespace filter."},
+                "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200},
+            },
+            "required": [],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="argocd_analyze_application",
+        title="Analyze Argo CD Application",
+        description=(
+            "Builds a compact read-only health and sync analysis for one Argo CD application "
+            "from application status, last operation, history, and resource tree metadata."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Argo CD application name."},
+                "integration_id": {"type": "string", "description": "Optional integration id."},
+            },
+            "required": ["name"],
+        },
+        annotations=_read_only_annotations(),
+    ),
 ]
 
 
