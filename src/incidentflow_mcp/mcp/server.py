@@ -22,8 +22,10 @@ from incidentflow_mcp.config import Settings, get_settings
 from incidentflow_mcp.mcp.resources import register_resources
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
+from incidentflow_mcp.platform_api.argocd_client import PlatformArgoCDClient
 from incidentflow_mcp.platform_api.grafana_client import PlatformGrafanaClient
 from incidentflow_mcp.platform_api.slack_client import PlatformSlackAPIError, PlatformSlackClient
+from incidentflow_mcp.tools import argocd as _argocd_tools
 from incidentflow_mcp.tools import grafana as _grafana_tools
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
@@ -398,6 +400,20 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             "k8s_analyze_workload",
             "k8s_list_services",
             "k8s_rbac_check",
+        ),
+    ),
+    (
+        "argocd",
+        "Argo CD",
+        (
+            "argocd_connection_health",
+            "argocd_list_applications",
+            "argocd_get_application",
+            "argocd_get_application_resources",
+            "argocd_get_sync_history",
+            "argocd_get_last_operation",
+            "argocd_find_recent_deployments",
+            "argocd_analyze_application",
         ),
     ),
     (
@@ -3576,6 +3592,100 @@ def create_mcp_server() -> FastMCP:
             if ctx:
                 report["memory_context"] = ctx
         return json.dumps(report, indent=2)
+
+    def _argocd_client() -> PlatformArgoCDClient:
+        resolved_workspace_id = _resolve_job_workspace_id(
+            None,
+            token_workspace_id=_current_token_workspace_id(),
+            default_workspace_id=settings.mcp_default_workspace_id,
+        )
+        return PlatformArgoCDClient(settings, workspace_id=resolved_workspace_id)
+
+    @mcp.tool(**_tool_metadata(_specs["argocd_connection_health"]))
+    async def argocd_connection_health(integration_id: str | None = None) -> str:
+        result = await _argocd_tools.argocd_connection_health(
+            _argocd_client(), integration_id=integration_id
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["argocd_list_applications"]))
+    async def argocd_list_applications(
+        integration_id: str | None = None,
+        search: str | None = None,
+        project: str | None = None,
+        namespace: str | None = None,
+        destination_cluster: str | None = None,
+        health_status: str | None = None,
+        sync_status: str | None = None,
+        limit: int = 50,
+    ) -> str:
+        result = await _argocd_tools.argocd_list_applications(
+            _argocd_client(),
+            integration_id=integration_id,
+            search=search,
+            project=project,
+            namespace=namespace,
+            destination_cluster=destination_cluster,
+            health_status=health_status,
+            sync_status=sync_status,
+            limit=limit,
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["argocd_get_application"]))
+    async def argocd_get_application(name: str, integration_id: str | None = None) -> str:
+        result = await _argocd_tools.argocd_get_application(
+            _argocd_client(), name=name, integration_id=integration_id
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["argocd_get_application_resources"]))
+    async def argocd_get_application_resources(name: str, integration_id: str | None = None) -> str:
+        result = await _argocd_tools.argocd_get_application_resources(
+            _argocd_client(), name=name, integration_id=integration_id
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["argocd_get_sync_history"]))
+    async def argocd_get_sync_history(
+        name: str,
+        integration_id: str | None = None,
+        limit: int = 20,
+    ) -> str:
+        result = await _argocd_tools.argocd_get_sync_history(
+            _argocd_client(), name=name, integration_id=integration_id, limit=limit
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["argocd_get_last_operation"]))
+    async def argocd_get_last_operation(name: str, integration_id: str | None = None) -> str:
+        result = await _argocd_tools.argocd_get_last_operation(
+            _argocd_client(), name=name, integration_id=integration_id
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["argocd_find_recent_deployments"]))
+    async def argocd_find_recent_deployments(
+        integration_id: str | None = None,
+        project: str | None = None,
+        namespace: str | None = None,
+        limit: int = 50,
+    ) -> str:
+        result = await _argocd_tools.argocd_find_recent_deployments(
+            _argocd_client(),
+            integration_id=integration_id,
+            project=project,
+            namespace=namespace,
+            limit=limit,
+        )
+        return result.model_dump_json(indent=2)
+
+    @mcp.tool(**_tool_metadata(_specs["argocd_analyze_application"]))
+    async def argocd_analyze_application(name: str, integration_id: str | None = None) -> str:
+        result = await _argocd_tools.argocd_analyze_application(
+            _argocd_client(), name=name, integration_id=integration_id
+        )
+        return result.model_dump_json(indent=2)
 
     def _grafana_client(workspace_id: str | None) -> PlatformGrafanaClient:
         resolved_workspace_id = _resolve_job_workspace_id(

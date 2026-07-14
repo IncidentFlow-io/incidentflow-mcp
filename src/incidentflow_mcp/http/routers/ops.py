@@ -201,7 +201,10 @@ def create_ops_router(settings: Settings) -> APIRouter:
     async def oauth_authorize(request: Request) -> RedirectResponse:
         auth_base = _oauth_authority_base(settings, request)
         if auth_base == str(request.base_url).rstrip("/"):
-            raise HTTPException(status_code=404, detail="OAuth authorization server is not configured")
+            raise HTTPException(
+                status_code=404,
+                detail="OAuth authorization server is not configured",
+            )
         query = request.url.query
         suffix = f"?{query}" if query else ""
         return RedirectResponse(url=f"{auth_base}/authorize{suffix}", status_code=307)

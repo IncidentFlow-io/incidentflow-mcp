@@ -40,6 +40,14 @@ EXPECTED_TOOL_NAMES = {
     "grafana_metrics_query_range",
     "analyze_dashboard_health",
     "grafana_get_panel_view",
+    "argocd_connection_health",
+    "argocd_list_applications",
+    "argocd_get_application",
+    "argocd_get_application_resources",
+    "argocd_get_sync_history",
+    "argocd_get_last_operation",
+    "argocd_find_recent_deployments",
+    "argocd_analyze_application",
     "memory_search_similar_incidents",
     "memory_get_service_context",
     "memory_find_runbook",
@@ -76,6 +84,7 @@ REQUIRED_SUBMISSION_JUSTIFICATIONS = {
 
 EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
     "kubernetes": 17,
+    "argocd": 8,
     "grafana_prometheus": 7,
     "slack_incidents": 6,
     "semantic_memory_read": 5,
@@ -161,9 +170,9 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     payload = json.loads(result)
 
     operational_names = EXPECTED_TOOL_NAMES - {"incidentflow_capabilities", "incidentflow_version"}
-    assert payload["total"] == 40
+    assert payload["total"] == 48
     assert payload["total"] == len(operational_names)
-    assert payload["read_only"] == 35
+    assert payload["read_only"] == 43
     assert payload["write_memory_only"] == 5
     assert "canonical" in payload["summary"]
     assert "authoritative runtime tool list" in payload["summary"]
@@ -175,9 +184,7 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
         assert categories[category_id]["total"] == expected_total
 
     returned_names = {
-        tool["canonical_name"]
-        for category in payload["categories"]
-        for tool in category["tools"]
+        tool["canonical_name"] for category in payload["categories"] for tool in category["tools"]
     }
     assert returned_names == operational_names
     assert "incidentflow_capabilities" not in returned_names
@@ -227,7 +234,7 @@ async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.M
     assert payload["environment"] == "dev"
     assert payload["tools"] == {
         "registered": len(EXPECTED_TOOL_NAMES),
-        "operational": 40,
+        "operational": 48,
         "meta": 2,
     }
     assert payload["image"] == {
