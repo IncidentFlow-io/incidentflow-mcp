@@ -136,6 +136,66 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     mcp_server_name: str = Field(default="incidentflow-mcp", description="MCP server name")
     mcp_server_version: str = Field(default="0.1.0", description="MCP server version")
+    mcp_build_service: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_SERVICE", "BUILD_SERVICE"),
+        description="Service name embedded at image build time.",
+    )
+    mcp_build_version: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_VERSION", "BUILD_VERSION"),
+        description="Release version or image tag embedded at image build time.",
+    )
+    mcp_build_tag: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_TAG", "BUILD_TAG"),
+        description="Git release tag embedded at image build time.",
+    )
+    mcp_build_commit: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_COMMIT", "BUILD_COMMIT"),
+        description="Short git commit SHA embedded at image build time.",
+    )
+    mcp_build_built_at: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_BUILT_AT", "BUILD_BUILT_AT"),
+        description="UTC image build timestamp embedded at image build time.",
+    )
+    mcp_build_environment: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_ENVIRONMENT", "BUILD_ENVIRONMENT"),
+        description="Release lane embedded at image build time, for example dev or prod.",
+    )
+    mcp_image_ref: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_REF", "IMAGE_REF"),
+        description="Container image reference deployed for this server.",
+    )
+    mcp_image_digest: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_DIGEST", "IMAGE_DIGEST"),
+        description="Container image digest deployed for this server.",
+    )
+    mcp_image_signed: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNED", "IMAGE_SIGNED"),
+        description="Whether CI signed the deployed container image.",
+    )
+    mcp_image_signature_verified: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_VERIFIED", "IMAGE_SIGNATURE_VERIFIED"),
+        description="Whether CI verified the deployed container image signature.",
+    )
+    mcp_image_signature_issuer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_ISSUER", "IMAGE_SIGNATURE_ISSUER"),
+        description="OIDC issuer used for the deployed container image signature.",
+    )
+    mcp_image_signature_identity: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_IDENTITY", "IMAGE_SIGNATURE_IDENTITY"),
+        description="OIDC identity used for the deployed container image signature.",
+    )
     mcp_canonical_resource: str = Field(
         default="https://mcp.incidentflow.io/mcp",
         description="Canonical OAuth resource identifier for this MCP server",
