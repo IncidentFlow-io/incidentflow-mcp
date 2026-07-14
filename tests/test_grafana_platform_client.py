@@ -186,3 +186,25 @@ class TestErrors:
         client = _client(_json({"detail": "forbidden"}, status=403), captured)
         with pytest.raises(httpx.HTTPStatusError):
             await client.list_dashboards()
+
+    async def test_http_error_includes_platform_error_body(self) -> None:
+        captured: list[httpx.Request] = []
+        client = _client(
+            _json(
+                {
+                    "code": "grafana_panel_type_unsupported",
+                    "message": 'Panel type "row" is not supported',
+                    "request_id": "req-123",
+                },
+                status=422,
+            ),
+            captured,
+        )
+
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await client.get_panel_view(dashboard_uid="dash", panel_id=1)
+
+        message = str(exc_info.value)
+        assert "code=grafana_panel_type_unsupported" in message
+        assert 'message=Panel type "row" is not supported' in message
+        assert "request_id=req-123" in message
