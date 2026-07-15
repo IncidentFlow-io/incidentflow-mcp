@@ -8,6 +8,162 @@ The IncidentFlow MCP server is open-source under the MIT License.
 
 IncidentFlow Cloud platform and hosted services are proprietary.
 
+## Connect hosted MCP clients
+
+Use these steps when the MCP server is already deployed behind HTTPS, for
+example:
+
+- Development: `https://mcp-dev.incidentflow.io/mcp`
+- Production: `https://mcp.incidentflow.io/mcp`
+
+The hosted server uses OAuth 2.1 with PKCE. Clients should register the MCP
+server as a Streamable HTTP MCP server, run the OAuth login flow, and then call
+tools with the issued access token.
+
+Default MCP scopes:
+
+- `mcp:read` — connect to the MCP resource and read MCP resources/metadata.
+- `mcp:tools:run` — execute MCP tools.
+
+Do not request `admin` for normal hosted MCP clients. `openid`, `email`, and
+`profile` are only for explicit OpenID Connect identity flows; MCP tool access
+does not require them.
+
+### Quick HTTP checks
+
+Check that the MCP endpoint is protected and advertises OAuth metadata:
+
+```bash
+curl -i https://mcp-dev.incidentflow.io/mcp
+```
+
+Expected unauthenticated response:
+
+```http
+HTTP/2 401
+www-authenticate: Bearer resource_metadata="https://mcp-dev.incidentflow.io/.well-known/oauth-protected-resource"
+```
+
+Check authorization server metadata:
+
+```bash
+curl -sS https://mcp-dev.incidentflow.io/.well-known/oauth-authorization-server | jq
+```
+
+Expected fields include:
+
+```json
+{
+  "issuer": "https://mcp-dev.incidentflow.io",
+  "authorization_endpoint": "https://mcp-dev.incidentflow.io/authorize",
+  "token_endpoint": "https://mcp-dev.incidentflow.io/token",
+  "registration_endpoint": "https://mcp-dev.incidentflow.io/register",
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token"],
+  "token_endpoint_auth_methods_supported": ["none"],
+  "code_challenge_methods_supported": ["S256"]
+}
+```
+
+For a normal MCP OAuth flow that requests only MCP scopes, the `/token` response
+must omit `id_token` completely. It must not return `"id_token": null`.
+
+Expected successful token shape:
+
+```json
+{
+  "access_token": "...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "mcp:read mcp:tools:run",
+  "refresh_token": "..."
+}
+```
+
+`id_token` is only expected for OpenID Connect flows that request the `openid`
+scope.
+
+### Claude Code
+
+Add the development MCP server:
+
+```bash
+claude mcp add --transport http incidentflow-dev https://mcp-dev.incidentflow.io/mcp
+```
+
+Authenticate with OAuth:
+
+```bash
+claude mcp login incidentflow-dev
+```
+
+Claude Code opens the browser. If the browser does not open, paste the printed
+authorization URL into a browser, complete login/consent, and return to the CLI
+when prompted.
+
+Verify the server is configured:
+
+```bash
+claude mcp list
+claude mcp get incidentflow-dev
+```
+
+Remove or re-authenticate when needed:
+
+```bash
+claude mcp logout incidentflow-dev
+claude mcp remove incidentflow-dev
+```
+
+Production uses the same commands with a different name and URL:
+
+```bash
+claude mcp add --transport http incidentflow https://mcp.incidentflow.io/mcp
+claude mcp login incidentflow
+```
+
+### Codex CLI
+
+Add the development MCP server:
+
+```bash
+codex mcp add incidentflow-dev \
+  --url https://mcp-dev.incidentflow.io/mcp \
+  --oauth-resource https://mcp-dev.incidentflow.io/mcp
+```
+
+Authenticate with OAuth and request the MCP scopes:
+
+```bash
+codex mcp login incidentflow-dev --scopes mcp:read,mcp:tools:run
+```
+
+Verify the server is configured:
+
+```bash
+codex mcp list
+codex mcp get incidentflow-dev
+codex mcp get incidentflow-dev --json
+```
+
+Remove or re-authenticate when needed:
+
+```bash
+codex mcp logout incidentflow-dev
+codex mcp remove incidentflow-dev
+```
+
+Production uses the same commands with a different name and URL:
+
+```bash
+codex mcp add incidentflow \
+  --url https://mcp.incidentflow.io/mcp \
+  --oauth-resource https://mcp.incidentflow.io/mcp
+
+codex mcp login incidentflow --scopes mcp:read,mcp:tools:run
+```
+
+
 ## Local API Docs (OpenAPI + Fern)
 
 This repository includes a code-derived OpenAPI spec and Fern docs config so contributors can inspect the full public API surface locally.

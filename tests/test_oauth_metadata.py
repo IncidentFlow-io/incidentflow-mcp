@@ -11,7 +11,7 @@ def test_protected_resource_metadata_contains_scopes(auth_client: TestClient) ->
     body = response.json()
     assert body["resource"].endswith("/mcp")
     assert "authorization_servers" in body
-    assert body["scopes_supported"] == ["mcp:read", "mcp:tools:run", "admin"]
+    assert body["scopes_supported"] == ["mcp:read", "mcp:tools:run"]
 
 
 def test_protected_resource_metadata_alias(auth_client: TestClient) -> None:
@@ -49,10 +49,14 @@ def test_local_oauth_authorization_server_metadata_bridge(monkeypatch) -> None:
     assert metadata_body["registration_endpoint"] == "http://localhost:8000/register"
     assert metadata_body["jwks_uri"] == "http://localhost:8000/.well-known/jwks.json"
     assert metadata_body["code_challenge_methods_supported"] == ["S256"]
+    assert metadata_body["scopes_supported"] == ["mcp:read", "mcp:tools:run"]
 
     openid = client.get("/.well-known/openid-configuration")
     assert openid.status_code == 200
-    assert openid.json()["authorization_endpoint"] == "http://localhost:8000/authorize"
+    openid_body = openid.json()
+    assert openid_body["authorization_endpoint"] == "http://localhost:8000/authorize"
+    assert "openid" in openid_body["scopes_supported"]
+    assert "admin" not in openid_body["scopes_supported"]
 
     authorize = client.get(
         "/authorize",
