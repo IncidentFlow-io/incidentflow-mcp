@@ -24,7 +24,11 @@ def _oauth_authority_base(settings: Settings, request: Request) -> str:
 
 def _oauth_metadata(settings: Settings, request: Request, *, openid: bool = False) -> dict:
     auth_base = _oauth_authority_base(settings, request)
-    scopes_supported = ["openid", "email", "profile", "mcp:read", "mcp:tools:run", "admin"]
+    scopes_supported = (
+        ["openid", "email", "profile", "mcp:read", "mcp:tools:run"]
+        if openid
+        else ["mcp:read", "mcp:tools:run"]
+    )
     payload = {
         "issuer": auth_base,
         "authorization_endpoint": f"{auth_base}/authorize",
@@ -146,7 +150,7 @@ def create_ops_router(settings: Settings) -> APIRouter:
             content={
                 "resource": settings.mcp_canonical_resource,
                 "authorization_servers": [auth_server],
-                "scopes_supported": ["mcp:read", "mcp:tools:run", "admin"],
+                "scopes_supported": ["mcp:read", "mcp:tools:run"],
             }
         )
 
@@ -165,7 +169,7 @@ def create_ops_router(settings: Settings) -> APIRouter:
             content={
                 "resource": settings.mcp_canonical_resource,
                 "authorization_servers": [auth_server],
-                "scopes_supported": ["mcp:read", "mcp:tools:run", "admin"],
+                "scopes_supported": ["mcp:read", "mcp:tools:run"],
             }
         )
 
