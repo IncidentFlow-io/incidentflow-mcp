@@ -13,6 +13,7 @@ EXPECTED_TOOL_NAMES = {
     "incidentflow_auth_status",
     "incidentflow_integrations_status",
     "incidentflow_docs_search",
+    "incidentflow_knowledge_search",
     "incident_summary",
     "correlate_alerts",
     "external_status_check",
@@ -60,8 +61,6 @@ EXPECTED_TOOL_NAMES = {
     "memory_upsert_postmortem",
     "memory_upsert_knowledge",
     "memory_upsert_incident",
-    "memory_find_rca",
-    "memory_find_knowledge",
 }
 
 # Write tools legitimately set readOnlyHint=False; everything else must be read-only.
@@ -86,12 +85,12 @@ REQUIRED_SUBMISSION_JUSTIFICATIONS = {
 }
 
 EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
-    "public_docs": 1,
+    "public_docs": 2,
     "kubernetes": 17,
     "argocd": 8,
     "grafana_prometheus": 7,
     "slack_incidents": 6,
-    "semantic_memory_read": 5,
+    "semantic_memory_read": 3,
     "semantic_memory_write": 5,
 }
 
@@ -179,9 +178,9 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
         "incidentflow_auth_status",
         "incidentflow_integrations_status",
     }
-    assert payload["total"] == 49
+    assert payload["total"] == 48
     assert payload["total"] == len(operational_names)
-    assert payload["read_only"] == 44
+    assert payload["read_only"] == 43
     assert payload["write_memory_only"] == 5
     assert "canonical" in payload["summary"]
     assert "authoritative runtime tool list" in payload["summary"]
@@ -204,6 +203,29 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     memory_write = categories["semantic_memory_write"]["tools"]
     assert all(tool["write_memory_only"] for tool in memory_write)
     assert all(tool["read_only"] is False for tool in memory_write)
+
+
+def test_memory_tool_schemas_do_not_expose_workspace_id() -> None:
+    for spec in get_tool_specs():
+        if not spec.name.startswith("memory_"):
+            continue
+        assert "workspace_id" not in spec.input_schema.get("properties", {})
+
+
+def test_incidentflow_knowledge_search_is_preferred_unified_tool() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+
+    unified = specs["incidentflow_knowledge_search"]
+
+    assert "workspace_id" not in unified.input_schema.get("properties", {})
+    assert "Preferred unified knowledge search" in unified.description
+    assert "publicResults" in unified.description
+    assert "workspaceResults" in unified.description
+    assert "MCP installation" in unified.description
+    assert "document_type" in unified.input_schema["properties"]
+    assert "rca" in unified.input_schema["properties"]["document_type"]["enum"]
+    assert "memory_find_knowledge" not in specs
+    assert "memory_find_rca" not in specs
 
 
 @pytest.mark.asyncio
@@ -245,7 +267,7 @@ async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.M
     assert payload["environment"] == "dev"
     assert payload["tools"] == {
         "registered": len(EXPECTED_TOOL_NAMES),
-        "operational": 49,
+        "operational": 48,
         "meta": 4,
     }
     assert payload["image"] == {

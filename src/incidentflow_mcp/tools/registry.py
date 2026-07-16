@@ -311,6 +311,76 @@ _TOOL_SPECS: list[ToolSpec] = [
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
+        name="incidentflow_knowledge_search",
+        title="Search IncidentFlow Knowledge",
+        description=(
+            "Preferred unified knowledge search for IncidentFlow. Use this first for any "
+            "public docs, product documentation, workspace memory, operational knowledge, "
+            "RCA, postmortem, runbook, troubleshooting, MCP installation, integration, or "
+            "combined public-plus-workspace query. It searches IncidentFlow public "
+            "documentation, authenticated workspace semantic memory, or both, and returns "
+            "separate publicResults and workspaceResults with sourceScope metadata. "
+            "Use document_type='rca' for RCA-only workspace searches. "
+            "Workspace memory scope is resolved from the authenticated workspace and cannot "
+            f"be selected by tool input. {_READ_ONLY_LOCAL_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language knowledge query.",
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["public", "workspace", "combined"],
+                    "default": "combined",
+                    "description": "Which knowledge scope to search.",
+                },
+                "document_type": {
+                    "type": "string",
+                    "enum": [
+                        "documentation",
+                        "integration_guide",
+                        "tool_reference",
+                        "runbook",
+                        "troubleshooting",
+                        "best_practice",
+                        "security_documentation",
+                        "faq",
+                        "api_reference",
+                        "incident",
+                        "rca",
+                        "postmortem",
+                        "knowledge",
+                        "service_context",
+                        "deployment_note",
+                    ],
+                    "description": (
+                        "Optional document type filter. For example, use 'rca' to search "
+                        "only workspace root-cause analyses."
+                    ),
+                },
+                "service": {
+                    "type": "string",
+                    "description": "Optional workspace memory service filter.",
+                },
+                "environment": {
+                    "type": "string",
+                    "description": "Optional workspace environment filter.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 8,
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+            },
+            "required": ["query"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
         name="incident_summary",
         title="Summarize Incident",
         description=(
@@ -1457,13 +1527,6 @@ _TOOL_SPECS.extend(
                         "maximum": 20,
                         "description": "Maximum number of similar incidents to return.",
                     },
-                    "workspace_id": {
-                        "type": "string",
-                        "description": (
-                            "Workspace scope. Optional when "
-                            "INCIDENTFLOW_WORKSPACE_ID is configured."
-                        ),
-                    },
                 },
                 "required": ["query"],
             },
@@ -1497,10 +1560,6 @@ _TOOL_SPECS.extend(
                         "default": 5,
                         "minimum": 1,
                         "maximum": 20,
-                    },
-                    "workspace_id": {
-                        "type": "string",
-                        "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
                     },
                 },
                 "required": ["service"],
@@ -1543,10 +1602,6 @@ _TOOL_SPECS.extend(
                         "minimum": 1,
                         "maximum": 10,
                     },
-                    "workspace_id": {
-                        "type": "string",
-                        "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",  # noqa: E501
-                    },
                 },
                 "required": ["query"],
             },
@@ -1571,10 +1626,6 @@ _DRY_RUN_PROP = {
     "type": "boolean",
     "default": False,
     "description": "If true, validate and return what would be stored without writing.",
-}
-_WORKSPACE_PROP = {
-    "type": "string",
-    "description": "Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.",
 }
 _TAGS_PROP = {
     "type": "array",
@@ -1619,7 +1670,6 @@ _TOOL_SPECS.extend(
                         "default": "active",
                     },
                     "dry_run": _DRY_RUN_PROP,
-                    "workspace_id": _WORKSPACE_PROP,
                 },
                 "required": ["title", "text"],
             },
@@ -1650,7 +1700,6 @@ _TOOL_SPECS.extend(
                     },
                     "tags": _TAGS_PROP,
                     "dry_run": _DRY_RUN_PROP,
-                    "workspace_id": _WORKSPACE_PROP,
                 },
                 "required": ["title", "text"],
             },
@@ -1681,7 +1730,6 @@ _TOOL_SPECS.extend(
                     },
                     "tags": _TAGS_PROP,
                     "dry_run": _DRY_RUN_PROP,
-                    "workspace_id": _WORKSPACE_PROP,
                 },
                 "required": ["title", "text"],
             },
@@ -1709,7 +1757,6 @@ _TOOL_SPECS.extend(
                     "namespace": {"type": "string"},
                     "tags": _TAGS_PROP,
                     "dry_run": _DRY_RUN_PROP,
-                    "workspace_id": _WORKSPACE_PROP,
                 },
                 "required": ["title", "text"],
             },
@@ -1742,51 +1789,10 @@ _TOOL_SPECS.extend(
                     "started_at": {"type": "string", "format": "date-time"},
                     "tags": _TAGS_PROP,
                     "dry_run": _DRY_RUN_PROP,
-                    "workspace_id": _WORKSPACE_PROP,
                 },
                 "required": ["incident_id", "title", "text"],
             },
             annotations=_KNOWLEDGE_WRITE_ANNOTATIONS,
-        ),
-        ToolSpec(
-            name="memory_find_rca",
-            title="Find RCA from Memory",
-            description=(
-                "Searches IncidentFlow semantic memory for past root-cause analyses matching "
-                f"the current problem. {_MEMORY_READ_ONLY_JUSTIFICATION}"
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Describe the problem/symptoms."},
-                    "service": {"type": "string"},
-                    "tags": _TAGS_PROP,
-                    "limit": {"type": "integer", "default": 3, "minimum": 1, "maximum": 10},
-                    "workspace_id": _WORKSPACE_PROP,
-                },
-                "required": ["query"],
-            },
-            annotations=_read_only_annotations(),
-        ),
-        ToolSpec(
-            name="memory_find_knowledge",
-            title="Find Operational Knowledge from Memory",
-            description=(
-                "Searches IncidentFlow semantic memory for operational knowledge notes matching "
-                f"the query. {_MEMORY_READ_ONLY_JUSTIFICATION}"
-            ),
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string"},
-                    "service": {"type": "string"},
-                    "tags": _TAGS_PROP,
-                    "limit": {"type": "integer", "default": 3, "minimum": 1, "maximum": 10},
-                    "workspace_id": _WORKSPACE_PROP,
-                },
-                "required": ["query"],
-            },
-            annotations=_read_only_annotations(),
         ),
     ]
 )

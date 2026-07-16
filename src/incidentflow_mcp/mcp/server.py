@@ -475,17 +475,15 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "public_docs",
-        "Public Documentation",
-        ("incidentflow_docs_search",),
+        "Public Documentation / Knowledge Search",
+        ("incidentflow_docs_search", "incidentflow_knowledge_search"),
     ),
     (
         "semantic_memory_read",
         "Semantic Memory — Read",
         (
             "memory_search_similar_incidents",
-            "memory_find_rca",
             "memory_find_runbook",
-            "memory_find_knowledge",
             "memory_get_service_context",
         ),
     ),
@@ -2721,6 +2719,10 @@ def create_mcp_server() -> FastMCP:
         )
 
     from incidentflow_mcp.tools.docs_tools import DocsSearchAPIError, incidentflow_docs_search
+    from incidentflow_mcp.tools.knowledge_search_tools import (
+        KnowledgeSearchAPIError,
+        incidentflow_knowledge_search,
+    )
 
     @mcp.tool(**_tool_metadata(_specs["incidentflow_docs_search"]))
     async def incidentflow_docs_search_tool(query: str, limit: int = 5) -> str:
@@ -2728,6 +2730,31 @@ def create_mcp_server() -> FastMCP:
             result = await incidentflow_docs_search(settings=settings, query=query, limit=limit)
             return json.dumps(result, indent=2)
         except DocsSearchAPIError as exc:
+            return json.dumps({"error": str(exc)})
+
+    @mcp.tool(**_tool_metadata(_specs["incidentflow_knowledge_search"]))
+    async def incidentflow_knowledge_search_tool(
+        query: str,
+        scope: str = "combined",
+        document_type: str | None = None,
+        service: str | None = None,
+        environment: str | None = None,
+        limit: int = 8,
+    ) -> str:
+        try:
+            resolved_scope = scope if scope in ("public", "workspace", "combined") else "combined"
+            result = await incidentflow_knowledge_search(
+                settings=settings,
+                workspace_id=None if resolved_scope == "public" else _workspace(),
+                query=query,
+                scope=resolved_scope,
+                document_type=document_type,
+                service=service,
+                environment=environment,
+                limit=limit,
+            )
+            return json.dumps(result, indent=2)
+        except (KnowledgeSearchAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool(**_tool_metadata(_specs["incident_summary"]))
@@ -4368,8 +4395,6 @@ def create_mcp_server() -> FastMCP:
     # Memory tools — semantic incident memory via Qdrant
     # ──────────────────────────────────────────────────────────────────────────
     from incidentflow_mcp.tools.knowledge_tools import (
-        memory_find_knowledge,
-        memory_find_rca,
         memory_upsert_incident,
         memory_upsert_knowledge,
         memory_upsert_postmortem,
@@ -4383,11 +4408,12 @@ def create_mcp_server() -> FastMCP:
         memory_search_similar_incidents,
     )
 
-    def _workspace(workspace_id: str | None) -> str:
+    def _workspace(workspace_id: str | None = None) -> str:
         wid = workspace_id or _current_token_workspace_id() or settings.mcp_default_workspace_id
         if not wid:
             raise ValueError(
-                "workspace_id is required. Pass it explicitly or set INCIDENTFLOW_WORKSPACE_ID."
+                "workspace_id is required from auth context. For local development, set "
+                "MCP_DEFAULT_WORKSPACE_ID."
             )
         return wid
 
@@ -4397,19 +4423,18 @@ def create_mcp_server() -> FastMCP:
         service: str | None = None,
         types: list[str] | None = None,
         limit: int = 5,
-        workspace_id: str | None = None,
     ) -> str:
         try:
             result = await memory_search_similar_incidents(
                 settings=settings,
-                workspace_id=_workspace(workspace_id),
+                workspace_id=_workspace(),
                 query=query,
                 service=service,
                 types=types,
                 limit=limit,
             )
             return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
+        except (MemoryAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool(**_tool_metadata(_specs["memory_get_service_context"]))
@@ -4417,18 +4442,17 @@ def create_mcp_server() -> FastMCP:
         service: str,
         query: str | None = None,
         limit: int = 5,
-        workspace_id: str | None = None,
     ) -> str:
         try:
             result = await memory_get_service_context(
                 settings=settings,
-                workspace_id=_workspace(workspace_id),
+                workspace_id=_workspace(),
                 service=service,
                 query=query,
                 limit=limit,
             )
             return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
+        except (MemoryAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool(**_tool_metadata(_specs["memory_find_runbook"]))
@@ -4439,12 +4463,11 @@ def create_mcp_server() -> FastMCP:
         namespace: str | None = None,
         tags: list[str] | None = None,
         limit: int = 3,
-        workspace_id: str | None = None,
     ) -> str:
         try:
             result = await memory_find_runbook(
                 settings=settings,
-                workspace_id=_workspace(workspace_id),
+                workspace_id=_workspace(),
                 query=query,
                 service=service,
                 cluster=cluster,
@@ -4453,7 +4476,7 @@ def create_mcp_server() -> FastMCP:
                 limit=limit,
             )
             return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
+        except (MemoryAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     # ── Typed knowledge-memory write tools ──────────────────────────────────
@@ -4470,12 +4493,11 @@ def create_mcp_server() -> FastMCP:
         tags: list[str] | None = None,
         status: str = "active",
         dry_run: bool = False,
-        workspace_id: str | None = None,
     ) -> str:
         try:
             result = await memory_upsert_runbook(
                 settings=settings,
-                workspace_id=_workspace(workspace_id),
+                workspace_id=_workspace(),
                 title=title,
                 text=text,
                 runbook_id=runbook_id,
@@ -4488,7 +4510,7 @@ def create_mcp_server() -> FastMCP:
                 dry_run=dry_run,
             )
             return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
+        except (MemoryAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool(**_tool_metadata(_specs["memory_upsert_rca"]))
@@ -4502,12 +4524,11 @@ def create_mcp_server() -> FastMCP:
         severity: str | None = None,
         tags: list[str] | None = None,
         dry_run: bool = False,
-        workspace_id: str | None = None,
     ) -> str:
         try:
             result = await memory_upsert_rca(
                 settings=settings,
-                workspace_id=_workspace(workspace_id),
+                workspace_id=_workspace(),
                 title=title,
                 text=text,
                 incident_id=incident_id,
@@ -4519,7 +4540,7 @@ def create_mcp_server() -> FastMCP:
                 dry_run=dry_run,
             )
             return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
+        except (MemoryAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool(**_tool_metadata(_specs["memory_upsert_postmortem"]))
@@ -4533,12 +4554,11 @@ def create_mcp_server() -> FastMCP:
         severity: str | None = None,
         tags: list[str] | None = None,
         dry_run: bool = False,
-        workspace_id: str | None = None,
     ) -> str:
         try:
             result = await memory_upsert_postmortem(
                 settings=settings,
-                workspace_id=_workspace(workspace_id),
+                workspace_id=_workspace(),
                 title=title,
                 text=text,
                 incident_id=incident_id,
@@ -4550,7 +4570,7 @@ def create_mcp_server() -> FastMCP:
                 dry_run=dry_run,
             )
             return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
+        except (MemoryAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool(**_tool_metadata(_specs["memory_upsert_knowledge"]))
@@ -4563,12 +4583,11 @@ def create_mcp_server() -> FastMCP:
         namespace: str | None = None,
         tags: list[str] | None = None,
         dry_run: bool = False,
-        workspace_id: str | None = None,
     ) -> str:
         try:
             result = await memory_upsert_knowledge(
                 settings=settings,
-                workspace_id=_workspace(workspace_id),
+                workspace_id=_workspace(),
                 title=title,
                 text=text,
                 knowledge_id=knowledge_id,
@@ -4579,7 +4598,7 @@ def create_mcp_server() -> FastMCP:
                 dry_run=dry_run,
             )
             return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
+        except (MemoryAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     @mcp.tool(**_tool_metadata(_specs["memory_upsert_incident"]))
@@ -4595,12 +4614,11 @@ def create_mcp_server() -> FastMCP:
         started_at: str | None = None,
         tags: list[str] | None = None,
         dry_run: bool = False,
-        workspace_id: str | None = None,
     ) -> str:
         try:
             result = await memory_upsert_incident(
                 settings=settings,
-                workspace_id=_workspace(workspace_id),
+                workspace_id=_workspace(),
                 incident_id=incident_id,
                 title=title,
                 text=text,
@@ -4614,51 +4632,7 @@ def create_mcp_server() -> FastMCP:
                 dry_run=dry_run,
             )
             return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
-            return json.dumps({"error": str(exc)})
-
-    # ── Typed knowledge-memory read tools ───────────────────────────────────
-
-    @mcp.tool(**_tool_metadata(_specs["memory_find_rca"]))
-    async def memory_find_rca_tool(
-        query: str,
-        service: str | None = None,
-        tags: list[str] | None = None,
-        limit: int = 3,
-        workspace_id: str | None = None,
-    ) -> str:
-        try:
-            result = await memory_find_rca(
-                settings=settings,
-                workspace_id=_workspace(workspace_id),
-                query=query,
-                service=service,
-                tags=tags,
-                limit=limit,
-            )
-            return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
-            return json.dumps({"error": str(exc)})
-
-    @mcp.tool(**_tool_metadata(_specs["memory_find_knowledge"]))
-    async def memory_find_knowledge_tool(
-        query: str,
-        service: str | None = None,
-        tags: list[str] | None = None,
-        limit: int = 3,
-        workspace_id: str | None = None,
-    ) -> str:
-        try:
-            result = await memory_find_knowledge(
-                settings=settings,
-                workspace_id=_workspace(workspace_id),
-                query=query,
-                service=service,
-                tags=tags,
-                limit=limit,
-            )
-            return json.dumps(result, indent=2)
-        except MemoryAPIError as exc:
+        except (MemoryAPIError, ValueError) as exc:
             return json.dumps({"error": str(exc)})
 
     register_resources(mcp)
