@@ -474,6 +474,11 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "public_docs",
+        "Public Documentation",
+        ("incidentflow_docs_search",),
+    ),
+    (
         "semantic_memory_read",
         "Semantic Memory — Read",
         (
@@ -2714,6 +2719,16 @@ def create_mcp_server() -> FastMCP:
                 principal=_current_principal(settings),
             )
         )
+
+    from incidentflow_mcp.tools.docs_tools import DocsSearchAPIError, incidentflow_docs_search
+
+    @mcp.tool(**_tool_metadata(_specs["incidentflow_docs_search"]))
+    async def incidentflow_docs_search_tool(query: str, limit: int = 5) -> str:
+        try:
+            result = await incidentflow_docs_search(settings=settings, query=query, limit=limit)
+            return json.dumps(result, indent=2)
+        except DocsSearchAPIError as exc:
+            return json.dumps({"error": str(exc)})
 
     @mcp.tool(**_tool_metadata(_specs["incident_summary"]))
     async def incident_summary(

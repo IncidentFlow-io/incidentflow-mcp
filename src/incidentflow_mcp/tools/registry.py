@@ -285,6 +285,32 @@ _TOOL_SPECS: list[ToolSpec] = [
         annotations=_read_only_annotations(),
     ),
     ToolSpec(
+        name="incidentflow_docs_search",
+        title="Search IncidentFlow Docs",
+        description=(
+            "Search official public IncidentFlow documentation for setup, integration, MCP, "
+            "tool, runbook, security, and API guidance. This searches only public docs and "
+            f"does not read workspace memory or customer data. {_READ_ONLY_LOCAL_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural language docs query, e.g. 'install Kubernetes agent'.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                },
+            },
+            "required": ["query"],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
         name="incident_summary",
         title="Summarize Incident",
         description=(

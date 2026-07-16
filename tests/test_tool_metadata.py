@@ -12,6 +12,7 @@ EXPECTED_TOOL_NAMES = {
     "incidentflow_version",
     "incidentflow_auth_status",
     "incidentflow_integrations_status",
+    "incidentflow_docs_search",
     "incident_summary",
     "correlate_alerts",
     "external_status_check",
@@ -85,6 +86,7 @@ REQUIRED_SUBMISSION_JUSTIFICATIONS = {
 }
 
 EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
+    "public_docs": 1,
     "kubernetes": 17,
     "argocd": 8,
     "grafana_prometheus": 7,
@@ -177,9 +179,9 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
         "incidentflow_auth_status",
         "incidentflow_integrations_status",
     }
-    assert payload["total"] == 48
+    assert payload["total"] == 49
     assert payload["total"] == len(operational_names)
-    assert payload["read_only"] == 43
+    assert payload["read_only"] == 44
     assert payload["write_memory_only"] == 5
     assert "canonical" in payload["summary"]
     assert "authoritative runtime tool list" in payload["summary"]
@@ -243,7 +245,7 @@ async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.M
     assert payload["environment"] == "dev"
     assert payload["tools"] == {
         "registered": len(EXPECTED_TOOL_NAMES),
-        "operational": 48,
+        "operational": 49,
         "meta": 4,
     }
     assert payload["image"] == {
