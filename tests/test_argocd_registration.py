@@ -23,6 +23,7 @@ def test_registry_declares_argocd_tools() -> None:
     for name in ARGOCD_TOOLS:
         spec = specs[name]
         assert spec.description
+        assert spec.required_integration == "argocd"
         assert spec.input_schema["type"] == "object"
         assert "workspace_id" not in spec.input_schema["properties"]
         assert spec.annotations["readOnlyHint"] is True

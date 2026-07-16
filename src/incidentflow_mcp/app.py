@@ -39,6 +39,14 @@ def create_app() -> FastAPI:
     in tests or the CLI runner — never instantiate FastAPI directly.
     """
     settings = get_settings()
+    configure_logging(
+        settings.log_level,
+        settings.library_log_level,
+        settings.log_format,
+        service=settings.mcp_server_name,
+        service_version=settings.mcp_server_version,
+        environment=settings.runtime_environment(),
+    )
 
     if (
         settings.environment == "production"
@@ -51,6 +59,11 @@ def create_app() -> FastAPI:
             "Auth must be configured in production. "
             "Set INCIDENTFLOW_PAT or PLATFORM_API_BASE_URL. "
             "To bypass temporarily, set ALLOW_UNPROTECTED_IN_PRODUCTION=true."
+        )
+
+    if settings.runtime_environment() == "production" and settings.shared_dev_kubernetes_enabled:
+        raise RuntimeError(
+            "Shared development Kubernetes fallback cannot be enabled in production."
         )
 
     # Create the MCP server once so both the lifespan and the route handler
@@ -79,8 +92,6 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-        configure_logging(settings.log_level, settings.library_log_level)
-
         try:
             if settings.oauth_validation_enabled():
                 logger.info(

@@ -13,6 +13,8 @@ To add a new tool:
 from dataclasses import dataclass, field
 from typing import Any
 
+from incidentflow_mcp.integrations import IntegrationType
+
 
 @dataclass
 class ToolSpec:
@@ -23,6 +25,20 @@ class ToolSpec:
     annotations: dict[str, Any] = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
     structured_output: bool | None = None
+    required_integration: IntegrationType | None = None
+    supports_shared_dev_fallback: bool = False
+
+    def __post_init__(self) -> None:
+        if self.required_integration is None:
+            if self.name.startswith("k8s_"):
+                self.required_integration = "kubernetes"
+                self.supports_shared_dev_fallback = True
+            elif self.name.startswith("grafana_") or self.name == "analyze_dashboard_health":
+                self.required_integration = "grafana"
+            elif self.name.startswith("slack_") or self.name == "incident_thread_summary":
+                self.required_integration = "slack"
+            elif self.name.startswith("argocd_"):
+                self.required_integration = "argocd"
 
 
 _READ_ONLY_LOCAL_ANNOTATIONS = {
@@ -62,6 +78,31 @@ _STATUS_READ_ONLY_JUSTIFICATION = (
 
 def _read_only_annotations() -> dict[str, Any]:
     return dict(_READ_ONLY_LOCAL_ANNOTATIONS)
+
+
+def build_tool_description(spec: ToolSpec, *, environment: str = "development") -> str:
+    if not spec.required_integration:
+        return spec.description
+
+    label = {
+        "kubernetes": "Kubernetes",
+        "grafana": "Grafana",
+        "slack": "Slack",
+        "argocd": "Argo CD",
+    }[spec.required_integration]
+    description = (
+        f"{spec.description} Requires an active {label} integration in the current workspace."
+    )
+    if (
+        spec.required_integration == "kubernetes"
+        and spec.supports_shared_dev_fallback
+        and environment in {"dev", "development", "test", "local"}
+    ):
+        description += (
+            " In development environments, a shared sandbox cluster may be used when "
+            "explicitly enabled."
+        )
+    return description
 
 
 def _k8s_cluster_properties() -> dict[str, Any]:
@@ -210,6 +251,36 @@ _TOOL_SPECS: list[ToolSpec] = [
             "type": "object",
             "properties": {},
             "required": [],
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="incidentflow_auth_status",
+        title="Show IncidentFlow Auth Status",
+        description=(
+            "Show the authenticated IncidentFlow user, active workspace, workspace role, "
+            "and runtime environment. "
+            f"{_READ_ONLY_LOCAL_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+        annotations=_read_only_annotations(),
+    ),
+    ToolSpec(
+        name="incidentflow_integrations_status",
+        title="Show IncidentFlow Integrations Status",
+        description=(
+            "Show which IncidentFlow integrations are connected for the active workspace "
+            "and whether a development fallback is being used. "
+            f"{_READ_ONLY_LOCAL_JUSTIFICATION}"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
         },
         annotations=_read_only_annotations(),
     ),

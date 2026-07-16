@@ -1,5 +1,6 @@
 """Observability metrics coverage for HTTP/MCP middleware."""
 
+import logging
 import re
 
 from fastapi.testclient import TestClient
@@ -25,6 +26,7 @@ def test_metrics_endpoint_exposes_observability_metrics(auth_client: TestClient)
     assert "mcp_tool_request_duration_seconds" in payload
     assert "mcp_tool_requests_in_flight" in payload
     assert "mcp_tool_errors_total" in payload
+    assert "mcp_integration_guard_total" in payload
     assert "mcp_request_duration_seconds" in payload
     assert "tool_duration_seconds" in payload
 
@@ -123,6 +125,37 @@ def test_headerless_request_increments_inferred_session_start(
 
     payload = auth_client.get("/metrics").text
     assert 'mcp_sessions_started_total{reason="inferred_request"}' in payload
+
+
+def test_request_log_uses_structured_http_fields(
+    auth_client: TestClient,
+    valid_auth_headers: dict[str, str],
+    caplog,
+) -> None:
+    caplog.set_level(logging.INFO, logger="incidentflow_mcp.observability.middleware")
+
+    auth_client.post(
+        "/mcp",
+        headers=valid_auth_headers,
+        json={"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {}},
+    )
+
+    record = next(
+        item
+        for item in caplog.records
+        if item.name == "incidentflow_mcp.observability.middleware"
+        and item.getMessage() == "http_request_completed"
+    )
+
+    assert record.http_method == "POST"
+    assert record.http_route == "/mcp"
+    assert record.http_status_code in {200, 202, 500}
+    assert record.http_status_class in {"2xx", "5xx"}
+    assert record.outcome in {"success", "error"}
+    assert record.mcp_request_type == "ListToolsRequest"
+    assert record.session_mode == "headerless"
+    assert not hasattr(record, "tool_name")
+    assert not hasattr(record, "tool")
 
 
 def test_request_with_session_header_tracks_session_lifecycle(
