@@ -23,11 +23,20 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", description="Bind host")
     port: int = Field(default=8000, description="Bind port")
     log_level: str = Field(default="info", description="Logging level")
+    log_format: str = Field(
+        default="text",
+        description="Log format: text or json.",
+    )
     library_log_level: str = Field(
         default="warning",
         description="Default log level for noisy third-party libraries.",
     )
     environment: str = Field(default="development", description="Environment name")
+    incidentflow_env: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INCIDENTFLOW_ENV"),
+        description="IncidentFlow runtime lane. Overrides ENVIRONMENT for user-facing status.",
+    )
     allow_unprotected_in_production: bool = Field(
         default=False,
         description=(
@@ -103,6 +112,24 @@ class Settings(BaseSettings):
             "when tool input omits workspace_id."
         ),
     )
+    shared_dev_kubernetes_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SHARED_DEV_KUBERNETES_ENABLED"),
+        description="Enable shared development Kubernetes fallback outside production.",
+    )
+    shared_dev_kubernetes_agent_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SHARED_DEV_KUBERNETES_AGENT_ID",
+            "SHARED_DEV_KUBERNETES_CLUSTER_ID",
+        ),
+        description="Shared development Kubernetes cluster/agent id used by platform-api.",
+    )
+    shared_dev_kubernetes_cluster_name: str = Field(
+        default="incidentflow-dev",
+        validation_alias=AliasChoices("SHARED_DEV_KUBERNETES_CLUSTER_NAME"),
+        description="Display name for the shared development Kubernetes cluster.",
+    )
 
     # When True, tokens must carry all required scopes for the endpoint they
     # access; requests missing a scope get 403.  Defaults to True in
@@ -121,6 +148,23 @@ class Settings(BaseSettings):
         if self.enforce_scopes is not None:
             return self.enforce_scopes
         return self.environment == "production"
+
+    def runtime_environment(self) -> str:
+        raw = (self.incidentflow_env or self.environment or "development").strip().lower()
+        aliases = {
+            "development": "dev",
+            "local": "dev",
+            "test": "dev",
+            "prod": "production",
+        }
+        return aliases.get(raw, raw)
+
+    def shared_dev_kubernetes_allowed(self) -> bool:
+        return (
+            self.runtime_environment() == "dev"
+            and self.shared_dev_kubernetes_enabled
+            and bool(self.shared_dev_kubernetes_agent_id)
+        )
 
     def managed_token_introspection_enabled(self) -> bool:
         """Return True when remote managed-token introspection is configured."""

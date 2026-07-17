@@ -225,21 +225,34 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                 )
 
             request_id = getattr(request.state, "request_id", None)
+            log_extra: dict[str, Any] = {
+                "http_method": method,
+                "http_route": route,
+                "traffic": traffic,
+                "http_status_code": status_code,
+                "http_status_class": status_class,
+                "outcome": outcome,
+                "http_duration_ms": round(elapsed * 1000.0, 2),
+                "request_id": request_id,
+            }
+            if route == "/mcp":
+                log_extra["mcp_request_type"] = request_type
+                log_extra["session_mode"] = session_mode
+                if is_call_tool and tool_name != "unknown":
+                    log_extra["tool_name"] = tool_name
+
+            auth_context = getattr(request.state, "auth_context", None)
+            if isinstance(auth_context, dict):
+                workspace_id = auth_context.get("workspace_id")
+                auth_method = auth_context.get("auth_method")
+                if workspace_id:
+                    log_extra["workspace_id"] = str(workspace_id)
+                if auth_method:
+                    log_extra["auth_method"] = str(auth_method)
+
             # Log while OTel context is still attached so _TraceContextFilter
             # can inject non-empty trace_id/span_id into this log record.
-            logger.info(
-                "http_request method=%s route=%s traffic=%s status_code=%d "
-                "duration_ms=%.2f request_id=%s request_type=%s tool=%s session_mode=%s",
-                method,
-                route,
-                traffic,
-                status_code,
-                elapsed * 1000.0,
-                request_id,
-                request_type if route == "/mcp" else "-",
-                tool_name if is_call_tool else "-",
-                session_mode if route == "/mcp" else "-",
-            )
+            logger.info("http_request_completed", extra=log_extra)
             if _otel_token is not None:
                 try:
                     import opentelemetry.context as otel_ctx

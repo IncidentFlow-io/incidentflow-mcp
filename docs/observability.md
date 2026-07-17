@@ -1,5 +1,10 @@
 # MCP Observability (Prometheus + Grafana)
 
+See also: [Logging](logging.md) and
+[Integration Status Tools and Metrics](integration-status-tools-and-metrics.md)
+for `incidentflow_auth_status`, `incidentflow_integrations_status`, integration guard
+metrics, and `curl | jq` verification commands.
+
 ## Architecture Summary
 
 - `MCPObservabilityMiddleware` instruments normalized HTTP routes with low-cardinality labels.
@@ -169,11 +174,68 @@ See: `k8s/monitoring/prometheusrule.yaml`
 
 ## Structured Logging Recommendations
 
+Run local MCP with readable text logs:
+
+```bash
+uv run incidentflow-mcp serve \
+  --reload \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --log-format text
+```
+
+Text logs omit `trace_id` and `span_id` when there is no active trace.
+
+Run MCP with machine-readable JSON logs:
+
+```bash
+uv run incidentflow-mcp serve \
+  --reload \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --log-format json
+```
+
+To suppress third-party reload/startup noise while debugging application logs:
+
+```bash
+uv run incidentflow-mcp serve \
+  --reload \
+  --host 127.0.0.1 \
+  --port 8001 \
+  --log-format json \
+  --library-log-level error
+```
+
+Environment variable equivalent:
+
+```bash
+LOG_FORMAT=json LIBRARY_LOG_LEVEL=error uv run incidentflow-mcp serve --host 127.0.0.1 --port 8001
+```
+
+Verify logs are parseable:
+
+```bash
+uv run incidentflow-mcp serve --host 127.0.0.1 --port 8001 --log-format json 2>&1 \
+  | jq -R 'fromjson? | select(. != null)'
+```
+
+- JSON logs use `event` for the log message and include `trace_id`/`span_id`
+  only when tracing is active.
+- JSON logs include `service`, `service_version`, and `environment` on every line.
+- Uvicorn's `color_message` field is omitted from JSON logs.
 - Log one line per request with:
-  - `request_id`, `method`, `route`, `traffic`, `status_code`, `duration_ms`,
-    `request_type`, `tool`, `session_mode`.
+  - `request_id`, `http_method`, `http_route`, `traffic`, `http_status_code`,
+    `http_status_class`, `outcome`, `http_duration_ms`, `mcp_request_type`,
+    `session_mode`.
+- `tool_name` is present only for MCP `tools/call` requests where the tool name
+  is known.
+- Authenticated request logs may include `workspace_id` and `auth_method` as
+  JSON fields. Do not promote them to Prometheus or Loki labels.
 - Keep client IP out of Prometheus labels; include in logs only when needed for debugging/security policy.
 - Avoid putting request IDs, raw URLs, tool args, or user identifiers into metric labels.
+- `uvicorn.access` is disabled because `MCPObservabilityMiddleware` emits the
+  canonical request log with bounded structured fields.
 
 ## Optional Tracing (OpenTelemetry)
 

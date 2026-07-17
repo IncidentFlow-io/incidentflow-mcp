@@ -10,6 +10,8 @@ from incidentflow_mcp.tools.registry import get_tool_specs
 EXPECTED_TOOL_NAMES = {
     "incidentflow_capabilities",
     "incidentflow_version",
+    "incidentflow_auth_status",
+    "incidentflow_integrations_status",
     "incident_summary",
     "correlate_alerts",
     "external_status_check",
@@ -169,7 +171,12 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     result = await tool_manager.call_tool("incidentflow_capabilities", {})
     payload = json.loads(result)
 
-    operational_names = EXPECTED_TOOL_NAMES - {"incidentflow_capabilities", "incidentflow_version"}
+    operational_names = EXPECTED_TOOL_NAMES - {
+        "incidentflow_capabilities",
+        "incidentflow_version",
+        "incidentflow_auth_status",
+        "incidentflow_integrations_status",
+    }
     assert payload["total"] == 48
     assert payload["total"] == len(operational_names)
     assert payload["read_only"] == 43
@@ -189,6 +196,8 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     assert returned_names == operational_names
     assert "incidentflow_capabilities" not in returned_names
     assert "incidentflow_version" not in returned_names
+    assert "incidentflow_auth_status" not in returned_names
+    assert "incidentflow_integrations_status" not in returned_names
 
     memory_write = categories["semantic_memory_write"]["tools"]
     assert all(tool["write_memory_only"] for tool in memory_write)
@@ -235,7 +244,7 @@ async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.M
     assert payload["tools"] == {
         "registered": len(EXPECTED_TOOL_NAMES),
         "operational": 48,
-        "meta": 2,
+        "meta": 4,
     }
     assert payload["image"] == {
         "ref": "ghcr.io/incidentflow-io/incidentflow-mcp:dev-v1.0.0",

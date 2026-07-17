@@ -186,10 +186,21 @@ async def _attempt_oauth_validation(
         _set_auth_context(
             request,
             authenticated=True,
+            auth_method="oauth",
             bearer_token=token,
             client_id=str(claims.get("client_id") or "oauth_client"),
             workspace_id=(str(claims.get("workspace_id")) if claims.get("workspace_id") else None),
+            workspace_name=(
+                str(claims.get("workspace_name")) if claims.get("workspace_name") else None
+            ),
+            workspace_slug=(
+                str(claims.get("workspace_slug")) if claims.get("workspace_slug") else None
+            ),
+            workspace_role=(
+                str(claims.get("workspace_role")) if claims.get("workspace_role") else None
+            ),
             user_id=(str(claims.get("user_id")) if claims.get("user_id") else None),
+            email=(str(claims.get("email")) if claims.get("email") else None),
             plan=None,
         )
         return JSONResponse(status_code=200, content={})
@@ -234,10 +245,15 @@ async def introspect_managed_pat(
         _set_auth_context(
             request,
             authenticated=True,
+            auth_method="api_token",
             bearer_token=token,
             client_id=data.get("credential_id"),
             workspace_id=data.get("workspace_id"),
+            workspace_name=data.get("workspace_name"),
+            workspace_slug=data.get("workspace_slug"),
+            workspace_role=data.get("workspace_role"),
             user_id=data.get("user_id"),
+            email=data.get("email"),
             plan=None,
         )
         return JSONResponse(status_code=200, content={})
@@ -297,10 +313,15 @@ def validate_local_pat(
     _set_auth_context(
         request,
         authenticated=True,
+        auth_method="api_token",
         bearer_token=token,
         client_id=token_id,
         workspace_id=record.workspace_id,
         user_id=request.headers.get("x-user-id"),
+        email=request.headers.get("x-user-email"),
+        workspace_name=request.headers.get("x-workspace-name"),
+        workspace_slug=request.headers.get("x-workspace-slug"),
+        workspace_role=request.headers.get("x-workspace-role"),
         plan=(
             request.headers.get("x-plan")
             or request.headers.get("x-plan-tier")
@@ -321,7 +342,13 @@ def validate_static_pat(*, request: Request, token: str) -> JSONResponse | None:
         logger.warning("auth: invalid static PAT token from %s", _client_ip(request))
         return _unauthorized("Invalid token.")
 
-    _set_auth_context(request, authenticated=True, bearer_token=token, client_id="legacy_pat")
+    _set_auth_context(
+        request,
+        authenticated=True,
+        auth_method="api_token",
+        bearer_token=token,
+        client_id="legacy_pat",
+    )
     return JSONResponse(status_code=200, content={})
 
 
@@ -389,18 +416,28 @@ def _set_auth_context(
     request: Request,
     *,
     authenticated: bool,
+    auth_method: str | None = None,
     bearer_token: str | None = None,
     client_id: str | None = None,
     workspace_id: str | None = None,
+    workspace_name: str | None = None,
+    workspace_slug: str | None = None,
+    workspace_role: str | None = None,
     user_id: str | None = None,
+    email: str | None = None,
     plan: str | None = None,
 ) -> None:
     context = {
         "authenticated": authenticated,
+        "auth_method": auth_method,
         "bearer_token": bearer_token,
         "client_id": client_id,
         "workspace_id": workspace_id,
+        "workspace_name": workspace_name,
+        "workspace_slug": workspace_slug,
+        "workspace_role": workspace_role,
         "user_id": user_id,
+        "email": email,
         "plan": plan,
     }
     request.state.auth_context = context

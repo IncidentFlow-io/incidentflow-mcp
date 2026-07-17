@@ -180,6 +180,11 @@ mcp_platform_api_jobs_errors_total = Counter(
     "Total platform-api async jobs client errors by operation and status code.",
     ("namespace", "pod", "operation", "status_code", "error_type"),
 )
+mcp_integration_guard_total = Counter(
+    "mcp_integration_guard_total",
+    "Integration guard decisions by tool, integration, result, and environment.",
+    ("tool", "integration", "result", "environment"),
+)
 
 # Clean, low-cardinality latency histograms (service-scoped names, no prefix).
 tool_duration_seconds = Histogram(

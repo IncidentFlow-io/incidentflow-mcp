@@ -17,6 +17,7 @@ Usage:
 
 import json
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 
 import click
@@ -43,11 +44,19 @@ def cli() -> None:
 @click.option("--port", default=None, type=int, help="Bind port (overrides PORT env var)")
 @click.option("--reload", is_flag=True, default=False, help="Enable auto-reload (dev only)")
 @click.option("--log-level", default=None, help="Log level: debug|info|warning|error")
+@click.option("--log-format", default=None, help="Log format: text|json")
+@click.option(
+    "--library-log-level",
+    default=None,
+    help="Third-party logger level: debug|info|warning|error",
+)
 def serve(
     host: str | None,
     port: int | None,
     reload: bool,
     log_level: str | None,
+    log_format: str | None,
+    library_log_level: str | None,
 ) -> None:
     """Start the MCP HTTP server."""
     settings = get_settings()
@@ -55,8 +64,24 @@ def serve(
     _host = host or settings.host
     _port = port or settings.port
     _level = log_level or settings.log_level
+    _format = log_format or settings.log_format
+    _library_level = library_log_level or settings.library_log_level
 
-    configure_logging(_level, settings.library_log_level)
+    _propagate_server_settings_to_reload_child(
+        host=_host,
+        port=_port,
+        log_level=_level,
+        log_format=_format,
+        library_log_level=_library_level,
+    )
+    configure_logging(
+        _level,
+        _library_level,
+        _format,
+        service=settings.mcp_server_name,
+        service_version=settings.mcp_server_version,
+        environment=settings.runtime_environment(),
+    )
     logger.info("launching server on %s:%d", _host, _port)
 
     uvicorn.run(
@@ -65,8 +90,26 @@ def serve(
         port=_port,
         factory=True,
         log_level=_level.lower(),
+        log_config=None,
+        access_log=False,
         reload=reload,
     )
+
+
+def _propagate_server_settings_to_reload_child(
+    *,
+    host: str,
+    port: int,
+    log_level: str,
+    log_format: str,
+    library_log_level: str,
+) -> None:
+    """Keep uvicorn reload child settings aligned with CLI flags."""
+    os.environ["HOST"] = host
+    os.environ["PORT"] = str(port)
+    os.environ["LOG_LEVEL"] = log_level
+    os.environ["LOG_FORMAT"] = log_format
+    os.environ["LIBRARY_LOG_LEVEL"] = library_log_level
 
 
 # ---------------------------------------------------------------------------
