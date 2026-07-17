@@ -20,6 +20,7 @@ class Severity(StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
+    WARNING = "warning"
     LOW = "low"
     INFO = "info"
 
@@ -121,6 +122,9 @@ class AlertCluster(BaseModel):
     dominant_severity: Severity
     likely_root_cause: str
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]
+    evidence: list[str] = Field(default_factory=list)
+    confidence_level: str = "possible"
+    missing_evidence: list[str] = Field(default_factory=list)
     human_context: dict[str, Any] | None = None
 
 

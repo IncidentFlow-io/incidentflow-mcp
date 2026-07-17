@@ -46,6 +46,7 @@ class PlatformAPIKnowledgeClient:
         document_type: str | None = None,
         service: str | None = None,
         environment: str | None = None,
+        response_mode: str = "compact",
         limit: int = 8,
     ) -> dict[str, Any]:
         tracer = get_tracer()
@@ -58,6 +59,9 @@ class PlatformAPIKnowledgeClient:
                 "query": query,
                 "scope": scope,
                 "limit": limit,
+                "response_mode": response_mode
+                if response_mode in {"compact", "full"}
+                else "compact",
             }
             if workspace_id:
                 body["workspace_id"] = workspace_id
@@ -98,6 +102,7 @@ async def incidentflow_knowledge_search(
     document_type: str | None = None,
     service: str | None = None,
     environment: str | None = None,
+    response_mode: str = "compact",
     limit: int = 8,
 ) -> dict[str, Any]:
     client = PlatformAPIKnowledgeClient(settings)
@@ -109,6 +114,7 @@ async def incidentflow_knowledge_search(
             document_type=document_type,
             service=service,
             environment=environment,
+            response_mode=response_mode,
             limit=limit,
         )
     except httpx.HTTPStatusError as exc:

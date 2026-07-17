@@ -31,9 +31,12 @@ _SEVERITY_ORDER: list[Severity] = [
     Severity.CRITICAL,
     Severity.HIGH,
     Severity.MEDIUM,
+    Severity.WARNING,
     Severity.LOW,
     Severity.INFO,
 ]
+
+_STRONG_RELATION_THRESHOLD = 0.25
 
 
 # ---------------------------------------------------------------------------
@@ -65,17 +68,18 @@ def correlate_alerts(input_data: CorrelateAlertsInput) -> CorrelateAlertsOutput:
     def union(x: str, y: str) -> None:
         parent[find(x)] = find(y)
 
-    # Two alerts are related if they share a service OR share a label value
-    # and fired within the correlation window
+    pair_evidence: dict[frozenset[str], list[str]] = {}
+
+    # Two alerts are related only when they have strong shared evidence inside
+    # the time window. Time/cluster/env proximity is intentionally weak.
     for a, b in combinations(firing, 2):
         time_diff = abs((a.fired_at - b.fired_at).total_seconds())
         if time_diff > window.total_seconds():
             continue
 
-        shares_service = a.service == b.service
-        shared_label_values = set(a.labels.values()) & set(b.labels.values())
-        shared_thread_hints = _thread_hints(a) & _thread_hints(b)
-        if shares_service or shared_label_values or shared_thread_hints:
+        score, evidence = _relation_score(a, b)
+        if score >= _STRONG_RELATION_THRESHOLD:
+            pair_evidence[frozenset({a.alert_id, b.alert_id})] = evidence
             union(a.alert_id, b.alert_id)
 
     # Group by cluster root
@@ -94,11 +98,18 @@ def correlate_alerts(input_data: CorrelateAlertsInput) -> CorrelateAlertsOutput:
         cluster_id = _short_hash(root)
         services = sorted({a.service for a in members})
         dominant = _dominant_severity([a.severity for a in members])
-        confidence = _confidence(members, window)
+        evidence = _cluster_evidence(members, pair_evidence)
+        confidence = _confidence(members, window, evidence)
         likely_cause = _infer_root_cause(members)
         human_context = _cluster_human_context(members)
         if human_context:
             confidence = min(1.0, round(confidence + 0.1, 2))
+            evidence.append("human thread context")
+        if confidence < 0.65 and len({alert.service for alert in members}) > 1:
+            likely_cause = (
+                f"Possible related symptoms across {', '.join(services)} "
+                "— missing dependency evidence"
+            )
 
         clusters.append(
             AlertCluster(
@@ -108,6 +119,9 @@ def correlate_alerts(input_data: CorrelateAlertsInput) -> CorrelateAlertsOutput:
                 dominant_severity=dominant,
                 likely_root_cause=likely_cause,
                 confidence=confidence,
+                confidence_level=_confidence_level(confidence),
+                evidence=sorted(set(evidence)),
+                missing_evidence=_missing_evidence(members, evidence),
                 human_context=human_context or None,
             )
         )
@@ -142,7 +156,56 @@ def _dominant_severity(severities: list[Severity]) -> Severity:
     return Severity.INFO
 
 
-def _confidence(members: list[Alert], window: timedelta) -> float:
+def _relation_score(a: Alert, b: Alert) -> tuple[float, list[str]]:
+    score = 0.03
+    evidence = ["within time window"]
+
+    if a.service == b.service:
+        score += 0.40
+        evidence.append("same service")
+
+    for key, label in (
+        ("deployment", "same deployment"),
+        ("workload", "same workload"),
+        ("pod", "same pod"),
+    ):
+        if _same_label(a, b, key):
+            score += 0.25
+            evidence.append(label)
+            break
+
+    shared_thread_hints = _thread_hints(a) & _thread_hints(b)
+    if shared_thread_hints:
+        score += 0.20
+        evidence.append("shared human/thread context")
+
+    if _same_label(a, b, "namespace"):
+        score += 0.08
+        evidence.append("same namespace")
+
+    if _same_label(a, b, "cluster") or _same_label(a, b, "environment") or _same_label(a, b, "env"):
+        score += 0.04
+        evidence.append("same cluster/environment")
+
+    return min(score, 1.0), evidence
+
+
+def _same_label(a: Alert, b: Alert, key: str) -> bool:
+    left = a.labels.get(key)
+    right = b.labels.get(key)
+    return bool(left and right and left == right)
+
+
+def _cluster_evidence(
+    members: list[Alert], pair_evidence: dict[frozenset[str], list[str]]
+) -> list[str]:
+    evidence: list[str] = []
+    for a, b in combinations(members, 2):
+        evidence.extend(pair_evidence.get(frozenset({a.alert_id, b.alert_id}), []))
+    return evidence or ["singleton cluster"]
+
+
+def _confidence(members: list[Alert], window: timedelta, evidence: list[str]) -> float:
     """
     Heuristic confidence score [0.0, 1.0] based on cluster size and
     how tightly alerts are grouped within the time window.
@@ -155,7 +218,40 @@ def _confidence(members: list[Alert], window: timedelta) -> float:
     tightness = 1.0 - min(span / window.total_seconds(), 1.0)
     size_factor = min(len(members) / 10.0, 1.0)
 
-    return round((tightness * 0.6 + size_factor * 0.4), 2)
+    evidence_factor = 0.0
+    if "same service" in evidence:
+        evidence_factor += 0.35
+    if any(item in evidence for item in ("same deployment", "same workload", "same pod")):
+        evidence_factor += 0.40
+    if "shared human/thread context" in evidence:
+        evidence_factor += 0.20
+    if "same namespace" in evidence:
+        evidence_factor += 0.08
+    if "same cluster/environment" in evidence:
+        evidence_factor += 0.04
+
+    return round(min(evidence_factor + tightness * 0.05 + size_factor * 0.07, 1.0), 2)
+
+
+def _confidence_level(confidence: float) -> str:
+    if confidence >= 0.85:
+        return "strong"
+    if confidence >= 0.65:
+        return "probable"
+    if confidence >= 0.45:
+        return "possible"
+    return "weak"
+
+
+def _missing_evidence(members: list[Alert], evidence: list[str]) -> list[str]:
+    if len({alert.service for alert in members}) <= 1:
+        return []
+    missing: list[str] = []
+    if "shared human/thread context" not in evidence:
+        missing.append("dependency, topology, trace, or human context linking services")
+    if not any(item in evidence for item in ("same deployment", "same workload", "same pod")):
+        missing.append("shared workload or deployment evidence")
+    return missing
 
 
 def _infer_root_cause(members: list[Alert]) -> str:
@@ -251,3 +347,6 @@ def _build_summary(total: int, clusters: list[AlertCluster], uncorrelated: list[
 
 def _short_hash(value: str) -> str:
     return hashlib.sha1(value.encode()).hexdigest()[:8]
+    confidence = _confidence(members, timedelta(minutes=60), _cluster_evidence(members, {}))
+    if confidence < 0.65 and len(set(services)) > 1:
+        return f"Possible related symptoms across {', '.join(services)} — missing dependency evidence"

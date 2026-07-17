@@ -140,8 +140,35 @@ async def test_upsert_knowledge_sends_document_id() -> None:
     assert body["type"] == "knowledge"
     assert body["source"] == "knowledge"
     assert body["document_id"] == "6a0542d0-7ccb-4733-bdc6-286f7bf9b88f"
+    assert body["text"].startswith("# IncidentFlow dev tools catalog\n\nCatalog text")
+    assert "markdown" in body["tags"]
     # Legacy field is still sent until all callers have migrated.
     assert body["incident_id"] == "6a0542d0-7ccb-4733-bdc6-286f7bf9b88f"
+
+
+@pytest.mark.asyncio
+async def test_upsert_knowledge_preserves_existing_markdown() -> None:
+    s = _make_settings()
+    captured: list[dict[str, Any]] = []
+    resp = _resp({"point_id": "p-4", "text_hash": "h-4", "type": "knowledge", "stored": True})
+
+    async def fake_post(url: str, **kwargs: Any) -> MagicMock:
+        captured.append(kwargs.get("json", {}))
+        return resp
+
+    markdown = "# Existing Title\n\n## Section\n\n- item"
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
+        await memory_upsert_knowledge(
+            s,
+            workspace_id="ws-1",
+            title="Different title",
+            text=markdown,
+            tags=["tool-review"],
+        )
+
+    body = captured[0]
+    assert body["text"] == markdown
+    assert body["tags"] == ["tool-review", "markdown"]
 
 
 @pytest.mark.asyncio

@@ -170,7 +170,7 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     mcp = create_mcp_server()
     tool_manager = mcp._tool_manager
     result = await tool_manager.call_tool("incidentflow_capabilities", {})
-    payload = json.loads(result)
+    payload = result if isinstance(result, dict) else json.loads(result)
 
     operational_names = EXPECTED_TOOL_NAMES - {
         "incidentflow_capabilities",
@@ -203,6 +203,14 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     memory_write = categories["semantic_memory_write"]["tools"]
     assert all(tool["write_memory_only"] for tool in memory_write)
     assert all(tool["read_only"] is False for tool in memory_write)
+    assert all("description" not in tool for tool in memory_write)
+
+    full_result = await tool_manager.call_tool(
+        "incidentflow_capabilities", {"response_mode": "full", "category": "semantic_memory_read"}
+    )
+    full_payload = full_result if isinstance(full_result, dict) else json.loads(full_result)
+    assert [category["id"] for category in full_payload["categories"]] == ["semantic_memory_read"]
+    assert "description" in full_payload["categories"][0]["tools"][0]
 
 
 def test_memory_tool_schemas_do_not_expose_workspace_id() -> None:
@@ -324,10 +332,41 @@ async def test_submission_risky_tool_inputs_are_structured() -> None:
 
     pods_schema = tools["k8s_list_pods"].inputSchema
     assert "namespace" in pods_schema["properties"]
+    assert tools["k8s_list_pods"].outputSchema["type"] == "object"
+
+    pod_schema = tools["k8s_get_pod"].inputSchema
+    assert pod_schema["properties"]["detail_level"]["enum"] == ["summary", "standard", "debug"]
+    assert tools["k8s_get_pod"].outputSchema["type"] == "object"
+
+    deployments_schema = tools["k8s_list_deployments"].inputSchema
+    assert deployments_schema["properties"]["limit"]["maximum"] == 200
+    assert tools["k8s_list_deployments"].outputSchema["type"] == "object"
+
+    services_schema = tools["k8s_list_services"].inputSchema
+    assert services_schema["properties"]["limit"]["maximum"] == 200
+    assert tools["k8s_list_services"].outputSchema["type"] == "object"
 
     logs_schema = tools["k8s_get_pod_logs"].inputSchema
     assert "namespace" in logs_schema["required"]
     assert "pod" in logs_schema["required"]
+    assert logs_schema["properties"]["tail_lines"]["maximum"] == 1000
+    assert tools["k8s_get_pod_logs"].outputSchema["type"] == "object"
+
+    unhealthy_schema = tools["k8s_show_unhealthy_pods"].inputSchema
+    assert "namespace" in unhealthy_schema["properties"]
+    assert tools["k8s_show_unhealthy_pods"].outputSchema["type"] == "object"
+
+    analyze_schema = tools["k8s_analyze_workload"].inputSchema
+    assert analyze_schema["properties"]["tail_lines"]["maximum"] == 1000
+    assert tools["k8s_analyze_workload"].outputSchema["type"] == "object"
+
+    describe_schema = tools["k8s_describe_pod"].inputSchema
+    assert describe_schema["properties"]["include_details"]["default"] is False
+    assert tools["k8s_describe_pod"].outputSchema["type"] == "object"
+
+    debug_schema = tools["k8s_debug_pod"].inputSchema
+    assert debug_schema["properties"]["tail_lines"]["maximum"] == 500
+    assert tools["k8s_debug_pod"].outputSchema["type"] == "object"
 
     workload_schema = tools["k8s_analyze_workload"].inputSchema
     assert workload_schema["properties"]["workload"]["type"] == "string"

@@ -51,6 +51,7 @@ class PlatformAPIMemoryClient:
         namespace: str | None = None,
         exclude_status: list[str] | None = None,
         include_text: bool = False,
+        response_mode: str = "compact",
         limit: int = 5,
         score_threshold: float | None = None,
     ) -> dict[str, Any]:
@@ -65,6 +66,9 @@ class PlatformAPIMemoryClient:
                 span.set_attribute("memory.types", ",".join(types))
 
             body: dict[str, Any] = {"workspace_id": workspace_id, "query": query, "limit": limit}
+            body["response_mode"] = (
+                response_mode if response_mode in {"compact", "full"} else "compact"
+            )
             if service:
                 body["service"] = service
             if types:
@@ -193,6 +197,7 @@ async def memory_search_similar_incidents(
     service: str | None = None,
     types: list[str] | None = None,
     limit: int = 5,
+    response_mode: str = "compact",
 ) -> dict[str, Any]:
     client = PlatformAPIMemoryClient(settings)
     try:
@@ -201,7 +206,8 @@ async def memory_search_similar_incidents(
             query=query,
             service=service,
             types=types,
-            include_text=True,
+            include_text=response_mode == "full",
+            response_mode=response_mode,
             limit=limit,
         )
         matches = result.get("matches", [])
@@ -224,6 +230,7 @@ async def memory_get_service_context(
     service: str,
     query: str | None = None,
     limit: int = 5,
+    response_mode: str = "compact",
 ) -> dict[str, Any]:
     client = PlatformAPIMemoryClient(settings)
     # Use service name as the query when no explicit query provided
@@ -233,7 +240,8 @@ async def memory_get_service_context(
             workspace_id=workspace_id,
             query=effective_query,
             service=service,
-            include_text=True,
+            include_text=response_mode == "full",
+            response_mode=response_mode,
             limit=limit,
             score_threshold=0.3,
         )
@@ -266,6 +274,7 @@ async def memory_find_runbook(
     namespace: str | None = None,
     tags: list[str] | None = None,
     limit: int = 3,
+    response_mode: str = "compact",
 ) -> dict[str, Any]:
     client = PlatformAPIMemoryClient(settings)
     try:
@@ -279,7 +288,8 @@ async def memory_find_runbook(
             tags=tags,
             types=["runbook"],
             exclude_status=["archived"],
-            include_text=True,
+            include_text=response_mode == "full",
+            response_mode=response_mode,
             limit=limit,
         )
         runbooks = result.get("matches", [])
@@ -290,7 +300,8 @@ async def memory_find_runbook(
                 query=query,
                 service=service,
                 types=["rca"],
-                include_text=True,
+                include_text=response_mode == "full",
+                response_mode=response_mode,
                 limit=limit,
             )
             runbooks = fallback.get("matches", [])

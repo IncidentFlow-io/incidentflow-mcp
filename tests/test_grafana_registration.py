@@ -46,5 +46,23 @@ def test_required_inputs_declared() -> None:
 
 async def test_server_registers_grafana_tools() -> None:
     mcp = create_mcp_server()
-    names = {tool.name for tool in await mcp.list_tools()}
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    names = set(tools)
     assert GRAFANA_TOOLS <= names
+
+    for name in GRAFANA_TOOLS:
+        assert tools[name].outputSchema["type"] == "object"
+
+    assert (
+        tools["grafana_get_dashboard"].inputSchema["properties"]["response_mode"]["enum"]
+        == ["compact", "full"]
+    )
+    assert tools["grafana_get_dashboard"].inputSchema["properties"]["panel_limit"]["maximum"] == 100
+    assert (
+        tools["grafana_metrics_query_range"].inputSchema["properties"]["max_points"]["maximum"]
+        == 1000
+    )
+    assert (
+        tools["analyze_dashboard_health"].inputSchema["properties"]["panel_limit"]["maximum"]
+        == 50
+    )

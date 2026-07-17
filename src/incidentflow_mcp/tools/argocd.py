@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -54,6 +54,73 @@ class ArgoCDOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+ResponseMode = Literal["compact", "full"]
+
+
+def _append_warning(payload: dict[str, Any], warning: str) -> None:
+    warnings = payload.setdefault("warnings", [])
+    if isinstance(warnings, list) and warning not in warnings:
+        warnings.append(warning)
+
+
+def _compact_history(history: Any, *, limit: int) -> tuple[list[Any], bool]:
+    if not isinstance(history, list):
+        return [], False
+    return history[:limit], len(history) > limit
+
+
+def _compact_operation(operation: Any, *, resource_limit: int = 10) -> Any:
+    if not isinstance(operation, dict):
+        return operation
+    compact = dict(operation)
+    resource_results = compact.get("resource_results")
+    if isinstance(resource_results, list) and len(resource_results) > resource_limit:
+        compact["resource_results"] = resource_results[:resource_limit]
+        compact["resource_results_returned"] = resource_limit
+        compact["resource_results_total"] = len(resource_results)
+        compact["resource_results_truncated"] = True
+    return compact
+
+
+def _compact_application_payload(payload: dict[str, Any], *, history_limit: int) -> dict[str, Any]:
+    compact = dict(payload)
+    application = compact.get("application")
+    if not isinstance(application, dict):
+        return compact
+
+    app = dict(application)
+    history, history_truncated = _compact_history(app.get("history"), limit=history_limit)
+    if "history" in app:
+        app["history"] = history
+        app["history_returned"] = len(history)
+        app["history_truncated"] = history_truncated
+        if history_truncated:
+            compact["truncated"] = True
+            _append_warning(compact, f"Application history trimmed to {history_limit} entries.")
+
+    if "operation" in app:
+        app["operation"] = _compact_operation(app["operation"])
+
+    compact["application"] = app
+    return compact
+
+
+def _compact_resources_payload(payload: dict[str, Any], *, resource_limit: int) -> dict[str, Any]:
+    compact = dict(payload)
+    resources = compact.get("resources")
+    if not isinstance(resources, list):
+        return compact
+
+    total = len(resources)
+    compact["resources"] = resources[:resource_limit]
+    compact["returned"] = min(total, resource_limit)
+    compact["total"] = compact.get("total", total)
+    if total > resource_limit:
+        compact["truncated"] = True
+        _append_warning(compact, f"Resource tree trimmed to {resource_limit} resources.")
+    return compact
+
+
 async def argocd_connection_health(
     client: ArgoCDReadClient, *, integration_id: str | None = None
 ) -> ArgoCDOutput:
@@ -86,19 +153,31 @@ async def argocd_list_applications(
 
 
 async def argocd_get_application(
-    client: ArgoCDReadClient, *, name: str, integration_id: str | None = None
+    client: ArgoCDReadClient,
+    *,
+    name: str,
+    integration_id: str | None = None,
+    response_mode: ResponseMode = "compact",
+    history_limit: int = 5,
 ) -> ArgoCDOutput:
-    return ArgoCDOutput.model_validate(
-        await client.get_application(name=name, integration_id=integration_id)
-    )
+    payload = await client.get_application(name=name, integration_id=integration_id)
+    if response_mode == "compact":
+        payload = _compact_application_payload(payload, history_limit=history_limit)
+    return ArgoCDOutput.model_validate(payload)
 
 
 async def argocd_get_application_resources(
-    client: ArgoCDReadClient, *, name: str, integration_id: str | None = None
+    client: ArgoCDReadClient,
+    *,
+    name: str,
+    integration_id: str | None = None,
+    limit: int = 50,
+    response_mode: ResponseMode = "compact",
 ) -> ArgoCDOutput:
-    return ArgoCDOutput.model_validate(
-        await client.get_application_resources(name=name, integration_id=integration_id)
-    )
+    payload = await client.get_application_resources(name=name, integration_id=integration_id)
+    if response_mode == "compact":
+        payload = _compact_resources_payload(payload, resource_limit=limit)
+    return ArgoCDOutput.model_validate(payload)
 
 
 async def argocd_get_sync_history(
@@ -140,8 +219,14 @@ async def argocd_find_recent_deployments(
 
 
 async def argocd_analyze_application(
-    client: ArgoCDReadClient, *, name: str, integration_id: str | None = None
+    client: ArgoCDReadClient,
+    *,
+    name: str,
+    integration_id: str | None = None,
+    response_mode: ResponseMode = "compact",
+    history_limit: int = 5,
 ) -> ArgoCDOutput:
-    return ArgoCDOutput.model_validate(
-        await client.analyze_application(name=name, integration_id=integration_id)
-    )
+    payload = await client.analyze_application(name=name, integration_id=integration_id)
+    if response_mode == "compact":
+        payload = _compact_application_payload(payload, history_limit=history_limit)
+    return ArgoCDOutput.model_validate(payload)

@@ -143,6 +143,16 @@ class DuplicateThreadFakeSlackClient(FakeSlackClient):
         return [first, second]
 
 
+class DuplicateAlertFakeSlackClient(FakeSlackClient):
+    async def conversation_history(self, *, channel_id: str, limit: int) -> list[dict[str, Any]]:
+        _ = channel_id, limit
+        first = dict(ROOT)
+        first["ts"] = "1710000000.000100"
+        second = dict(ROOT)
+        second["ts"] = "1710000060.000100"
+        return [first, second]
+
+
 class RepeatedUserFakeSlackClient(FakeSlackClient):
     async def thread_replies(
         self,
@@ -355,6 +365,7 @@ async def test_thread_fetch_rate_limit_warning_does_not_crash(
         limit=10,
         include_threads=True,
         thread_mode="full",
+        deduplicate=False,
     )
 
     assert result.alerts[0].thread is not None
@@ -371,10 +382,50 @@ async def test_full_mode_dedupes_thread_fetches(monkeypatch: pytest.MonkeyPatch)
         limit=10,
         include_threads=True,
         thread_mode="full",
+        deduplicate=False,
     )
 
     assert len(result.alerts) == 2
     assert FakeSlackClient.replies_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_alert_list_deduplicates_repeated_notifications(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", DuplicateAlertFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alerts(
+        token="x",
+        channel="#alerts",
+        limit=10,
+    )
+
+    assert result.parsed == 2
+    assert result.returned == 1
+    alert = result.alerts[0]
+    assert alert.fingerprint is not None
+    assert alert.occurrences == 2
+    assert alert.deduplicated is True
+    assert alert.first_seen == "2024-03-09T16:00:00.000100+00:00"
+    assert alert.last_seen == "2024-03-09T16:01:00.000100+00:00"
+
+
+@pytest.mark.asyncio
+async def test_alert_list_can_disable_deduplication(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", DuplicateAlertFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alerts(
+        token="x",
+        channel="#alerts",
+        limit=10,
+        deduplicate=False,
+    )
+
+    assert result.deduplicated is False
+    assert result.parsed == 2
+    assert result.returned == 2
+    assert [alert.occurrences for alert in result.alerts] == [1, 1]
 
 
 @pytest.mark.asyncio
