@@ -12,6 +12,7 @@ from incidentflow_mcp.tools.knowledge_tools import (
     memory_find_knowledge,
     memory_find_rca,
     memory_upsert_incident,
+    memory_upsert_knowledge,
     memory_upsert_runbook,
 )
 from incidentflow_mcp.tools.memory_tools import _group_matches, memory_consult
@@ -114,6 +115,33 @@ async def test_upsert_incident_requires_explicit_id() -> None:
     assert body["type"] == "incident"
     assert body["source"] == "incident_summary"
     assert body["incident_id"] == "INC-77"
+
+
+@pytest.mark.asyncio
+async def test_upsert_knowledge_sends_document_id() -> None:
+    s = _make_settings()
+    captured: list[dict[str, Any]] = []
+    resp = _resp({"point_id": "p-3", "text_hash": "h-3", "type": "knowledge", "stored": True})
+
+    async def fake_post(url: str, **kwargs: Any) -> MagicMock:
+        captured.append(kwargs.get("json", {}))
+        return resp
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
+        await memory_upsert_knowledge(
+            s,
+            workspace_id="ws-1",
+            knowledge_id="6a0542d0-7ccb-4733-bdc6-286f7bf9b88f",
+            title="IncidentFlow dev tools catalog",
+            text="Catalog text",
+        )
+
+    body = captured[0]
+    assert body["type"] == "knowledge"
+    assert body["source"] == "knowledge"
+    assert body["document_id"] == "6a0542d0-7ccb-4733-bdc6-286f7bf9b88f"
+    # Legacy field is still sent until all callers have migrated.
+    assert body["incident_id"] == "6a0542d0-7ccb-4733-bdc6-286f7bf9b88f"
 
 
 @pytest.mark.asyncio

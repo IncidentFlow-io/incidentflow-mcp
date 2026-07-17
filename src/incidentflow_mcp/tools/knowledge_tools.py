@@ -56,6 +56,7 @@ async def _upsert_doc(
         result = await client.upsert(
             workspace_id=workspace_id,
             incident_id=external_id,
+            document_id=external_id,
             source=_TYPE_TO_SOURCE.get(doc_type, doc_type),
             text=text,
             type=doc_type,
