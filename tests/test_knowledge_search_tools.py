@@ -62,6 +62,7 @@ async def test_platform_knowledge_client_search_uses_internal_endpoint() -> None
         "query": "checkout latency",
         "scope": "combined",
         "limit": 8,
+        "response_mode": "compact",
         "document_type": "rca",
         "service": "checkout-api",
         "environment": "production",
@@ -126,4 +127,5 @@ async def test_platform_knowledge_client_omits_workspace_for_public_scope() -> N
         "query": "install",
         "scope": "public",
         "limit": 5,
+        "response_mode": "compact",
     }

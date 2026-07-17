@@ -29,6 +29,7 @@ def test_registry_declares_argocd_tools() -> None:
         assert spec.annotations["readOnlyHint"] is True
         assert spec.annotations["openWorldHint"] is False
         assert spec.annotations["destructiveHint"] is False
+        assert spec.structured_output is True
 
 
 def test_required_inputs_declared() -> None:
@@ -45,5 +46,33 @@ def test_required_inputs_declared() -> None:
 
 async def test_server_registers_argocd_tools() -> None:
     mcp = create_mcp_server()
-    names = {tool.name for tool in await mcp.list_tools()}
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    names = set(tools)
     assert ARGOCD_TOOLS <= names
+
+    for name in ARGOCD_TOOLS:
+        assert tools[name].outputSchema["type"] == "object"
+
+    assert tools["argocd_list_applications"].inputSchema["properties"]["limit"]["maximum"] == 200
+    assert (
+        tools["argocd_find_recent_deployments"].inputSchema["properties"]["limit"]["maximum"]
+        == 200
+    )
+    assert tools["argocd_get_sync_history"].inputSchema["properties"]["limit"]["maximum"] == 100
+    assert tools["argocd_get_application"].inputSchema["properties"]["name"]["minLength"] == 1
+    assert (
+        tools["argocd_get_application"].inputSchema["properties"]["response_mode"]["enum"]
+        == ["compact", "full"]
+    )
+    assert (
+        tools["argocd_get_application"].inputSchema["properties"]["history_limit"]["maximum"]
+        == 20
+    )
+    assert (
+        tools["argocd_get_application_resources"].inputSchema["properties"]["limit"]["maximum"]
+        == 200
+    )
+    assert (
+        tools["argocd_analyze_application"].inputSchema["properties"]["history_limit"]["maximum"]
+        == 20
+    )

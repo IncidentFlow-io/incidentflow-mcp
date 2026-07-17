@@ -111,15 +111,27 @@ class TestCorrelateAlertsTimeWindow:
 
 
 class TestCorrelateAlertsLabelAffinity:
-    def test_shared_label_correlates_across_services(self) -> None:
+    def test_shared_workload_label_correlates_across_services(self) -> None:
         alerts = [
-            _alert("a1", "service-x", labels={"env": "prod"}),
-            _alert("a2", "service-y", labels={"env": "prod"}),
+            _alert("a1", "service-x", labels={"workload": "checkout"}),
+            _alert("a2", "service-y", labels={"workload": "checkout"}),
         ]
         result = correlate_alerts(
             CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
         )
         assert len(result.clusters) == 1
+        assert "same workload" in result.clusters[0].evidence
+
+    def test_same_environment_only_does_not_correlate_across_services(self) -> None:
+        alerts = [
+            _alert("a1", "checkout-api", labels={"env": "prod"}),
+            _alert("a2", "payments-db", labels={"env": "prod"}),
+        ]
+        result = correlate_alerts(
+            CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
+        )
+        assert result.clusters == []
+        assert set(result.uncorrelated_alert_ids) == {"a1", "a2"}
 
 
 class TestCorrelateAlertsMinClusterSize:
@@ -152,6 +164,29 @@ class TestCorrelateAlertsSeverity:
             CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
         )
         assert result.clusters[0].dominant_severity == Severity.CRITICAL
+
+    def test_warning_severity_is_accepted(self) -> None:
+        alerts = [
+            _alert("a1", "payments", severity=Severity.WARNING),
+            _alert("a2", "payments", severity=Severity.INFO),
+        ]
+        result = correlate_alerts(
+            CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
+        )
+        assert result.clusters[0].dominant_severity == Severity.WARNING
+
+    def test_cross_service_possible_cluster_does_not_claim_root_cause(self) -> None:
+        alerts = [
+            _alert("a1", "checkout-api", labels={"workload": "checkout"}),
+            _alert("a2", "auth-gateway", labels={"workload": "checkout"}),
+        ]
+        result = correlate_alerts(
+            CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
+        )
+        cluster = result.clusters[0]
+        assert cluster.confidence_level in {"possible", "probable"}
+        assert "missing dependency evidence" in cluster.likely_root_cause
+        assert cluster.missing_evidence
 
 
 class TestCorrelateAlertsResolvedAlerts:

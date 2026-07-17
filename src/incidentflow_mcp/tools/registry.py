@@ -61,8 +61,9 @@ _READ_ONLY_LOCAL_JUSTIFICATION = (
 
 _K8S_READ_ONLY_JUSTIFICATION = (
     "Read-only observability tool: it reads Kubernetes resource status and metadata from "
-    "the cluster API and returns it as structured data. It is limited to reading and "
-    "cannot make any changes."
+    "the cluster API and returns it as structured data. It does not exec into containers, "
+    "run shell commands, restart, scale, patch, delete, update resources, or escalate "
+    "privileges."
 )
 
 _SLACK_READ_ONLY_JUSTIFICATION = (
@@ -135,7 +136,7 @@ def _alert_schema() -> dict[str, Any]:
             "service": {"type": "string", "description": "Affected service name."},
             "severity": {
                 "type": "string",
-                "enum": ["critical", "high", "medium", "low", "info"],
+                "enum": ["critical", "high", "medium", "warning", "low", "info"],
             },
             "status": {"type": "string", "enum": ["firing", "resolved", "pending"]},
             "fired_at": {
@@ -234,10 +235,25 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         input_schema={
             "type": "object",
-            "properties": {},
+            "properties": {
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact omits long descriptions; full includes full metadata.",
+                },
+                "category": {
+                    "type": "string",
+                    "description": (
+                        "Optional category id filter, e.g. kubernetes, grafana_prometheus, "
+                        "semantic_memory_read, or semantic_memory_write."
+                    ),
+                },
+            },
             "required": [],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="incidentflow_version",
@@ -253,6 +269,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": [],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="incidentflow_auth_status",
@@ -268,6 +285,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "additionalProperties": False,
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="incidentflow_integrations_status",
@@ -283,6 +301,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "additionalProperties": False,
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="incidentflow_docs_search",
@@ -309,6 +328,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": ["query"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="incidentflow_knowledge_search",
@@ -369,6 +389,12 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "type": "string",
                     "description": "Optional workspace environment filter.",
                 },
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact returns excerpts only; full includes complete content.",
+                },
                 "limit": {
                     "type": "integer",
                     "default": 8,
@@ -379,6 +405,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": ["query"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="incident_summary",
@@ -445,6 +472,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": [],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="correlate_alerts",
@@ -503,6 +531,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             },
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="external_status_check",
@@ -569,6 +598,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": [],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="slack_alerts_list",
@@ -576,7 +606,8 @@ _TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Reads recent alert messages from a configured Slack alert channel and parses "
             "Grafana or Alertmanager-style payloads into structured incident context with "
-            "status, labels, summaries, timestamps, and Slack permalinks. "
+            "status, labels, summaries, timestamps, Slack permalinks, stable fingerprints, "
+            "and occurrence counts. Repeated alert notifications are deduplicated by default. "
             f"{_SLACK_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
@@ -625,6 +656,14 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "default": False,
                     "description": "Include Slack channel join/leave and other system messages.",
                 },
+                "deduplicate": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Group repeated notifications for the same alert fingerprint and "
+                        "return first_seen, last_seen, and occurrences."
+                    ),
+                },
                 "workspace_id": {
                     "type": "string",
                     "description": (
@@ -636,6 +675,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": [],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="slack_alert_thread_get",
@@ -688,6 +728,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": ["channel_id", "message_ts"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="incident_thread_summary",
@@ -726,6 +767,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": ["channel_id", "thread_ts"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_connection_health",
@@ -737,6 +779,7 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         input_schema=_k8s_schema(),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_cluster_overview",
@@ -749,6 +792,7 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         input_schema=_k8s_schema(),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_namespace_overview",
@@ -760,6 +804,7 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}, required=["namespace"]),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_rbac_check",
@@ -771,6 +816,7 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         input_schema=_k8s_schema(),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_agent_status",
@@ -782,6 +828,7 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         input_schema=_k8s_schema(),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_list_namespaces",
@@ -792,6 +839,7 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         input_schema=_k8s_schema(),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_list_pods",
@@ -830,6 +878,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             }
         ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_get_pod",
@@ -872,6 +921,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             required=["namespace", "pod"],
         ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_get_pod_logs",
@@ -918,6 +968,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": ["namespace", "pod"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_list_events",
@@ -945,6 +996,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             }
         ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_list_deployments",
@@ -954,8 +1006,20 @@ _TOOL_SPECS: list[ToolSpec] = [
             "Kubernetes Agent and returns current rollout and availability metadata. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
-        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        input_schema=_k8s_schema(
+            {
+                "namespace": {"type": "string"},
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200,
+                    "description": "Maximum number of deployments to return.",
+                },
+            }
+        ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_list_services",
@@ -965,8 +1029,20 @@ _TOOL_SPECS: list[ToolSpec] = [
             "Kubernetes Agent and returns service type, ports, selectors, and metadata. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
-        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        input_schema=_k8s_schema(
+            {
+                "namespace": {"type": "string"},
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200,
+                    "description": "Maximum number of services to return.",
+                },
+            }
+        ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_get_rollout_status",
@@ -991,6 +1067,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             required=["namespace"],
         ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_show_unhealthy_pods",
@@ -1004,6 +1081,7 @@ _TOOL_SPECS: list[ToolSpec] = [
         ),
         input_schema=_k8s_schema({"namespace": {"type": "string"}}),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_analyze_workload",
@@ -1029,6 +1107,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             required=["namespace", "workload"],
         ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_describe_pod",
@@ -1047,10 +1126,19 @@ _TOOL_SPECS: list[ToolSpec] = [
             {
                 "namespace": {"type": "string"},
                 "pod": {"type": "string"},
+                "include_details": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Include lower-level pod details such as node, pod IP, probes, "
+                        "and resource requests/limits. Off by default for compact output."
+                    ),
+                },
             },
             required=["namespace", "pod"],
         ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="k8s_debug_pod",
@@ -1079,6 +1167,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             required=["namespace", "pod"],
         ),
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="grafana_list_dashboards",
@@ -1108,14 +1197,16 @@ _TOOL_SPECS: list[ToolSpec] = [
             "idempotentHint": True,
             "openWorldHint": False,
         },
+        structured_output=True,
     ),
     ToolSpec(
         name="grafana_get_dashboard",
         title="Get Grafana Dashboard",
         description=(
             "Use this when you already have an allow-listed Grafana dashboard uid and need "
-            "its dashboard metadata, panels, and datasource references. Read-only; the "
-            "dashboard must be approved for the workspace in platform-api."
+            "its dashboard metadata, panels, and datasource references. Defaults to "
+            "response_mode=compact to keep panel payloads bounded. Read-only; the dashboard "
+            "must be approved for the workspace in platform-api."
         ),
         input_schema={
             "type": "object",
@@ -1125,6 +1216,19 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
                 },
                 "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact trims dashboard panels; full returns API payload.",
+                },
+                "panel_limit": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Maximum panels returned in compact mode.",
+                },
             },
             "required": ["dashboard_uid"],
         },
@@ -1134,6 +1238,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "idempotentHint": True,
             "openWorldHint": False,
         },
+        structured_output=True,
     ),
     ToolSpec(
         name="grafana_extract_panel_queries",
@@ -1161,6 +1266,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "idempotentHint": True,
             "openWorldHint": False,
         },
+        structured_output=True,
     ),
     ToolSpec(
         name="grafana_metrics_query",
@@ -1189,6 +1295,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "idempotentHint": True,
             "openWorldHint": False,
         },
+        structured_output=True,
     ),
     ToolSpec(
         name="grafana_metrics_query_range",
@@ -1196,7 +1303,8 @@ _TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Use this when you need a PromQL time series over a bounded window from an "
             "approved Grafana datasource. Runs a range query through platform-api with "
-            "server-side query limits, workspace policy, and label sanitization."
+            "server-side query limits, workspace policy, and label sanitization. Defaults "
+            "to response_mode=compact with bounded series and samples."
         ),
         input_schema={
             "type": "object",
@@ -1207,6 +1315,26 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "end": {"type": "string", "description": "Range end (RFC3339/unix/now)."},
                 "step": {"type": "string", "description": "Step, e.g. '30s' or seconds."},
                 "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact trims series/samples; full returns API payload.",
+                },
+                "max_series": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Maximum metric series in compact mode.",
+                },
+                "max_points": {
+                    "type": "integer",
+                    "default": 120,
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "Maximum samples per series in compact mode.",
+                },
             },
             "required": ["datasource_uid", "query", "start", "end", "step"],
         },
@@ -1216,6 +1344,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "idempotentHint": True,
             "openWorldHint": False,
         },
+        structured_output=True,
     ),
     ToolSpec(
         name="analyze_dashboard_health",
@@ -1223,7 +1352,8 @@ _TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Use this when you need a read-only health summary for an allow-listed Grafana "
             "dashboard over a time window. Extracts panel PromQL, runs guarded range queries, "
-            "and returns per-panel series, anomaly flags, and a concise summary."
+            "and returns per-panel series, anomaly flags, and a concise summary. Defaults "
+            "to response_mode=compact with bounded panels, series, and samples."
         ),
         input_schema={
             "type": "object",
@@ -1244,6 +1374,33 @@ _TOOL_SPECS: list[ToolSpec] = [
                 },
                 "step": {"type": "string", "description": "Optional step; server picks a default."},
                 "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact trims panel series; full returns API payload.",
+                },
+                "panel_limit": {
+                    "type": "integer",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "Maximum panels returned in compact mode.",
+                },
+                "max_series": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Maximum series per panel in compact mode.",
+                },
+                "max_points": {
+                    "type": "integer",
+                    "default": 120,
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "Maximum samples per series in compact mode.",
+                },
             },
             "required": ["dashboard_uid"],
         },
@@ -1253,6 +1410,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "idempotentHint": True,
             "openWorldHint": False,
         },
+        structured_output=True,
     ),
     ToolSpec(
         name="grafana_get_panel_view",
@@ -1338,6 +1496,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": [],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="argocd_list_applications",
@@ -1365,40 +1524,72 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": [],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="argocd_get_application",
         title="Get Argo CD Application",
         description=(
             "Returns normalized read-only Argo CD application details, including project, "
-            "destination, sources, health, sync, recent history, and last operation summary."
+            "destination, sources, health, sync, recent history, and last operation summary. "
+            "Defaults to response_mode=compact so long histories and operation resource "
+            "results stay safe for chat context; use response_mode=full for raw diagnostics."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Argo CD application name."},
                 "integration_id": {"type": "string", "description": "Optional integration id."},
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact trims large nested lists; full returns API payload.",
+                },
+                "history_limit": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "Maximum history entries in compact mode.",
+                },
             },
             "required": ["name"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="argocd_get_application_resources",
         title="Get Argo CD Application Resources",
         description=(
             "Returns normalized resource tree metadata for an Argo CD application. Full "
-            "Kubernetes manifests and Secret data are intentionally omitted."
+            "Kubernetes manifests and Secret data are intentionally omitted. Defaults to "
+            "response_mode=compact with a bounded resource list."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Argo CD application name."},
                 "integration_id": {"type": "string", "description": "Optional integration id."},
+                "limit": {
+                    "type": "integer",
+                    "default": 50,
+                    "minimum": 1,
+                    "maximum": 200,
+                    "description": "Maximum resources returned in compact mode.",
+                },
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact trims large resource trees; full returns API payload.",
+                },
             },
             "required": ["name"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="argocd_get_sync_history",
@@ -1417,6 +1608,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": ["name"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="argocd_get_last_operation",
@@ -1434,6 +1626,7 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": ["name"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="argocd_find_recent_deployments",
@@ -1453,23 +1646,39 @@ _TOOL_SPECS: list[ToolSpec] = [
             "required": [],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
     ToolSpec(
         name="argocd_analyze_application",
         title="Analyze Argo CD Application",
         description=(
             "Builds a compact read-only health and sync analysis for one Argo CD application "
-            "from application status, last operation, history, and resource tree metadata."
+            "from application status, last operation, history, and resource tree metadata. "
+            "Defaults to compact response mode to bound embedded history and operation results."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Argo CD application name."},
                 "integration_id": {"type": "string", "description": "Optional integration id."},
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact trims large nested lists; full returns API payload.",
+                },
+                "history_limit": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "Maximum history entries in compact mode.",
+                },
             },
             "required": ["name"],
         },
         annotations=_read_only_annotations(),
+        structured_output=True,
     ),
 ]
 
@@ -1527,10 +1736,19 @@ _TOOL_SPECS.extend(
                         "maximum": 20,
                         "description": "Maximum number of similar incidents to return.",
                     },
+                    "response_mode": {
+                        "type": "string",
+                        "enum": ["compact", "full"],
+                        "default": "compact",
+                        "description": (
+                            "compact returns summaries only; full includes complete text."
+                        ),
+                    },
                 },
                 "required": ["query"],
             },
             annotations=_read_only_annotations(),
+            structured_output=True,
         ),
         ToolSpec(
             name="memory_get_service_context",
@@ -1561,10 +1779,19 @@ _TOOL_SPECS.extend(
                         "minimum": 1,
                         "maximum": 20,
                     },
+                    "response_mode": {
+                        "type": "string",
+                        "enum": ["compact", "full"],
+                        "default": "compact",
+                        "description": (
+                            "compact returns summaries only; full includes complete text."
+                        ),
+                    },
                 },
                 "required": ["service"],
             },
             annotations=_read_only_annotations(),
+            structured_output=True,
         ),
         ToolSpec(
             name="memory_find_runbook",
@@ -1602,10 +1829,19 @@ _TOOL_SPECS.extend(
                         "minimum": 1,
                         "maximum": 10,
                     },
+                    "response_mode": {
+                        "type": "string",
+                        "enum": ["compact", "full"],
+                        "default": "compact",
+                        "description": (
+                            "compact returns summaries only; full includes complete text."
+                        ),
+                    },
                 },
                 "required": ["query"],
             },
             annotations=_read_only_annotations(),
+            structured_output=True,
         ),
     ]
 )

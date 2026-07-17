@@ -32,6 +32,37 @@ def _slugify(text: str, *, prefix: str) -> str:
     return f"{prefix}-{slug}"
 
 
+def _looks_like_markdown(text: str) -> bool:
+    stripped = text.lstrip()
+    return bool(
+        stripped.startswith("# ")
+        or stripped.startswith("## ")
+        or stripped.startswith("```")
+        or re.search(r"(?m)^\s*[-*]\s+\S", stripped)
+        or re.search(r"(?m)^\s*\d+\.\s+\S", stripped)
+    )
+
+
+def _normalize_knowledge_markdown(*, title: str, text: str) -> str:
+    normalized = text.strip()
+    if not normalized or _looks_like_markdown(normalized):
+        return normalized
+
+    paragraphs = [
+        " ".join(line.strip() for line in block.splitlines() if line.strip())
+        for block in re.split(r"\n\s*\n", normalized)
+    ]
+    body = "\n\n".join(paragraph for paragraph in paragraphs if paragraph)
+    return f"# {title.strip() or 'Knowledge'}\n\n{body}"
+
+
+def _ensure_markdown_tag(tags: list[str] | None) -> list[str]:
+    ordered = list(tags or [])
+    if "markdown" not in ordered:
+        ordered.append("markdown")
+    return ordered
+
+
 async def _upsert_doc(
     settings: Settings,
     *,
@@ -206,17 +237,18 @@ async def memory_upsert_knowledge(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     external_id = knowledge_id or _slugify(title, prefix="knowledge")
+    markdown_text = _normalize_knowledge_markdown(title=title, text=text)
     return await _upsert_doc(
         settings,
         doc_type="knowledge",
         workspace_id=workspace_id,
         external_id=external_id,
         title=title,
-        text=text,
+        text=markdown_text,
         service=service,
         cluster=cluster,
         namespace=namespace,
-        tags=tags,
+        tags=_ensure_markdown_tag(tags),
         dry_run=dry_run,
     )
 

@@ -827,7 +827,7 @@ def test_normalize_polled_incident_summary_job_terminal_returns_completed_payloa
         job={
             "status": "succeeded",
             "result": {"title": "DB outage", "severity": "sev1"},
-            "artifact_refs": ["artifact_1"],
+            "artifact_refs": ["artifact_1", "mock_ref"],
             "usage": {"tokens": 42},
             "updated_at": "2026-07-08T18:00:00Z",
         },
@@ -842,6 +842,44 @@ def test_normalize_polled_incident_summary_job_terminal_returns_completed_payloa
     assert payload["artifact_refs"] == ["artifact_1"]
     assert payload["usage"] == {"tokens": 42}
     assert payload["updated_at"] == "2026-07-08T18:00:00Z"
+
+
+def test_normalize_polled_incident_summary_job_rejects_external_status_result() -> None:
+    output = _normalize_polled_incident_summary_job(
+        job_id="sum_wrong",
+        job={
+            "status": "succeeded",
+            "result": {
+                "action": "fetched_external_status",
+                "external_status": [{"provider": "github"}],
+            },
+            "artifact_refs": ["mock_ref"],
+        },
+        poll_after_seconds=2,
+    )
+    payload = json.loads(output)
+
+    assert payload["status"] == "failed"
+    assert payload["error"]["code"] == "JOB_OPERATION_MISMATCH"
+    assert "result" not in payload
+    assert "artifact_refs" not in payload
+
+
+def test_normalize_polled_incident_summary_job_rejects_wrong_job_type() -> None:
+    output = _normalize_polled_incident_summary_job(
+        job_id="sum_wrong_type",
+        job={
+            "status": "succeeded",
+            "job_type": "alert.group.summary.generate",
+            "result": {"title": "Should not leak"},
+        },
+        poll_after_seconds=2,
+    )
+    payload = json.loads(output)
+
+    assert payload["status"] == "failed"
+    assert payload["error"]["expected_job_type"] == "incident.summary.generate"
+    assert "Should not leak" not in output
 
 
 def test_normalize_polled_incident_summary_job_failed_returns_error() -> None:

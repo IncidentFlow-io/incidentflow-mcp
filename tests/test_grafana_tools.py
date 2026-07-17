@@ -130,6 +130,31 @@ class TestGetDashboard:
         assert dumped["schemaVersion"] == 39
         assert client.calls == [("get_dashboard", {"dashboard_uid": "dns"})]
 
+    async def test_compact_mode_trims_dashboard_panels(self) -> None:
+        client = FakeClient(
+            get_dashboard={
+                "uid": "dns",
+                "title": "DNS",
+                "dashboard": {
+                    "uid": "dns",
+                    "title": "DNS",
+                    "panels": [
+                        {"id": 1, "title": "A", "type": "timeseries", "gridPos": {"x": 0}},
+                        {"id": 2, "title": "B", "type": "stat", "gridPos": {"x": 1}},
+                    ],
+                },
+            }
+        )
+
+        out = await grafana_get_dashboard(client, dashboard_uid="dns", panel_limit=1)
+        payload = out.model_dump()
+
+        assert payload["truncated"] is True
+        assert payload["dashboard"]["panels_returned"] == 1
+        assert payload["dashboard"]["panels_total"] == 2
+        assert payload["dashboard"]["panels"][0] == {"id": 1, "title": "A", "type": "timeseries"}
+        assert "Dashboard panels trimmed to 1." in payload["warnings"]
+
 
 class TestExtractQueries:
     async def test_maps_queries(self) -> None:
@@ -182,6 +207,47 @@ class TestMetricsQuery:
         assert out.result_type == "matrix"
         assert client.calls[0][1]["step"] == "60s"
 
+    async def test_range_query_compact_mode_trims_series_and_samples(self) -> None:
+        client = FakeClient(
+            query_range={
+                "datasource_uid": "ds1",
+                "query": "up",
+                "result_type": "matrix",
+                "series": [
+                    {
+                        "metric": {"job": "a"},
+                        "samples": [
+                            {"timestamp": 1.0, "value": 1.0},
+                            {"timestamp": 2.0, "value": 2.0},
+                        ],
+                    },
+                    {
+                        "metric": {"job": "b"},
+                        "samples": [{"timestamp": 1.0, "value": 1.0}],
+                    },
+                ],
+            }
+        )
+
+        out = await grafana_metrics_query_range(
+            client,
+            datasource_uid="ds1",
+            query="up",
+            start="now-6h",
+            end="now",
+            step="60s",
+            max_series=1,
+            max_points=1,
+        )
+        payload = out.model_dump()
+
+        assert payload["truncated"] is True
+        assert payload["series_returned"] == 1
+        assert payload["series_total"] == 2
+        assert len(payload["series"]) == 1
+        assert payload["series"][0]["samples"][0]["timestamp"] == 2.0
+        assert payload["series"][0]["samples_truncated"] is True
+
 
 class TestAnalyze:
     async def test_analyze_maps_panels_and_hints(self) -> None:
@@ -229,6 +295,48 @@ class TestAnalyze:
         )
         # Tools serialize via model_dump_json in the server layer.
         assert '"dashboard_uid":"dns"' in out.model_dump_json()
+
+    async def test_analyze_compact_mode_trims_panels_series_and_samples(self) -> None:
+        client = FakeClient(
+            analyze={
+                "dashboard_uid": "dns",
+                "panels": [
+                    {
+                        "panel_title": "A",
+                        "series": [
+                            {
+                                "metric": {"job": "a"},
+                                "samples": [
+                                    {"timestamp": 1.0, "value": 1.0},
+                                    {"timestamp": 2.0, "value": 2.0},
+                                ],
+                            },
+                            {
+                                "metric": {"job": "b"},
+                                "samples": [{"timestamp": 1.0, "value": 1.0}],
+                            },
+                        ],
+                    },
+                    {"panel_title": "B", "series": []},
+                ],
+            }
+        )
+
+        out = await analyze_dashboard_health(
+            client,
+            dashboard_uid="dns",
+            panel_limit=1,
+            max_series=1,
+            max_points=1,
+        )
+        payload = out.model_dump()
+
+        assert payload["truncated"] is True
+        assert payload["panels_returned"] == 1
+        assert payload["panels_total"] == 2
+        assert payload["panels"][0]["series_returned"] == 1
+        assert payload["panels"][0]["series_total"] == 2
+        assert payload["panels"][0]["series"][0]["samples_truncated"] is True
 
 
 class TestPanelView:

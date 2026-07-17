@@ -394,7 +394,7 @@ async def test_argocd_tool_returns_standard_not_connected_response(
     _set_context()
 
     result = await create_mcp_server()._tool_manager.call_tool("argocd_connection_health", {})
-    payload = json.loads(result)
+    payload = result if isinstance(result, dict) else json.loads(result)
 
     assert payload["ok"] is False
     assert payload["code"] == "INTEGRATION_NOT_CONNECTED"
