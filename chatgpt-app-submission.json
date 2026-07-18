@@ -20,7 +20,7 @@
         "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
       }
     },
-    "incidentflow_version": {
+    "mcp_version": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,

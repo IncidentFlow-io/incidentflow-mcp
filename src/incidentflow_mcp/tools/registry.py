@@ -256,11 +256,13 @@ _TOOL_SPECS: list[ToolSpec] = [
         structured_output=True,
     ),
     ToolSpec(
-        name="incidentflow_version",
-        title="Show IncidentFlow MCP Version",
+        name="mcp_version",
+        title="Show MCP Server Version",
         description=(
-            "Returns IncidentFlow MCP server identity, release build metadata, deployment "
-            "environment, registered tool counts, and a short server description. "
+            "Returns the IncidentFlow MCP server version, release tag, build commit, "
+            "container image provenance, deployment environment, registered tool counts, "
+            "and server identity. Use this to verify which MCP build is currently serving "
+            "tools after a deployment. "
             f"{_READ_ONLY_LOCAL_JUSTIFICATION}"
         ),
         input_schema={
