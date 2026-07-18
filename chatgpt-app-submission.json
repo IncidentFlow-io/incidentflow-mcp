@@ -56,18 +56,6 @@
         "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
       }
     },
-    "incidentflow_docs_search": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool retrieves or computes operational information and returns structured IncidentFlow context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
     "external_status_check": {
       "annotations": {
         "readOnlyHint": true,
@@ -392,102 +380,6 @@
         "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
       }
     },
-    "memory_search_similar_incidents": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool retrieves or computes operational information and returns structured IncidentFlow context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
-    "memory_get_service_context": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool retrieves or computes operational information and returns structured IncidentFlow context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
-    "memory_find_runbook": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool retrieves or computes operational information and returns structured IncidentFlow context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
-    "memory_upsert_runbook": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool writes only to IncidentFlow semantic memory so future incident investigations can retrieve operational context; it does not modify Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
-    "memory_upsert_rca": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool writes only to IncidentFlow semantic memory so future incident investigations can retrieve operational context; it does not modify Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
-    "memory_upsert_postmortem": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool writes only to IncidentFlow semantic memory so future incident investigations can retrieve operational context; it does not modify Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
-    "memory_upsert_knowledge": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool writes only to IncidentFlow semantic memory so future incident investigations can retrieve operational context; it does not modify Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
-    "memory_upsert_incident": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool writes only to IncidentFlow semantic memory so future incident investigations can retrieve operational context; it does not modify Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
     "argocd_connection_health": {
       "annotations": {
         "readOnlyHint": true,
@@ -620,15 +512,51 @@
         "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
       }
     },
-    "incidentflow_knowledge_search": {
+    "public_knowledge_search": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "This tool retrieves or computes operational information and returns structured IncidentFlow context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
+        "read_only_justification": "This tool retrieves IncidentFlow knowledge and returns structured context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
+        "open_world_justification": "This tool is limited to public IncidentFlow knowledge or the connected IncidentFlow workspace and does not take actions outside those boundaries.",
+        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
+      }
+    },
+    "private_knowledge_search": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "This tool retrieves IncidentFlow knowledge and returns structured context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
+        "open_world_justification": "This tool is limited to public IncidentFlow knowledge or the connected IncidentFlow workspace and does not take actions outside those boundaries.",
+        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
+      }
+    },
+    "knowledge_get": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "This tool retrieves IncidentFlow knowledge and returns structured context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
+        "open_world_justification": "This tool is limited to public IncidentFlow knowledge or the connected IncidentFlow workspace and does not take actions outside those boundaries.",
+        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
+      }
+    },
+    "knowledge_upsert": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "This tool writes only to IncidentFlow semantic memory so future knowledge searches can retrieve operational context; it does not modify Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
+        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace and IncidentFlow semantic memory and does not take actions outside those boundaries.",
         "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
       }
     }

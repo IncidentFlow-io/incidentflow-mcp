@@ -118,6 +118,9 @@ async def _upsert_doc(
             "type": doc_type,
             "id": external_id,
             "title": title,
+            "operation": result.get("operation"),
+            "created": result.get("created"),
+            "updated": result.get("updated"),
             "point_id": result.get("point_id"),
             "text_hash": result.get("text_hash"),
         }
@@ -283,6 +286,102 @@ async def memory_upsert_incident(
         started_at=started_at,
         tags=tags,
         dry_run=dry_run,
+    )
+
+
+async def knowledge_upsert(
+    settings: Settings,
+    workspace_id: str,
+    document_type: str,
+    title: str,
+    text: str,
+    id: str | None = None,
+    service: str | None = None,
+    cluster: str | None = None,
+    namespace: str | None = None,
+    severity: str | None = None,
+    status: str | None = None,
+    started_at: str | None = None,
+    tags: list[str] | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    doc_type = document_type.strip().lower()
+    if doc_type == "knowledge":
+        return await memory_upsert_knowledge(
+            settings=settings,
+            workspace_id=workspace_id,
+            title=title,
+            text=text,
+            knowledge_id=id,
+            service=service,
+            cluster=cluster,
+            namespace=namespace,
+            tags=tags,
+            dry_run=dry_run,
+        )
+    if doc_type == "runbook":
+        return await memory_upsert_runbook(
+            settings=settings,
+            workspace_id=workspace_id,
+            title=title,
+            text=text,
+            runbook_id=id,
+            service=service,
+            cluster=cluster,
+            namespace=namespace,
+            severity=severity,
+            tags=tags,
+            status=status or "active",
+            dry_run=dry_run,
+        )
+    if doc_type == "rca":
+        return await memory_upsert_rca(
+            settings=settings,
+            workspace_id=workspace_id,
+            title=title,
+            text=text,
+            incident_id=id,
+            service=service,
+            cluster=cluster,
+            namespace=namespace,
+            severity=severity,
+            tags=tags,
+            dry_run=dry_run,
+        )
+    if doc_type == "postmortem":
+        return await memory_upsert_postmortem(
+            settings=settings,
+            workspace_id=workspace_id,
+            title=title,
+            text=text,
+            incident_id=id,
+            service=service,
+            cluster=cluster,
+            namespace=namespace,
+            severity=severity,
+            tags=tags,
+            dry_run=dry_run,
+        )
+    if doc_type == "incident":
+        if not id:
+            raise ValueError("id is required when document_type is 'incident'")
+        return await memory_upsert_incident(
+            settings=settings,
+            workspace_id=workspace_id,
+            incident_id=id,
+            title=title,
+            text=text,
+            service=service,
+            cluster=cluster,
+            namespace=namespace,
+            severity=severity,
+            status=status,
+            started_at=started_at,
+            tags=tags,
+            dry_run=dry_run,
+        )
+    raise ValueError(
+        "document_type must be one of: knowledge, runbook, rca, postmortem, incident"
     )
 
 

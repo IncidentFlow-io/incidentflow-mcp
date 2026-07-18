@@ -3,6 +3,33 @@
 This runbook covers the workspace-aware IncidentFlow MCP status tools and the
 integration metrics added across `incidentflow-mcp` and `platform-api`.
 
+## IncidentFlow Tool Review - Auth Status Contract Improvements
+
+Use `incidentflow_auth_status` as the canonical quick check for the active MCP
+principal and workspace scope. The response contract should stay intentionally
+small, safe to paste into support threads, and aligned with the runtime tool
+registry.
+
+Contract expectations:
+
+- Always include `authenticated`, `authMethod`, `client`, `user`, `workspace`,
+  `permissions`, `connectedIntegrations`, `availableToolGroups`, and
+  `environment`.
+- Include `workspace.id` in addition to `workspace.slug`, `workspace.name`, and
+  `workspace.role` so support can distinguish workspaces with similar names.
+- Use `connectedIntegrations` only for workspace-backed integrations with
+  `status="connected"` and `source="workspace"`.
+- Use `availableToolGroups` for the effective MCP surface visible to the
+  principal. It always starts with `platform` and then includes connected
+  integration groups, including development fallback groups when active.
+- Keep the tool read-only and never return access tokens, refresh tokens,
+  cookies, raw OAuth claims, authorization headers, or provider credentials.
+
+When reviewing docs or client examples, prefer the live
+`incidentflow_capabilities` inventory over stale generated docs or cached
+submission metadata. The runtime inventory is the source of truth for which
+tools are currently exposed.
+
 ## MCP Tools
 
 ### `incidentflow_auth_status`
@@ -57,15 +84,36 @@ Expected shape:
 ```json
 {
   "authenticated": true,
-  "authMethod": "api_token",
+  "authMethod": "oauth",
+  "client": {
+    "name": "OAuth MCP client",
+    "type": "mcp"
+  },
   "user": {
-    "email": null
+    "email": "demo@example.com"
   },
   "workspace": {
-    "name": "demo",
+    "id": "ws_123",
     "slug": "demo",
+    "name": "Demo Workspace",
     "role": "owner"
   },
+  "permissions": [
+    "workspace.read",
+    "integrations.read",
+    "integrations.manage"
+  ],
+  "connectedIntegrations": [
+    "kubernetes",
+    "grafana",
+    "argocd"
+  ],
+  "availableToolGroups": [
+    "platform",
+    "kubernetes",
+    "grafana",
+    "argocd"
+  ],
   "environment": "dev"
 }
 ```

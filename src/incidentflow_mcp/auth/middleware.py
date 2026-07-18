@@ -18,6 +18,7 @@ from incidentflow_mcp.auth.oauth import validate_oauth_access_token
 from incidentflow_mcp.auth.repository import get_token_repository
 from incidentflow_mcp.auth.tokens import parse_token_id, verify_token
 from incidentflow_mcp.config import get_settings
+from incidentflow_mcp.observability.metrics import mcp_auth_failures_total, mcp_auth_success_total
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,50 @@ def _required_scope_for_request(request: Request) -> str | None:
     return None
 
 
+def _record_auth_failure(reason: str) -> None:
+    mcp_auth_failures_total.labels(reason=reason).inc()
+
+
+def _log_auth_failure(request: Request, *, reason: str) -> None:
+    logger.warning(
+        "auth_failure",
+        extra={
+            "auth_failure_reason": reason,
+            "http_method": request.method,
+            "http_route": request.url.path,
+            "forwarded_ip": _client_ip(request),
+            "user_agent": request.headers.get("user-agent", "unknown")[:200],
+        },
+    )
+
+
+def _safe_client_id_label(client_id: object) -> str:
+    raw = str(client_id or "").strip()
+    if not raw:
+        return "unknown"
+    lowered = raw.lower()
+    if lowered.startswith(("if_oac_", "if_pat_", "sk-", "xoxb-", "xoxp-")):
+        return "redacted"
+    if len(raw) > 80:
+        return "redacted"
+    return raw
+
+
+def _record_auth_success(*, client_id: object, auth_method: str) -> None:
+    mcp_auth_success_total.labels(
+        client_id=_safe_client_id_label(client_id),
+        auth_method=auth_method,
+    ).inc()
+
+
+def _oauth_failure_reason(*, code: str, detail: str) -> str:
+    if code == "insufficient_scope":
+        return "insufficient_scope"
+    if "expired" in detail.lower():
+        return "expired_token"
+    return "invalid_token"
+
+
 def _is_openai_domain_verification_path(path: str) -> bool:
     settings = get_settings()
     if not settings.openai_domain_verification_path:
@@ -93,6 +138,8 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
 
     if "token" in request.query_params or "access_token" in request.query_params:
         logger.warning("auth: rejected token sent via query parameter from %s", _client_ip(request))
+        _record_auth_failure("query_token")
+        _log_auth_failure(request, reason="query_token")
         return _unauthorized(
             "Tokens must be sent in the Authorization header, not as query parameters."
         )
@@ -105,14 +152,20 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
             logger.warning("auth: no auth provider configured — MCP endpoint is UNPROTECTED")
             return None
         logger.warning("auth: missing Authorization header from %s", _client_ip(request))
+        _record_auth_failure("missing_header")
+        _log_auth_failure(request, reason="missing_header")
         return _unauthorized("Missing or malformed Authorization: Bearer <token>.")
 
     if not auth_header.lower().startswith("bearer "):
         logger.warning("auth: malformed Authorization header from %s", _client_ip(request))
+        _record_auth_failure("malformed_header")
+        _log_auth_failure(request, reason="malformed_header")
         return _unauthorized("Missing or malformed Authorization: Bearer <token>.")
 
     token = auth_header[len("bearer ") :].strip()
     if not token:
+        _record_auth_failure("empty_bearer")
+        _log_auth_failure(request, reason="empty_bearer")
         return _unauthorized("Empty Bearer token.")
 
     required_scope = _required_scope_for_request(request)
@@ -155,6 +208,8 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
         logger.warning("auth: no auth provider configured — MCP endpoint is UNPROTECTED")
         return None
 
+    _record_auth_failure("invalid_token")
+    _log_auth_failure(request, reason="invalid_token")
     return _unauthorized("Invalid token.", required_scope=required_scope)
 
 
@@ -183,6 +238,10 @@ async def _attempt_oauth_validation(
 
     if result.ok:
         claims = result.claims or {}
+        _record_auth_success(
+            client_id=claims.get("client_id") or "oauth_client",
+            auth_method="oauth",
+        )
         _set_auth_context(
             request,
             authenticated=True,
@@ -206,10 +265,15 @@ async def _attempt_oauth_validation(
         return JSONResponse(status_code=200, content={})
 
     if result.code == "insufficient_scope":
+        _record_auth_failure("insufficient_scope")
+        _log_auth_failure(request, reason="insufficient_scope")
         return _unauthorized("Insufficient token scope", required_scope=required_scope)
 
     # This looks like OAuth but failed validation; do not downcast to PAT.
     if result.code == "oauth_invalid":
+        reason = _oauth_failure_reason(code=result.code, detail=result.detail)
+        _record_auth_failure(reason)
+        _log_auth_failure(request, reason=reason)
         return _unauthorized(result.detail, required_scope=required_scope)
 
     # not_oauth -> continue with PAT fallback.
@@ -242,6 +306,7 @@ async def introspect_managed_pat(
 
     if response.status_code == 200:
         data = response.json()
+        _record_auth_success(client_id=data.get("credential_id"), auth_method="api_token")
         _set_auth_context(
             request,
             authenticated=True,
@@ -259,6 +324,8 @@ async def introspect_managed_pat(
         return JSONResponse(status_code=200, content={})
 
     if response.status_code == 403:
+        _record_auth_failure("insufficient_scope")
+        _log_auth_failure(request, reason="insufficient_scope")
         return _unauthorized("Insufficient token scope", required_scope=required_scope)
 
     if response.status_code == 401:
@@ -286,19 +353,27 @@ def validate_local_pat(
     record = repo.find_by_id(token_id)
     if record is None:
         logger.warning("auth: unknown token_id %r from %s", token_id, _client_ip(request))
+        _record_auth_failure("invalid_token")
+        _log_auth_failure(request, reason="invalid_token")
         return _unauthorized("Invalid token.", required_scope=required_scope)
 
     if record.revoked_at is not None:
         logger.warning("auth: revoked token %r used from %s", token_id, _client_ip(request))
+        _record_auth_failure("revoked_token")
+        _log_auth_failure(request, reason="revoked_token")
         return _unauthorized("Token has been revoked.", required_scope=required_scope)
 
     now = datetime.now(UTC)
     if record.expires_at is not None and record.expires_at < now:
         logger.warning("auth: expired token %r used from %s", token_id, _client_ip(request))
+        _record_auth_failure("expired_token")
+        _log_auth_failure(request, reason="expired_token")
         return _unauthorized("Token has expired.", required_scope=required_scope)
 
     if not verify_token(token, record.token_hash):
         logger.warning("auth: invalid token secret for %r from %s", token_id, _client_ip(request))
+        _record_auth_failure("invalid_token")
+        _log_auth_failure(request, reason="invalid_token")
         return _unauthorized("Invalid token.", required_scope=required_scope)
 
     if (
@@ -307,9 +382,12 @@ def validate_local_pat(
         and get_settings().scopes_enforced()
     ):
         logger.warning("auth_scope_denied token_id=%s required_scope=%s", token_id, required_scope)
+        _record_auth_failure("insufficient_scope")
+        _log_auth_failure(request, reason="insufficient_scope")
         return _unauthorized("Insufficient token scope", required_scope=required_scope)
 
     repo.update_last_used(token_id, now)
+    _record_auth_success(client_id=token_id, auth_method="api_token")
     _set_auth_context(
         request,
         authenticated=True,
@@ -340,8 +418,11 @@ def validate_static_pat(*, request: Request, token: str) -> JSONResponse | None:
     expected = expected_pat.get_secret_value()
     if not hmac.compare_digest(token.encode(), expected.encode()):
         logger.warning("auth: invalid static PAT token from %s", _client_ip(request))
+        _record_auth_failure("invalid_token")
+        _log_auth_failure(request, reason="invalid_token")
         return _unauthorized("Invalid token.")
 
+    _record_auth_success(client_id="legacy_pat", auth_method="api_token")
     _set_auth_context(
         request,
         authenticated=True,
