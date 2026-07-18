@@ -9,7 +9,7 @@ from incidentflow_mcp.tools.registry import get_tool_specs
 
 EXPECTED_TOOL_NAMES = {
     "incidentflow_capabilities",
-    "incidentflow_version",
+    "mcp_version",
     "incidentflow_auth_status",
     "incidentflow_integrations_status",
     "incidentflow_docs_search",
@@ -174,7 +174,7 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
 
     operational_names = EXPECTED_TOOL_NAMES - {
         "incidentflow_capabilities",
-        "incidentflow_version",
+        "mcp_version",
         "incidentflow_auth_status",
         "incidentflow_integrations_status",
     }
@@ -196,7 +196,7 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     }
     assert returned_names == operational_names
     assert "incidentflow_capabilities" not in returned_names
-    assert "incidentflow_version" not in returned_names
+    assert "mcp_version" not in returned_names
     assert "incidentflow_auth_status" not in returned_names
     assert "incidentflow_integrations_status" not in returned_names
 
@@ -237,7 +237,7 @@ def test_incidentflow_knowledge_search_is_preferred_unified_tool() -> None:
 
 
 @pytest.mark.asyncio
-async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "incidentflow_mcp.config._settings",
         Settings(
@@ -264,7 +264,7 @@ async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.M
     )
     mcp = create_mcp_server()
     tool_manager = mcp._tool_manager
-    result = await tool_manager.call_tool("incidentflow_version", {})
+    result = await tool_manager.call_tool("mcp_version", {})
     payload = json.loads(result)
 
     assert payload["service"] == "incidentflow-mcp"
@@ -293,7 +293,7 @@ async def test_incidentflow_version_returns_build_metadata(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_incidentflow_version_normalizes_prod_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_mcp_version_normalizes_prod_tag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "incidentflow_mcp.config._settings",
         Settings(
@@ -307,7 +307,7 @@ async def test_incidentflow_version_normalizes_prod_tag(monkeypatch: pytest.Monk
     )
     mcp = create_mcp_server()
     tool_manager = mcp._tool_manager
-    result = await tool_manager.call_tool("incidentflow_version", {})
+    result = await tool_manager.call_tool("mcp_version", {})
     payload = json.loads(result)
 
     assert payload["version"] == "1.0.0"

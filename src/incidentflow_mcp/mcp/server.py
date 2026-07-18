@@ -422,7 +422,7 @@ def _structured_guard_error(raw: str) -> dict[str, Any]:
 
 
 _CAPABILITIES_TOOL_NAME = "incidentflow_capabilities"
-_VERSION_TOOL_NAME = "incidentflow_version"
+_VERSION_TOOL_NAME = "mcp_version"
 _AUTH_STATUS_TOOL_NAME = "incidentflow_auth_status"
 _INTEGRATIONS_STATUS_TOOL_NAME = "incidentflow_integrations_status"
 _META_TOOL_NAMES = {
@@ -646,7 +646,7 @@ def _environment_from_build_metadata(
     return fallback
 
 
-def _incidentflow_version_payload(settings: Settings) -> dict[str, Any]:
+def _mcp_version_payload(settings: Settings) -> dict[str, Any]:
     specs = get_tool_specs()
     meta_count = sum(1 for spec in specs if spec.name in _META_TOOL_NAMES)
     tag = (settings.mcp_build_tag or "").strip() or None
@@ -2827,9 +2827,9 @@ def create_mcp_server() -> FastMCP:
     ) -> dict[str, Any]:
         return _incidentflow_capabilities_payload(response_mode=response_mode, category=category)
 
-    @mcp.tool(**_tool_metadata(_specs["incidentflow_version"]))
-    async def incidentflow_version() -> str:
-        return _json(_incidentflow_version_payload(settings))
+    @mcp.tool(**_tool_metadata(_specs["mcp_version"]))
+    async def mcp_version() -> str:
+        return _json(_mcp_version_payload(settings))
 
     @mcp.tool(**_tool_metadata(_specs["incidentflow_auth_status"]))
     async def incidentflow_auth_status() -> str:
