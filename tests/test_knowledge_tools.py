@@ -9,6 +9,7 @@ import pytest
 
 from incidentflow_mcp.tools.knowledge_tools import (
     _slugify,
+    knowledge_upsert,
     memory_find_knowledge,
     memory_find_rca,
     memory_upsert_incident,
@@ -121,14 +122,24 @@ async def test_upsert_incident_requires_explicit_id() -> None:
 async def test_upsert_knowledge_sends_document_id() -> None:
     s = _make_settings()
     captured: list[dict[str, Any]] = []
-    resp = _resp({"point_id": "p-3", "text_hash": "h-3", "type": "knowledge", "stored": True})
+    resp = _resp(
+        {
+            "point_id": "p-3",
+            "text_hash": "h-3",
+            "type": "knowledge",
+            "stored": True,
+            "operation": "updated",
+            "created": False,
+            "updated": True,
+        }
+    )
 
     async def fake_post(url: str, **kwargs: Any) -> MagicMock:
         captured.append(kwargs.get("json", {}))
         return resp
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
-        await memory_upsert_knowledge(
+        result = await memory_upsert_knowledge(
             s,
             workspace_id="ws-1",
             knowledge_id="6a0542d0-7ccb-4733-bdc6-286f7bf9b88f",
@@ -144,6 +155,9 @@ async def test_upsert_knowledge_sends_document_id() -> None:
     assert "markdown" in body["tags"]
     # Legacy field is still sent until all callers have migrated.
     assert body["incident_id"] == "6a0542d0-7ccb-4733-bdc6-286f7bf9b88f"
+    assert result["operation"] == "updated"
+    assert result["created"] is False
+    assert result["updated"] is True
 
 
 @pytest.mark.asyncio
@@ -169,6 +183,47 @@ async def test_upsert_knowledge_preserves_existing_markdown() -> None:
     body = captured[0]
     assert body["text"] == markdown
     assert body["tags"] == ["tool-review", "markdown"]
+
+
+@pytest.mark.asyncio
+async def test_knowledge_upsert_routes_to_document_type() -> None:
+    s = _make_settings()
+    captured: list[dict[str, Any]] = []
+    resp = _resp({"point_id": "p-5", "text_hash": "h-5", "type": "knowledge", "stored": True})
+
+    async def fake_post(url: str, **kwargs: Any) -> MagicMock:
+        captured.append(kwargs.get("json", {}))
+        return resp
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
+        result = await knowledge_upsert(
+            s,
+            workspace_id="ws-1",
+            document_type="knowledge",
+            id="knowledge-auth-contract",
+            title="Auth contract",
+            text="Contract notes",
+            tags=["auth"],
+        )
+
+    body = captured[0]
+    assert body["type"] == "knowledge"
+    assert body["document_id"] == "knowledge-auth-contract"
+    assert "markdown" in body["tags"]
+    assert result["id"] == "knowledge-auth-contract"
+
+
+@pytest.mark.asyncio
+async def test_knowledge_upsert_requires_incident_id() -> None:
+    s = _make_settings()
+    with pytest.raises(ValueError, match="id is required"):
+        await knowledge_upsert(
+            s,
+            workspace_id="ws-1",
+            document_type="incident",
+            title="Missing id",
+            text="Incident text",
+        )
 
 
 @pytest.mark.asyncio

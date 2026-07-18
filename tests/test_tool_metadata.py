@@ -12,8 +12,9 @@ EXPECTED_TOOL_NAMES = {
     "mcp_version",
     "incidentflow_auth_status",
     "incidentflow_integrations_status",
-    "incidentflow_docs_search",
-    "incidentflow_knowledge_search",
+    "public_knowledge_search",
+    "private_knowledge_search",
+    "knowledge_get",
     "incident_summary",
     "correlate_alerts",
     "external_status_check",
@@ -52,25 +53,11 @@ EXPECTED_TOOL_NAMES = {
     "argocd_get_last_operation",
     "argocd_find_recent_deployments",
     "argocd_analyze_application",
-    "memory_search_similar_incidents",
-    "memory_get_service_context",
-    "memory_find_runbook",
-    # Typed knowledge-memory tools (Phase 6)
-    "memory_upsert_runbook",
-    "memory_upsert_rca",
-    "memory_upsert_postmortem",
-    "memory_upsert_knowledge",
-    "memory_upsert_incident",
+    "knowledge_upsert",
 }
 
 # Write tools legitimately set readOnlyHint=False; everything else must be read-only.
-WRITE_TOOL_NAMES = {
-    "memory_upsert_runbook",
-    "memory_upsert_rca",
-    "memory_upsert_postmortem",
-    "memory_upsert_knowledge",
-    "memory_upsert_incident",
-}
+WRITE_TOOL_NAMES = {"knowledge_upsert"}
 
 REQUIRED_BOOLEAN_ANNOTATIONS = {
     "readOnlyHint",
@@ -85,13 +72,11 @@ REQUIRED_SUBMISSION_JUSTIFICATIONS = {
 }
 
 EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
-    "public_docs": 2,
     "kubernetes": 17,
     "argocd": 8,
     "grafana_prometheus": 7,
     "slack_incidents": 6,
-    "semantic_memory_read": 3,
-    "semantic_memory_write": 5,
+    "knowledge": 4,
 }
 
 
@@ -178,10 +163,10 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
         "incidentflow_auth_status",
         "incidentflow_integrations_status",
     }
-    assert payload["total"] == 48
+    assert payload["total"] == 42
     assert payload["total"] == len(operational_names)
-    assert payload["read_only"] == 43
-    assert payload["write_memory_only"] == 5
+    assert payload["read_only"] == 41
+    assert payload["write_memory_only"] == 1
     assert "canonical" in payload["summary"]
     assert "authoritative runtime tool list" in payload["summary"]
     assert any("cached docs" in note for note in payload["notes"])
@@ -200,40 +185,46 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     assert "incidentflow_auth_status" not in returned_names
     assert "incidentflow_integrations_status" not in returned_names
 
-    memory_write = categories["semantic_memory_write"]["tools"]
-    assert all(tool["write_memory_only"] for tool in memory_write)
-    assert all(tool["read_only"] is False for tool in memory_write)
-    assert all("description" not in tool for tool in memory_write)
+    knowledge_tools = categories["knowledge"]["tools"]
+    write_tools = [tool for tool in knowledge_tools if tool["write_memory_only"]]
+    assert [tool["canonical_name"] for tool in write_tools] == ["knowledge_upsert"]
+    assert write_tools[0]["read_only"] is False
+    assert all("description" not in tool for tool in knowledge_tools)
 
     full_result = await tool_manager.call_tool(
-        "incidentflow_capabilities", {"response_mode": "full", "category": "semantic_memory_read"}
+        "incidentflow_capabilities", {"response_mode": "full", "category": "knowledge"}
     )
     full_payload = full_result if isinstance(full_result, dict) else json.loads(full_result)
-    assert [category["id"] for category in full_payload["categories"]] == ["semantic_memory_read"]
+    assert [category["id"] for category in full_payload["categories"]] == ["knowledge"]
     assert "description" in full_payload["categories"][0]["tools"][0]
 
 
-def test_memory_tool_schemas_do_not_expose_workspace_id() -> None:
+def test_knowledge_tool_schemas_do_not_expose_workspace_id() -> None:
     for spec in get_tool_specs():
-        if not spec.name.startswith("memory_"):
+        if not spec.name.endswith("knowledge_search") and spec.name not in {
+            "knowledge_get",
+            "knowledge_upsert",
+        }:
             continue
         assert "workspace_id" not in spec.input_schema.get("properties", {})
 
 
-def test_incidentflow_knowledge_search_is_preferred_unified_tool() -> None:
+def test_knowledge_tools_are_the_unified_contract() -> None:
     specs = {spec.name: spec for spec in get_tool_specs()}
 
-    unified = specs["incidentflow_knowledge_search"]
+    private_search = specs["private_knowledge_search"]
+    public_search = specs["public_knowledge_search"]
 
-    assert "workspace_id" not in unified.input_schema.get("properties", {})
-    assert "Preferred unified knowledge search" in unified.description
-    assert "publicResults" in unified.description
-    assert "workspaceResults" in unified.description
-    assert "MCP installation" in unified.description
-    assert "document_type" in unified.input_schema["properties"]
-    assert "rca" in unified.input_schema["properties"]["document_type"]["enum"]
+    assert "workspace_id" not in private_search.input_schema.get("properties", {})
+    assert "workspace_id" not in public_search.input_schema.get("properties", {})
+    assert "document_type" in private_search.input_schema["properties"]
+    assert "document_type" in public_search.input_schema["properties"]
+    assert "rca" in private_search.input_schema["properties"]["document_type"]["enum"]
+    assert "api_reference" in public_search.input_schema["properties"]["document_type"]["enum"]
     assert "memory_find_knowledge" not in specs
     assert "memory_find_rca" not in specs
+    assert "incidentflow_knowledge_search" not in specs
+    assert "incidentflow_docs_search" not in specs
 
 
 @pytest.mark.asyncio
@@ -275,7 +266,7 @@ async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatc
     assert payload["environment"] == "dev"
     assert payload["tools"] == {
         "registered": len(EXPECTED_TOOL_NAMES),
-        "operational": 48,
+        "operational": 42,
         "meta": 4,
     }
     assert payload["image"] == {

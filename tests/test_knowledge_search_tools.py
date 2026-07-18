@@ -10,6 +10,9 @@ from pydantic import SecretStr
 from incidentflow_mcp.tools.knowledge_search_tools import (
     PlatformAPIKnowledgeClient,
     incidentflow_knowledge_search,
+    knowledge_get,
+    private_knowledge_search,
+    public_knowledge_search,
 )
 
 
@@ -129,3 +132,73 @@ async def test_platform_knowledge_client_omits_workspace_for_public_scope() -> N
         "limit": 5,
         "response_mode": "compact",
     }
+
+
+@pytest.mark.asyncio
+async def test_platform_knowledge_client_get_uses_internal_endpoint() -> None:
+    captured: dict[str, Any] = {}
+
+    async def post(url: str, *, json: dict[str, Any], headers: dict[str, str]) -> httpx.Response:
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        return httpx.Response(
+            200,
+            request=httpx.Request("POST", url),
+            json={"found": True, "status": "found", "result": {"title": "Auth contract"}},
+        )
+
+    with patch("incidentflow_mcp.tools.knowledge_search_tools.httpx.AsyncClient") as client_cls:
+        client = AsyncMock()
+        client.post.side_effect = post
+        client_cls.return_value.__aenter__.return_value = client
+
+        result = await PlatformAPIKnowledgeClient(_settings()).get(
+            workspace_id="ws-1",
+            id="IncidentFlow Tool Review",
+            id_type="title",
+            document_type="knowledge",
+            response_mode="full",
+        )
+
+    assert captured["url"] == "http://platform-api:8000/internal/knowledge/get"
+    assert captured["json"] == {
+        "workspace_id": "ws-1",
+        "id": "IncidentFlow Tool Review",
+        "id_type": "title",
+        "response_mode": "full",
+        "document_type": "knowledge",
+    }
+    assert captured["headers"]["X-Internal-Api-Key"] == "internal"
+    assert result["result"]["title"] == "Auth contract"
+
+
+@pytest.mark.asyncio
+async def test_public_private_and_get_wrappers_call_client() -> None:
+    search_payload = {"query": "auth", "scope": "public", "publicResults": []}
+    get_payload = {"found": True, "status": "found", "result": {"title": "Auth"}}
+
+    with patch.object(
+        PlatformAPIKnowledgeClient,
+        "search",
+        AsyncMock(return_value=search_payload),
+    ) as search_mock:
+        assert await public_knowledge_search(_settings(), query="auth") == search_payload
+        assert await private_knowledge_search(
+            _settings(),
+            workspace_id="ws-1",
+            query="auth",
+            document_type="rca",
+        ) == search_payload
+
+    assert search_mock.await_args_list[0].kwargs["scope"] == "public"
+    assert search_mock.await_args_list[0].kwargs["workspace_id"] is None
+    assert search_mock.await_args_list[1].kwargs["scope"] == "workspace"
+    assert search_mock.await_args_list[1].kwargs["workspace_id"] == "ws-1"
+
+    with patch.object(PlatformAPIKnowledgeClient, "get", AsyncMock(return_value=get_payload)):
+        assert await knowledge_get(
+            _settings(),
+            workspace_id="ws-1",
+            id="doc-1",
+        ) == get_payload

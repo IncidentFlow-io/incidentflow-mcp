@@ -27,6 +27,8 @@ def test_metrics_endpoint_exposes_observability_metrics(auth_client: TestClient)
     assert "mcp_tool_requests_in_flight" in payload
     assert "mcp_tool_errors_total" in payload
     assert "mcp_integration_guard_total" in payload
+    assert "mcp_auth_failures_total" in payload
+    assert "mcp_auth_success_total" in payload
     assert "mcp_request_duration_seconds" in payload
     assert "tool_duration_seconds" in payload
 
@@ -221,6 +223,7 @@ def test_tool_duration_and_error_metrics_recorded_on_error(
     )
 
     payload = auth_client.get("/metrics").text
+    assert 'mcp_auth_failures_total{reason="missing_header"}' in payload
     assert re.search(
         r'mcp_tool_request_duration_seconds_count\{[^}]*method="CallToolRequest"[^}]*outcome="error"[^}]*\}',
         payload,

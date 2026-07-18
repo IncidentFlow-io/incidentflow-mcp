@@ -496,28 +496,13 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         ),
     ),
     (
-        "public_docs",
-        "Public Documentation / Knowledge Search",
-        ("incidentflow_docs_search", "incidentflow_knowledge_search"),
-    ),
-    (
-        "semantic_memory_read",
-        "Semantic Memory — Read",
+        "knowledge",
+        "Knowledge",
         (
-            "memory_search_similar_incidents",
-            "memory_find_runbook",
-            "memory_get_service_context",
-        ),
-    ),
-    (
-        "semantic_memory_write",
-        "Semantic Memory — Write",
-        (
-            "memory_upsert_incident",
-            "memory_upsert_rca",
-            "memory_upsert_runbook",
-            "memory_upsert_postmortem",
-            "memory_upsert_knowledge",
+            "public_knowledge_search",
+            "private_knowledge_search",
+            "knowledge_get",
+            "knowledge_upsert",
         ),
     ),
 )
@@ -531,7 +516,7 @@ def _capability_tool_entry(spec: Any, *, response_mode: str) -> dict[str, Any]:
         "required_integration": getattr(spec, "required_integration", None),
         "supports_shared_dev_fallback": bool(getattr(spec, "supports_shared_dev_fallback", False)),
         "read_only": read_only,
-        "write_memory_only": spec.name.startswith("memory_upsert_"),
+        "write_memory_only": spec.name == "knowledge_upsert",
     }
     if response_mode == "full":
         entry["description"] = spec.description
@@ -591,9 +576,7 @@ def _incidentflow_capabilities_payload(
     read_only_count = sum(
         1 for spec in operational_specs.values() if spec.annotations.get("readOnlyHint") is True
     )
-    write_memory_only_count = sum(
-        1 for name in operational_specs if name.startswith("memory_upsert_")
-    )
+    write_memory_only_count = sum(1 for name in operational_specs if name == "knowledge_upsert")
     return {
         "name": "incidentflow",
         "source": "incidentflow-mcp",
@@ -690,7 +673,16 @@ def _client_payload() -> dict[str, str]:
         client_name = "Codex"
     elif client_id == "oauth-client":
         client_name = "OAuth MCP client"
+    elif _looks_like_secret_identifier(client_id):
+        client_name = "OAuth MCP client"
     return {"name": client_name, "type": "mcp"}
+
+
+def _looks_like_secret_identifier(value: str) -> bool:
+    lowered = value.lower().strip()
+    if lowered.startswith(("if_oac_", "if_pat_", "sk-", "xoxb-", "xoxp-")):
+        return True
+    return bool(re.search(r"(access[_-]?token|refresh[_-]?token|api[_-]?key|secret)", lowered))
 
 
 def _principal_permissions(principal: IncidentFlowPrincipal) -> list[str]:
@@ -2849,24 +2841,34 @@ def create_mcp_server() -> FastMCP:
             )
         )
 
-    from incidentflow_mcp.tools.docs_tools import DocsSearchAPIError, incidentflow_docs_search
     from incidentflow_mcp.tools.knowledge_search_tools import (
         KnowledgeSearchAPIError,
-        incidentflow_knowledge_search,
+        knowledge_get,
+        private_knowledge_search,
+        public_knowledge_search,
     )
 
-    @mcp.tool(**_tool_metadata(_specs["incidentflow_docs_search"]))
-    async def incidentflow_docs_search_tool(query: str, limit: int = 5) -> str:
-        try:
-            result = await incidentflow_docs_search(settings=settings, query=query, limit=limit)
-            return json.dumps(result, indent=2)
-        except DocsSearchAPIError as exc:
-            return json.dumps({"error": str(exc)})
-
-    @mcp.tool(**_tool_metadata(_specs["incidentflow_knowledge_search"]))
-    async def incidentflow_knowledge_search_tool(
+    @mcp.tool(**_tool_metadata(_specs["public_knowledge_search"]))
+    async def public_knowledge_search_tool(
         query: str,
-        scope: str = "combined",
+        document_type: str | None = None,
+        response_mode: str = "compact",
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        try:
+            return await public_knowledge_search(
+                settings=settings,
+                query=query,
+                document_type=document_type,
+                response_mode=response_mode,
+                limit=limit,
+            )
+        except KnowledgeSearchAPIError as exc:
+            return {"error": str(exc)}
+
+    @mcp.tool(**_tool_metadata(_specs["private_knowledge_search"]))
+    async def private_knowledge_search_tool(
+        query: str,
         document_type: str | None = None,
         service: str | None = None,
         environment: str | None = None,
@@ -2874,19 +2876,35 @@ def create_mcp_server() -> FastMCP:
         limit: int = 8,
     ) -> dict[str, Any]:
         try:
-            resolved_scope = scope if scope in ("public", "workspace", "combined") else "combined"
-            result = await incidentflow_knowledge_search(
+            return await private_knowledge_search(
                 settings=settings,
-                workspace_id=None if resolved_scope == "public" else _workspace(),
+                workspace_id=_workspace(),
                 query=query,
-                scope=resolved_scope,
                 document_type=document_type,
                 service=service,
                 environment=environment,
                 response_mode=response_mode,
                 limit=limit,
             )
-            return result
+        except (KnowledgeSearchAPIError, ValueError) as exc:
+            return {"error": str(exc)}
+
+    @mcp.tool(**_tool_metadata(_specs["knowledge_get"]))
+    async def knowledge_get_tool(
+        id: str,
+        id_type: str = "auto",
+        document_type: str | None = None,
+        response_mode: str = "full",
+    ) -> dict[str, Any]:
+        try:
+            return await knowledge_get(
+                settings=settings,
+                workspace_id=_workspace(),
+                id=id,
+                id_type=id_type,
+                document_type=document_type,
+                response_mode=response_mode,
+            )
         except (KnowledgeSearchAPIError, ValueError) as exc:
             return {"error": str(exc)}
 
@@ -4635,21 +4653,10 @@ def create_mcp_server() -> FastMCP:
         )
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Memory tools — semantic incident memory via Qdrant
+    # Knowledge write tool — private workspace semantic memory via Qdrant
     # ──────────────────────────────────────────────────────────────────────────
-    from incidentflow_mcp.tools.knowledge_tools import (
-        memory_upsert_incident,
-        memory_upsert_knowledge,
-        memory_upsert_postmortem,
-        memory_upsert_rca,
-        memory_upsert_runbook,
-    )
-    from incidentflow_mcp.tools.memory_tools import (
-        MemoryAPIError,
-        memory_find_runbook,
-        memory_get_service_context,
-        memory_search_similar_incidents,
-    )
+    from incidentflow_mcp.tools.knowledge_tools import knowledge_upsert
+    from incidentflow_mcp.tools.memory_tools import MemoryAPIError
 
     def _workspace(workspace_id: str | None = None) -> str:
         wid = workspace_id or _current_token_workspace_id() or settings.mcp_default_workspace_id
@@ -4660,201 +4667,12 @@ def create_mcp_server() -> FastMCP:
             )
         return wid
 
-    @mcp.tool(**_tool_metadata(_specs["memory_search_similar_incidents"]))
-    async def memory_search_similar_incidents_tool(
-        query: str,
-        service: str | None = None,
-        types: list[str] | None = None,
-        limit: int = 5,
-        response_mode: str = "compact",
-    ) -> dict[str, Any]:
-        try:
-            result = await memory_search_similar_incidents(
-                settings=settings,
-                workspace_id=_workspace(),
-                query=query,
-                service=service,
-                types=types,
-                limit=limit,
-                response_mode=response_mode,
-            )
-            return result
-        except (MemoryAPIError, ValueError) as exc:
-            return {"error": str(exc)}
-
-    @mcp.tool(**_tool_metadata(_specs["memory_get_service_context"]))
-    async def memory_get_service_context_tool(
-        service: str,
-        query: str | None = None,
-        limit: int = 5,
-        response_mode: str = "compact",
-    ) -> dict[str, Any]:
-        try:
-            result = await memory_get_service_context(
-                settings=settings,
-                workspace_id=_workspace(),
-                service=service,
-                query=query,
-                limit=limit,
-                response_mode=response_mode,
-            )
-            return result
-        except (MemoryAPIError, ValueError) as exc:
-            return {"error": str(exc)}
-
-    @mcp.tool(**_tool_metadata(_specs["memory_find_runbook"]))
-    async def memory_find_runbook_tool(
-        query: str,
-        service: str | None = None,
-        cluster: str | None = None,
-        namespace: str | None = None,
-        tags: list[str] | None = None,
-        limit: int = 3,
-        response_mode: str = "compact",
-    ) -> dict[str, Any]:
-        try:
-            result = await memory_find_runbook(
-                settings=settings,
-                workspace_id=_workspace(),
-                query=query,
-                service=service,
-                cluster=cluster,
-                namespace=namespace,
-                tags=tags,
-                limit=limit,
-                response_mode=response_mode,
-            )
-            return result
-        except (MemoryAPIError, ValueError) as exc:
-            return {"error": str(exc)}
-
-    # ── Typed knowledge-memory write tools ──────────────────────────────────
-
-    @mcp.tool(**_tool_metadata(_specs["memory_upsert_runbook"]))
-    async def memory_upsert_runbook_tool(
+    @mcp.tool(**_tool_metadata(_specs["knowledge_upsert"]))
+    async def knowledge_upsert_tool(
+        document_type: str,
         title: str,
         text: str,
-        runbook_id: str | None = None,
-        service: str | None = None,
-        cluster: str | None = None,
-        namespace: str | None = None,
-        severity: str | None = None,
-        tags: list[str] | None = None,
-        status: str = "active",
-        dry_run: bool = False,
-    ) -> str:
-        try:
-            result = await memory_upsert_runbook(
-                settings=settings,
-                workspace_id=_workspace(),
-                title=title,
-                text=text,
-                runbook_id=runbook_id,
-                service=service,
-                cluster=cluster,
-                namespace=namespace,
-                severity=severity,
-                tags=tags,
-                status=status,
-                dry_run=dry_run,
-            )
-            return json.dumps(result, indent=2)
-        except (MemoryAPIError, ValueError) as exc:
-            return json.dumps({"error": str(exc)})
-
-    @mcp.tool(**_tool_metadata(_specs["memory_upsert_rca"]))
-    async def memory_upsert_rca_tool(
-        title: str,
-        text: str,
-        incident_id: str | None = None,
-        service: str | None = None,
-        cluster: str | None = None,
-        namespace: str | None = None,
-        severity: str | None = None,
-        tags: list[str] | None = None,
-        dry_run: bool = False,
-    ) -> str:
-        try:
-            result = await memory_upsert_rca(
-                settings=settings,
-                workspace_id=_workspace(),
-                title=title,
-                text=text,
-                incident_id=incident_id,
-                service=service,
-                cluster=cluster,
-                namespace=namespace,
-                severity=severity,
-                tags=tags,
-                dry_run=dry_run,
-            )
-            return json.dumps(result, indent=2)
-        except (MemoryAPIError, ValueError) as exc:
-            return json.dumps({"error": str(exc)})
-
-    @mcp.tool(**_tool_metadata(_specs["memory_upsert_postmortem"]))
-    async def memory_upsert_postmortem_tool(
-        title: str,
-        text: str,
-        incident_id: str | None = None,
-        service: str | None = None,
-        cluster: str | None = None,
-        namespace: str | None = None,
-        severity: str | None = None,
-        tags: list[str] | None = None,
-        dry_run: bool = False,
-    ) -> str:
-        try:
-            result = await memory_upsert_postmortem(
-                settings=settings,
-                workspace_id=_workspace(),
-                title=title,
-                text=text,
-                incident_id=incident_id,
-                service=service,
-                cluster=cluster,
-                namespace=namespace,
-                severity=severity,
-                tags=tags,
-                dry_run=dry_run,
-            )
-            return json.dumps(result, indent=2)
-        except (MemoryAPIError, ValueError) as exc:
-            return json.dumps({"error": str(exc)})
-
-    @mcp.tool(**_tool_metadata(_specs["memory_upsert_knowledge"]))
-    async def memory_upsert_knowledge_tool(
-        title: str,
-        text: str,
-        knowledge_id: str | None = None,
-        service: str | None = None,
-        cluster: str | None = None,
-        namespace: str | None = None,
-        tags: list[str] | None = None,
-        dry_run: bool = False,
-    ) -> str:
-        try:
-            result = await memory_upsert_knowledge(
-                settings=settings,
-                workspace_id=_workspace(),
-                title=title,
-                text=text,
-                knowledge_id=knowledge_id,
-                service=service,
-                cluster=cluster,
-                namespace=namespace,
-                tags=tags,
-                dry_run=dry_run,
-            )
-            return json.dumps(result, indent=2)
-        except (MemoryAPIError, ValueError) as exc:
-            return json.dumps({"error": str(exc)})
-
-    @mcp.tool(**_tool_metadata(_specs["memory_upsert_incident"]))
-    async def memory_upsert_incident_tool(
-        incident_id: str,
-        title: str,
-        text: str,
+        id: str | None = None,
         service: str | None = None,
         cluster: str | None = None,
         namespace: str | None = None,
@@ -4863,14 +4681,15 @@ def create_mcp_server() -> FastMCP:
         started_at: str | None = None,
         tags: list[str] | None = None,
         dry_run: bool = False,
-    ) -> str:
+    ) -> dict[str, Any]:
         try:
-            result = await memory_upsert_incident(
+            return await knowledge_upsert(
                 settings=settings,
                 workspace_id=_workspace(),
-                incident_id=incident_id,
+                document_type=document_type,
                 title=title,
                 text=text,
+                id=id,
                 service=service,
                 cluster=cluster,
                 namespace=namespace,
@@ -4880,9 +4699,8 @@ def create_mcp_server() -> FastMCP:
                 tags=tags,
                 dry_run=dry_run,
             )
-            return json.dumps(result, indent=2)
         except (MemoryAPIError, ValueError) as exc:
-            return json.dumps({"error": str(exc)})
+            return {"error": str(exc)}
 
     register_resources(mcp)
 

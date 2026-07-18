@@ -185,6 +185,16 @@ mcp_integration_guard_total = Counter(
     "Integration guard decisions by tool, integration, result, and environment.",
     ("tool", "integration", "result", "environment"),
 )
+mcp_auth_failures_total = Counter(
+    "mcp_auth_failures_total",
+    "Total MCP authentication failures by normalized reason.",
+    ("reason",),
+)
+mcp_auth_success_total = Counter(
+    "mcp_auth_success_total",
+    "Total MCP authentication successes by safe client identifier and auth method.",
+    ("client_id", "auth_method"),
+)
 
 # Clean, low-cardinality latency histograms (service-scoped names, no prefix).
 tool_duration_seconds = Histogram(

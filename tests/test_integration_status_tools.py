@@ -97,6 +97,37 @@ async def test_incidentflow_auth_status_returns_safe_principal(
 
 
 @pytest.mark.asyncio
+async def test_incidentflow_auth_status_redacts_token_like_client_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "incidentflow_mcp.config._settings",
+        Settings(_env_file=None, environment="development", redis_url="redis://test-only"),
+    )
+    _set_context()
+    context = {
+        "authenticated": True,
+        "auth_method": "oauth",
+        "bearer_token": "token",
+        "client_id": "if_oac_example_token_like_identifier",
+        "workspace_id": "ws_123",
+        "workspace_name": "Demo Workspace",
+        "workspace_slug": "demo",
+        "workspace_role": "owner",
+        "user_id": "user_123",
+        "email": "demo@example.com",
+        "plan": None,
+    }
+    set_current_auth_context(context)
+
+    result = await create_mcp_server()._tool_manager.call_tool("incidentflow_auth_status", {})
+    payload = json.loads(result)
+
+    assert payload["client"] == {"name": "OAuth MCP client", "type": "mcp"}
+    assert "if_oac" not in json.dumps(payload)
+
+
+@pytest.mark.asyncio
 async def test_incidentflow_auth_status_includes_connected_integrations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -374,7 +405,7 @@ async def test_grafana_tool_returns_standard_not_connected_response(
     _set_context()
 
     result = await create_mcp_server()._tool_manager.call_tool("grafana_list_dashboards", {})
-    payload = json.loads(result)
+    payload = result if isinstance(result, dict) else json.loads(result)
 
     assert payload["ok"] is False
     assert payload["code"] == "INTEGRATION_NOT_CONNECTED"

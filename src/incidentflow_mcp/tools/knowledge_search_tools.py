@@ -92,6 +92,44 @@ class PlatformAPIKnowledgeClient:
                 )
                 return payload  # type: ignore[return-value]
 
+    async def get(
+        self,
+        *,
+        workspace_id: str,
+        id: str,
+        id_type: str = "auto",
+        document_type: str | None = None,
+        response_mode: str = "full",
+    ) -> dict[str, Any]:
+        tracer = get_tracer()
+        with tracer.start_as_current_span("knowledge.get") as span:
+            span.set_attribute("workspace.id", workspace_id)
+            span.set_attribute("knowledge.id_type", id_type)
+            body: dict[str, Any] = {
+                "workspace_id": workspace_id,
+                "id": id,
+                "id_type": id_type,
+                "response_mode": response_mode
+                if response_mode in {"compact", "full"}
+                else "full",
+            }
+            if document_type:
+                body["document_type"] = document_type
+
+            headers = self._headers()
+            inject_trace_headers(headers)
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(
+                    f"{self._base}/internal/knowledge/get",
+                    json=body,
+                    headers=headers,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                span.set_attribute("knowledge.found", bool(payload.get("found")))
+                span.set_attribute("knowledge.status", str(payload.get("status")))
+                return payload  # type: ignore[return-value]
+
 
 async def incidentflow_knowledge_search(
     settings: Settings,
@@ -125,3 +163,74 @@ async def incidentflow_knowledge_search(
     except Exception as exc:
         logger.warning("knowledge search error: %s", exc)
         raise KnowledgeSearchAPIError(f"IncidentFlow knowledge search error: {exc}") from exc
+
+
+async def public_knowledge_search(
+    settings: Settings,
+    *,
+    query: str,
+    document_type: str | None = None,
+    response_mode: str = "compact",
+    limit: int = 8,
+) -> dict[str, Any]:
+    return await incidentflow_knowledge_search(
+        settings=settings,
+        workspace_id=None,
+        query=query,
+        scope="public",
+        document_type=document_type,
+        response_mode=response_mode,
+        limit=limit,
+    )
+
+
+async def private_knowledge_search(
+    settings: Settings,
+    *,
+    workspace_id: str,
+    query: str,
+    document_type: str | None = None,
+    service: str | None = None,
+    environment: str | None = None,
+    response_mode: str = "compact",
+    limit: int = 8,
+) -> dict[str, Any]:
+    return await incidentflow_knowledge_search(
+        settings=settings,
+        workspace_id=workspace_id,
+        query=query,
+        scope="workspace",
+        document_type=document_type,
+        service=service,
+        environment=environment,
+        response_mode=response_mode,
+        limit=limit,
+    )
+
+
+async def knowledge_get(
+    settings: Settings,
+    *,
+    workspace_id: str,
+    id: str,
+    id_type: str = "auto",
+    document_type: str | None = None,
+    response_mode: str = "full",
+) -> dict[str, Any]:
+    client = PlatformAPIKnowledgeClient(settings)
+    try:
+        return await client.get(
+            workspace_id=workspace_id,
+            id=id,
+            id_type=id_type,
+            document_type=document_type,
+            response_mode=response_mode,
+        )
+    except httpx.HTTPStatusError as exc:
+        logger.warning("knowledge get failed status=%s", exc.response.status_code)
+        raise KnowledgeSearchAPIError(
+            f"IncidentFlow knowledge get failed: HTTP {exc.response.status_code}"
+        ) from exc
+    except Exception as exc:
+        logger.warning("knowledge get error: %s", exc)
+        raise KnowledgeSearchAPIError(f"IncidentFlow knowledge get error: {exc}") from exc
