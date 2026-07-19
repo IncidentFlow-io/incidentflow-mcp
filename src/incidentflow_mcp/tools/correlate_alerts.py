@@ -281,10 +281,6 @@ def _thread_hints(alert: Alert) -> set[str]:
     for item in analysis.get("mentioned_services", []):
         if isinstance(item, str) and item.strip():
             hints.add(item.strip().lower())
-    for key in ("namespace", "service", "cluster"):
-        value = alert.labels.get(key)
-        if value:
-            hints.add(value.lower())
     return hints
 
 
@@ -347,6 +343,3 @@ def _build_summary(total: int, clusters: list[AlertCluster], uncorrelated: list[
 
 def _short_hash(value: str) -> str:
     return hashlib.sha1(value.encode()).hexdigest()[:8]
-    confidence = _confidence(members, timedelta(minutes=60), _cluster_evidence(members, {}))
-    if confidence < 0.65 and len(set(services)) > 1:
-        return f"Possible related symptoms across {', '.join(services)} — missing dependency evidence"

@@ -61,6 +61,20 @@ class TestCorrelateAlertsBasic:
         assert len(result.clusters) == 1
         assert result.clusters[0].alert_ids == ["a1", "a2", "a3"]
 
+    def test_synthetic_alerts_do_not_claim_human_thread_context(self) -> None:
+        alerts = [
+            _alert("a1", "payments", labels={"namespace": "prod", "cluster": "main"}),
+            _alert("a2", "payments", labels={"namespace": "prod", "cluster": "main"}),
+        ]
+        result = correlate_alerts(
+            CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
+        )
+
+        cluster = result.clusters[0]
+        assert "shared human/thread context" not in cluster.evidence
+        assert "human thread context" not in cluster.evidence
+        assert cluster.human_context is None
+
     def test_alerts_in_separate_services_not_clustered(self) -> None:
         alerts = [
             _alert("a1", "service-alpha", offset_minutes=0),
