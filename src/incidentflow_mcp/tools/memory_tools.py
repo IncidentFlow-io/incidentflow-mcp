@@ -358,6 +358,7 @@ async def memory_consult(
     namespace: str | None = None,
     tags: list[str] | None = None,
     limit: int = 6,
+    score_threshold: float | None = None,
 ) -> dict[str, Any] | None:
     """Single semantic lookup across knowledge types for diagnostic enrichment.
 
@@ -378,6 +379,7 @@ async def memory_consult(
             exclude_status=["archived"],
             include_text=False,
             limit=limit,
+            score_threshold=score_threshold,
         )
     except httpx.HTTPStatusError as exc:
         raise MemoryAPIError(f"Memory consult failed: HTTP {exc.response.status_code}") from exc

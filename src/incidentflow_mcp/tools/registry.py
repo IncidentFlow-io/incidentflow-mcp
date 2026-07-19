@@ -220,6 +220,7 @@ def _k8s_schema(
             "timeout_seconds": _timeout_property(),
         },
         "required": required or [],
+        "additionalProperties": False,
     }
 
 
@@ -982,6 +983,16 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "tail_lines": {"type": "integer", "default": 200, "minimum": 1, "maximum": 1000},
                 "level": {
                     "type": "string",
+                    "enum": [
+                        "trace",
+                        "debug",
+                        "info",
+                        "warn",
+                        "warning",
+                        "error",
+                        "critical",
+                        "fatal",
+                    ],
                     "description": "Optional case-insensitive level filter.",
                 },
                 "contains": {
@@ -1006,6 +1017,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "timeout_seconds": _timeout_property(),
             },
             "required": ["namespace", "pod"],
+            "additionalProperties": False,
         },
         annotations=_read_only_annotations(),
         structured_output=True,
@@ -1119,7 +1131,19 @@ _TOOL_SPECS: list[ToolSpec] = [
             "action. Use as the first step in namespace-level triage. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
-        input_schema=_k8s_schema({"namespace": {"type": "string"}}),
+        input_schema=_k8s_schema(
+            {
+                "namespace": {"type": "string"},
+                "include_memory_context": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Attach semantic memory/runbook context. Off by default for this "
+                        "status/list tool to keep routine output focused."
+                    ),
+                },
+            }
+        ),
         annotations=_read_only_annotations(),
         structured_output=True,
     ),
@@ -1143,6 +1167,30 @@ _TOOL_SPECS: list[ToolSpec] = [
                     ),
                 },
                 "tail_lines": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000},
+                "include_memory_context": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Attach relevant runbook/RCA/postmortem context when the workload "
+                        "looks unhealthy. Enabled by default for investigation workflows."
+                    ),
+                },
+                "include_raw_logs": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Include compact raw log lines under data.raw_logs. Off by default; "
+                        "the tool normally returns log_analysis only."
+                    ),
+                },
+                "exclude_loggers": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Additional logger or substring patterns to classify as internal_debug "
+                        "and hide from top application patterns, for example httpcore.*."
+                    ),
+                },
             },
             required=["namespace", "workload"],
         ),
@@ -1174,6 +1222,14 @@ _TOOL_SPECS: list[ToolSpec] = [
                         "and resource requests/limits. Off by default for compact output."
                     ),
                 },
+                "include_memory_context": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Attach relevant runbook/RCA/postmortem context when current "
+                        "pod issues are detected. Off by default for compact inspect calls."
+                    ),
+                },
             },
             required=["namespace", "pod"],
         ),
@@ -1202,6 +1258,14 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "minimum": 1,
                     "maximum": 500,
                     "description": "Log lines to fetch for diagnosis.",
+                },
+                "include_memory_context": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": (
+                        "Attach relevant runbook/RCA/postmortem context when current "
+                        "pod issues are detected. Enabled by default for debug workflows."
+                    ),
                 },
             },
             required=["namespace", "pod"],

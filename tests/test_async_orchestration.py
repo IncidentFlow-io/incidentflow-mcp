@@ -8,8 +8,12 @@ import pytest
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import (
+    _analyze_workload_logs,
+    _build_describe_response,
     _compact_external_status_result,
     _compact_log_payload,
+    _describe_pod_structured,
+    _diagnose_pod,
     _execute_external_status_check,
     _filter_workload_pods,
     _k8s_cluster_overview_payload,
@@ -24,7 +28,9 @@ from incidentflow_mcp.mcp.server import (
     _resolve_job_workspace_id,
     _resolve_k8s_cluster_id,
     _resolve_slack_tool_access,
+    _restart_window_summary,
     _select_workload_pod,
+    _structured_tool_exception,
 )
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -701,6 +707,9 @@ def test_overview_treats_single_restart_ready_pod_as_healthy() -> None:
             "phase": "Running",
             "node": None,
             "restarts": 1,
+            "last_restart_at": None,
+            "restarts_last_1h": 0,
+            "restarts_last_24h": 0,
         }
     ]
 
@@ -746,6 +755,285 @@ def test_compact_log_payload_redacts_secrets() -> None:
     )
 
     assert compact["data"]["lines"] == ["INFO redis_url=redis://***@redis-master:6379/0 token=***"]
+
+
+def test_compact_log_payload_marks_truncated_when_compact_cap_applies() -> None:
+    payload = {
+        "status": "succeeded",
+        "data": {"logs": "\n".join(f"INFO line {idx}" for idx in range(121))},
+    }
+
+    compact = _compact_log_payload(
+        payload,
+        level=None,
+        contains=None,
+        exclude=None,
+        compact=True,
+    )
+
+    assert compact["truncated"] is True
+    assert compact["data"]["truncated"] is True
+    assert compact["data"]["line_count"] == 121
+    assert compact["data"]["returned_line_count"] == 120
+    assert len(compact["data"]["lines"]) == 120
+
+
+def test_analyze_workload_logs_summarizes_and_redacts_internal_details() -> None:
+    analysis = _analyze_workload_logs(
+        {
+            "line_count": 5,
+            "skipped_debug_lines": 2,
+            "lines": [
+                (
+                    "INFO event='agent command dispatch completed' "
+                    "duration_ms=123 workspace_id=ws_123 agent_id=agent_456 "
+                    "url=http://incidentflow-agent-gateway.incidentflow-dev.svc.cluster.local"
+                    "/internal/agents/commands/dispatch"
+                ),
+                "DEBUG httpcore.connection connect_tcp.started host='10.0.0.1'",
+                "WARNING dependency timeout duration_ms=164",
+                "INFO GET /api/health status_code=200 duration_ms=12",
+                "ERROR failed dependency request_id=req_123",
+            ],
+        },
+        exclude_loggers=["httpcore.*"],
+    )
+
+    assert analysis["lines_scanned"] == 5
+    assert analysis["errors"] == 1
+    assert analysis["warnings"] == 1
+    assert analysis["latency"] == {"p50_ms": 123.0, "max_ms": 164.0}
+    assert analysis["log_categories"]["internal_debug"] == 3
+    assert analysis["log_categories"]["http_access"] == 1
+    assert analysis["log_categories"]["dependency"] == 2
+    assert analysis["top_patterns"][0] == {
+        "event": "agent command dispatch completed",
+        "count": 1,
+    }
+    assert all("svc.cluster.local" not in line for line in analysis["notable_lines"])
+    assert all("/internal/agents" not in line for line in analysis["notable_lines"])
+
+
+def test_diagnose_pod_treats_ready_pod_probe_events_as_historical() -> None:
+    diagnosis = _diagnose_pod(
+        {
+            "phase": "Running",
+            "containers": [{"name": "api", "ready": True, "restart_count": 0}],
+        },
+        [
+            {
+                "type": "Warning",
+                "reason": "Unhealthy",
+                "message": "Startup probe failed during startup",
+            }
+        ],
+    )
+
+    assert diagnosis["healthy"] is True
+    assert diagnosis["issues"] == []
+    assert diagnosis["historical_warnings"] == ["StartupProbeFailure"]
+
+
+def test_describe_pod_structured_reports_historical_restart_as_observation() -> None:
+    response = _describe_pod_structured(
+        {
+            "name": "api-123",
+            "namespace": "incidentflow-dev",
+            "phase": "Running",
+            "age": "25d",
+            "containers": [{"name": "api", "ready": True, "restart_count": 1}],
+        },
+        [],
+    )
+
+    assert response["data"]["diagnosis"]["healthy"] is True
+    assert response["data"]["diagnosis"]["issues"] == []
+    assert response["observations"] == [
+        {
+            "severity": "info",
+            "code": "HISTORICAL_RESTART",
+            "message": "Container restarted 1 time during the pod lifetime",
+            "count": 1,
+        }
+    ]
+    assert response["data"]["observations"] == response["observations"]
+    assert response["recommendations"] == [
+        (
+            "No immediate action required. Check the previous container termination reason "
+            "if the restart was recent or recurring."
+        )
+    ]
+    assert response["next_actions"] == [
+        {
+            "action": "k8s_describe_pod",
+            "priority": "low",
+            "reason": "Determine the historical restart cause",
+            "tool_arguments": {
+                "namespace": "incidentflow-dev",
+                "pod": "api-123",
+            },
+        }
+    ]
+    assert response["data"]["next_actions"] == response["next_actions"]
+
+
+def test_restart_window_summary_uses_last_restart_timestamp() -> None:
+    summary = _restart_window_summary(
+        [
+            {
+                "name": "api",
+                "restart_count": 2,
+                "last_restart_at": "2026-07-19T15:30:00Z",
+            },
+            {
+                "name": "worker",
+                "restart_count": 1,
+                "last_state": {
+                    "terminated": {
+                        "finished_at": "2026-07-18T14:00:00Z",
+                    }
+                },
+            },
+        ],
+        now=datetime(2026, 7, 19, 16, 0, tzinfo=UTC),
+    )
+
+    assert summary == {
+        "last_restart_at": "2026-07-19T15:30:00Z",
+        "restarts_last_1h": 2,
+        "restarts_last_24h": 2,
+    }
+
+
+def test_build_describe_response_keeps_running_ready_restart_healthy() -> None:
+    response = _build_describe_response(
+        {
+            "metadata": {
+                "name": "prometheus-server-abc",
+                "namespace": "observability",
+                "age": "25d",
+            },
+            "status": {
+                "phase": "Running",
+                "ready": True,
+            },
+            "containers": [
+                {
+                    "name": "prometheus-server",
+                    "ready": True,
+                    "restart_count": 1,
+                    "last_restart_at": "2000-01-01T00:00:00Z",
+                    "last_state": {
+                        "terminated": {
+                            "exit_code": 137,
+                            "reason": "Error",
+                            "finished_at": "2000-01-01T00:00:00Z",
+                        }
+                    },
+                },
+                {"name": "config-reload", "ready": True, "restart_count": 0},
+            ],
+            "resources": {
+                "qos_class": "Burstable",
+                "containers": [
+                    {"name": "prometheus-server", "requests": {}, "limits": {}},
+                    {"name": "config-reload", "requests": {"cpu": "10m"}, "limits": {}},
+                ],
+            },
+            "events": [],
+        },
+        include_details=False,
+    )
+
+    assert response["data"]["diagnosis"]["healthy"] is True
+    assert response["data"]["diagnosis"]["current_issues"] == []
+    assert response["data"]["diagnosis"]["historical_warnings"] == [
+        {
+            "severity": "info",
+            "type": "PreviousContainerTermination",
+            "container": "prometheus-server",
+            "exit_code": 137,
+            "reason": "Error",
+            "finished_at": "2000-01-01T00:00:00Z",
+            "message": (
+                "Container was previously terminated with exit code 137. "
+                "The pod has remained healthy since restart."
+            ),
+        }
+    ]
+    assert response["data"]["status"]["restart_count"] == 1
+    assert response["data"]["status"]["last_restart_at"] == "2000-01-01T00:00:00Z"
+    assert response["data"]["status"]["restarts_last_1h"] == 0
+    assert response["data"]["status"]["restarts_last_24h"] == 0
+    assert response["data"]["containers"][0]["last_restart_at"] == "2000-01-01T00:00:00Z"
+    assert response["observations"][0]["code"] == "HISTORICAL_RESTART"
+    assert response["observations"][0]["last_restart_at"] == "2000-01-01T00:00:00Z"
+    assert response["observations"][1] == {
+        "severity": "info",
+        "code": "PreviousContainerTermination",
+        "message": (
+            "Container was previously terminated with exit code 137. "
+            "The pod has remained healthy since restart."
+        ),
+        "container": "prometheus-server",
+        "exit_code": 137,
+        "reason": "Error",
+        "finished_at": "2000-01-01T00:00:00Z",
+    }
+    assert "⚠ prometheus-server has no explicit CPU or memory requests/limits" in response[
+        "findings"
+    ]
+    assert response["recommendations"] == [
+        (
+            "No immediate action required. Check the previous container termination reason "
+            "if the restart was recent or recurring."
+        )
+    ]
+    assert response["next_actions"] == [
+        {
+            "action": "k8s_get_pod_logs",
+            "priority": "low",
+            "reason": "Inspect recent logs only if the restart was recent or recurring",
+            "tool_arguments": {
+                "namespace": "observability",
+                "pod": "prometheus-server-abc",
+                "tail_lines": 100,
+            },
+        }
+    ]
+
+
+def test_structured_tool_exception_wraps_http_status_body() -> None:
+    request = httpx.Request("POST", "https://platform.example/internal")
+    response = httpx.Response(
+        403,
+        request=request,
+        json={"error": {"code": "FORBIDDEN", "message": "Dashboard is not approved"}},
+    )
+    exc = httpx.HTTPStatusError("forbidden", request=request, response=response)
+
+    payload = _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+
+    assert payload["ok"] is False
+    assert payload["status"] == "failed"
+    assert payload["error"]["code"] == "HTTP_403"
+    assert payload["error"]["http_status"] == 403
+    assert payload["error"]["upstream_response"]["error"]["code"] == "FORBIDDEN"
+
+
+async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error() -> None:
+    from incidentflow_mcp.mcp.server import create_mcp_server
+
+    mcp = create_mcp_server()
+    result = await mcp._tool_manager.call_tool(
+        "k8s_get_pod",
+        {"namespace": "default", "pod": "api-123", "tail_lines_typo": 10},
+    )
+
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "VALIDATION_ERROR"
+    assert result["error"]["details"][0]["type"] == "extra_forbidden"
+    assert result["error"]["details"][0]["loc"] == ("tail_lines_typo",)
 
 
 def test_compact_external_status_includes_failed_provider_entries() -> None:

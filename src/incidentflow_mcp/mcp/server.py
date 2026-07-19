@@ -10,12 +10,14 @@ import json
 import logging
 import re
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from types import MethodType
 from typing import Annotated, Any, Literal
 
 import httpx
 from mcp.server.fastmcp import FastMCP
-from pydantic import BaseModel, Field
+from mcp.shared.exceptions import UrlElicitationRequiredError
+from pydantic import BaseModel, Field, ValidationError
 
 from incidentflow_mcp.auth.context import get_current_auth_context
 from incidentflow_mcp.auth.principal import IncidentFlowPrincipal, require_principal
@@ -421,6 +423,63 @@ def _structured_guard_error(raw: str) -> dict[str, Any]:
     return decoded if isinstance(decoded, dict) else {"ok": False, "status": "failed", "error": raw}
 
 
+def _structured_tool_exception(exc: Exception, *, code: str = "TOOL_ERROR") -> dict[str, Any]:
+    """Return a stable MCP tool error envelope for exceptions from upstream clients."""
+    error: dict[str, Any] = {
+        "code": code,
+        "message": str(exc),
+    }
+    if isinstance(exc, ValidationError):
+        error["code"] = "VALIDATION_ERROR"
+        error["details"] = exc.errors()
+    if isinstance(exc, httpx.HTTPStatusError):
+        error["code"] = f"HTTP_{exc.response.status_code}"
+        error["http_status"] = exc.response.status_code
+        try:
+            body = exc.response.json()
+        except ValueError:
+            body = exc.response.text
+        if body:
+            error["upstream_response"] = body
+    return {"ok": False, "status": "failed", "error": error}
+
+
+async def _run_tool_with_structured_errors(
+    tool: Any,
+    arguments: dict[str, Any],
+    context: Any | None = None,
+    convert_result: bool = False,
+) -> Any:
+    """Run a FastMCP tool without converting validation/runtime errors to text-only ToolError."""
+    try:
+        result = await tool.fn_metadata.call_fn_with_arg_validation(
+            tool.fn,
+            tool.is_async,
+            arguments,
+            {tool.context_kwarg: context} if tool.context_kwarg is not None else None,
+        )
+        if convert_result:
+            result = tool.fn_metadata.convert_result(result)
+        return result
+    except UrlElicitationRequiredError:
+        raise
+    except Exception as exc:
+        return _structured_tool_exception(exc)
+
+
+def _harden_fastmcp_tool_contracts(mcp: FastMCP) -> None:
+    """Make FastMCP argument validation strict and keep validation errors structured."""
+    for tool in mcp._tool_manager.list_tools():
+        tool.fn_metadata.arg_model.model_config["extra"] = "forbid"
+        tool.fn_metadata.arg_model.model_rebuild(force=True)
+        tool.parameters = tool.fn_metadata.arg_model.model_json_schema(by_alias=True)
+        object.__setattr__(
+            tool,
+            "run",
+            MethodType(_run_tool_with_structured_errors, tool),
+        )
+
+
 _CAPABILITIES_TOOL_NAME = "incidentflow_capabilities"
 _VERSION_TOOL_NAME = "mcp_version"
 _AUTH_STATUS_TOOL_NAME = "incidentflow_auth_status"
@@ -801,6 +860,84 @@ def _container_restart_count(container: dict[str, Any]) -> int:
         return 0
 
 
+def _parse_k8s_timestamp(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _format_k8s_timestamp(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _container_last_restart_at(container: dict[str, Any]) -> datetime | None:
+    direct = _parse_k8s_timestamp(
+        container.get("last_restart_at") or container.get("lastRestartAt")
+    )
+    if direct is not None:
+        return direct
+    last_state = container.get("last_state") or container.get("lastState") or {}
+    if not isinstance(last_state, dict):
+        return None
+    terminated = last_state.get("terminated") or {}
+    if not isinstance(terminated, dict):
+        return None
+    return _parse_k8s_timestamp(terminated.get("finished_at") or terminated.get("finishedAt"))
+
+
+def _container_last_termination(container: dict[str, Any]) -> dict[str, Any] | None:
+    last_state = container.get("last_state") or container.get("lastState") or {}
+    if not isinstance(last_state, dict):
+        return None
+    terminated = last_state.get("terminated") or {}
+    if not isinstance(terminated, dict) or not terminated:
+        return None
+    return terminated
+
+
+def _restart_window_summary(
+    containers: list[dict[str, Any]],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    checked_at = now or datetime.now(tz=UTC)
+    last_restart_at: datetime | None = None
+    restarts_last_1h = 0
+    restarts_last_24h = 0
+    for container in containers:
+        restart_count = _container_restart_count(container)
+        if restart_count <= 0:
+            continue
+        restarted_at = _container_last_restart_at(container)
+        if restarted_at is None:
+            continue
+        if last_restart_at is None or restarted_at > last_restart_at:
+            last_restart_at = restarted_at
+        age = checked_at - restarted_at
+        if age.total_seconds() < 0:
+            continue
+        if age <= timedelta(hours=1):
+            restarts_last_1h += restart_count
+        if age <= timedelta(hours=24):
+            restarts_last_24h += restart_count
+    return {
+        "last_restart_at": _format_k8s_timestamp(last_restart_at),
+        "restarts_last_1h": restarts_last_1h,
+        "restarts_last_24h": restarts_last_24h,
+    }
+
+
 def _pod_restart_count(pod: dict[str, Any]) -> int:
     containers = pod.get("containers")
     if not isinstance(containers, list):
@@ -813,12 +950,14 @@ def _pod_restart_count(pod: dict[str, Any]) -> int:
 
 
 def _pod_brief(pod: dict[str, Any]) -> dict[str, Any]:
+    containers = [c for c in (pod.get("containers") or []) if isinstance(c, dict)]
     return {
         "namespace": pod.get("namespace"),
         "pod": pod.get("name"),
         "phase": pod.get("phase"),
         "node": pod.get("node_name") or pod.get("nodeName"),
         "restarts": _pod_restart_count(pod),
+        **_restart_window_summary(containers),
     }
 
 
@@ -1628,13 +1767,15 @@ def _diagnose_pod(
     liveness_msgs = [msg for msg in event_messages if "liveness" in msg]
     startup_msgs = [msg for msg in event_messages if "startup" in msg]
     if "unhealthy" in event_reasons:
-        if readiness_msgs:
+        current_probe_failure = bool(not_ready) or phase != "running"
+        restart_probe_failure = total_restarts > 0
+        if readiness_msgs and current_probe_failure:
             issues.append({"type": "ReadinessProbeFailure", "severity": "warning"})
             recommendations.append("Check readiness probe endpoint and application startup time")
-        if liveness_msgs:
+        if liveness_msgs and (current_probe_failure or restart_probe_failure):
             issues.append({"type": "LivenessProbeFailure", "severity": "warning"})
             recommendations.append("Check liveness probe — container may be restarting")
-        if startup_msgs:
+        if startup_msgs and current_probe_failure:
             issues.append({"type": "StartupProbeFailure", "severity": "warning"})
             recommendations.append("Startup probe failed — consider increasing initialDelaySeconds")
 
@@ -1669,12 +1810,143 @@ def _diagnose_pod(
             "Containers are not ready — check readiness probe and application startup"
         )
 
+    historical_warnings: list[str] = []
+    if "unhealthy" in event_reasons and not issues and phase == "running" and not not_ready:
+        if readiness_msgs:
+            historical_warnings.append("ReadinessProbeFailure")
+        if liveness_msgs:
+            historical_warnings.append("LivenessProbeFailure")
+        if startup_msgs:
+            historical_warnings.append("StartupProbeFailure")
+
     healthy = not issues and phase == "running" and not not_ready
     return {
         "healthy": healthy,
         "issues": issues,
+        "historical_warnings": historical_warnings,
         "recommendations": list(dict.fromkeys(recommendations)),
     }
+
+
+def _pod_observations(
+    *,
+    healthy: bool,
+    total_restarts: int,
+    last_restart_at: str | None = None,
+    historical_warnings: list[Any] | None = None,
+) -> list[dict[str, Any]]:
+    observations: list[dict[str, Any]] = []
+    if healthy and total_restarts > 0:
+        observation: dict[str, Any] = {
+            "severity": "info",
+            "code": "HISTORICAL_RESTART",
+            "message": (
+                f"Container restarted {total_restarts} time"
+                f"{'s' if total_restarts != 1 else ''} during the pod lifetime"
+                + (f"; last restart at {last_restart_at}" if last_restart_at else "")
+            ),
+            "count": total_restarts,
+        }
+        if last_restart_at:
+            observation["last_restart_at"] = last_restart_at
+        observations.append(observation)
+
+    for warning in historical_warnings or []:
+        warning_dict = warning if isinstance(warning, dict) else {}
+        code = warning_dict.get("type") if warning_dict else str(warning)
+        if not code:
+            continue
+        if warning_dict and code == "PreviousContainerTermination":
+            observation = {
+                "severity": warning_dict.get("severity") or "info",
+                "code": str(code),
+                "message": warning_dict.get("message")
+                or "Container was previously terminated and the pod recovered",
+                "container": warning_dict.get("container"),
+                "exit_code": warning_dict.get("exit_code"),
+                "reason": warning_dict.get("reason"),
+                "finished_at": warning_dict.get("finished_at"),
+            }
+            observations.append({k: v for k, v in observation.items() if v is not None})
+        else:
+            observations.append(
+                {
+                    "severity": "info",
+                    "code": str(code),
+                    "message": "Historical pod warning observed during startup or rollout",
+                }
+            )
+
+    return observations
+
+
+def _pod_recommendations(
+    diagnosis_recommendations: list[str],
+    *,
+    healthy: bool,
+    total_restarts: int,
+) -> list[str]:
+    if healthy and total_restarts > 0 and not diagnosis_recommendations:
+        return [
+            (
+                "No immediate action required. Check the previous container termination reason "
+                "if the restart was recent or recurring."
+            )
+        ]
+    return diagnosis_recommendations
+
+
+def _pod_next_actions(
+    *,
+    namespace: str,
+    pod: str,
+    healthy: bool,
+    total_restarts: int,
+    source_tool: str,
+) -> list[dict[str, Any]]:
+    if healthy and total_restarts > 0:
+        action = "k8s_describe_pod" if source_tool != "k8s_describe_pod" else "k8s_get_pod_logs"
+        reason = (
+            "Determine the historical restart cause"
+            if action == "k8s_describe_pod"
+            else "Inspect recent logs only if the restart was recent or recurring"
+        )
+        next_action: dict[str, Any] = {
+            "action": action,
+            "priority": "low",
+            "reason": reason,
+            "tool_arguments": {
+                "namespace": namespace,
+                "pod": pod,
+            },
+        }
+        if action == "k8s_get_pod_logs":
+            next_action["tool_arguments"]["tail_lines"] = 100
+        return [next_action]
+    return []
+
+
+def _containers_without_explicit_resources(
+    *,
+    containers: list[dict[str, Any]],
+    resources: dict[str, Any],
+) -> list[str]:
+    resource_items = resources.get("containers") if isinstance(resources, dict) else None
+    if not isinstance(resource_items, list):
+        return []
+    known_container_names = {str(c.get("name") or "") for c in containers if isinstance(c, dict)}
+    missing: list[str] = []
+    for item in resource_items:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        if name not in known_container_names:
+            continue
+        requests = item.get("requests") if isinstance(item.get("requests"), dict) else {}
+        limits = item.get("limits") if isinstance(item.get("limits"), dict) else {}
+        if not requests and not limits:
+            missing.append(name)
+    return missing
 
 
 def _describe_pod_structured(
@@ -1695,15 +1967,37 @@ def _describe_pod_structured(
             "ready": bool(c.get("ready")),
             "restart_count": _container_restart_count(c),
         }
+        last_restart_at = _format_k8s_timestamp(_container_last_restart_at(c))
+        if last_restart_at:
+            entry["last_restart_at"] = last_restart_at
         for extra in ("state", "last_state", "started_at"):
             if extra in c:
                 entry[extra] = c[extra]
         containers_out.append(entry)
 
     total_restarts = sum(c["restart_count"] for c in containers_out)
+    restart_summary = _restart_window_summary(containers_out)
     all_ready = bool(containers_out) and all(c["ready"] for c in containers_out)
 
     diagnosis = _diagnose_pod(pod_raw, pod_events)
+    observations = _pod_observations(
+        healthy=bool(diagnosis["healthy"]),
+        total_restarts=total_restarts,
+        last_restart_at=restart_summary["last_restart_at"],
+        historical_warnings=diagnosis.get("historical_warnings"),
+    )
+    recommendations = _pod_recommendations(
+        diagnosis["recommendations"],
+        healthy=bool(diagnosis["healthy"]),
+        total_restarts=total_restarts,
+    )
+    next_actions = _pod_next_actions(
+        namespace=namespace,
+        pod=pod_name,
+        healthy=bool(diagnosis["healthy"]),
+        total_restarts=total_restarts,
+        source_tool="k8s_get_pod",
+    )
     sorted_events = _sort_events_for_display(_deduplicate_events(pod_events))[:20]
 
     workload = _workload_from_pod_name(pod_name)
@@ -1722,7 +2016,9 @@ def _describe_pod_structured(
         "status": "success",
         "summary": summary,
         "findings": finding_lines,
-        "recommendations": diagnosis["recommendations"],
+        "observations": observations,
+        "recommendations": recommendations,
+        "next_actions": next_actions,
         "data": {
             "pod": {
                 "name": pod_name,
@@ -1735,6 +2031,7 @@ def _describe_pod_structured(
                 "phase": phase,
                 "ready": all_ready,
                 "restart_count": total_restarts,
+                **restart_summary,
             },
             "containers": containers_out,
             "events": [
@@ -1748,6 +2045,8 @@ def _describe_pod_structured(
                 for e in sorted_events
             ],
             "diagnosis": diagnosis,
+            "observations": observations,
+            "next_actions": next_actions,
         },
     }
 
@@ -1820,9 +2119,10 @@ def _diagnose_pod_from_description(
 
         # Last termination reason (OOMKilled)
         # Historical if pod is now Ready with 0 restarts; current if restarts are ongoing
-        last_state = c.get("last_state") or {}
-        last_term = (last_state.get("terminated") or {}) if isinstance(last_state, dict) else {}
-        if str(last_term.get("reason") or "").lower() == "oomkilled":
+        last_term = _container_last_termination(c) or {}
+        termination_reason = str(last_term.get("reason") or "")
+        termination_reason_lower = termination_reason.lower()
+        if termination_reason_lower == "oomkilled":
             if restart_count > 0 or not ready or phase != "running":
                 current_issues.append(
                     {
@@ -1843,6 +2143,24 @@ def _diagnose_pod_from_description(
                         "note": "Pod recovered and is now Ready",
                     }
                 )
+        elif last_term and restart_count > 0 and phase == "running" and ready:
+            exit_code = last_term.get("exit_code") or last_term.get("exitCode")
+            finished_at = last_term.get("finished_at") or last_term.get("finishedAt")
+            message = (
+                f"Container was previously terminated with exit code {exit_code}. "
+                "The pod has remained healthy since restart."
+            )
+            historical_warnings.append(
+                {
+                    "severity": "info",
+                    "type": "PreviousContainerTermination",
+                    "container": name,
+                    "exit_code": exit_code,
+                    "reason": termination_reason,
+                    "finished_at": finished_at,
+                    "message": message,
+                }
+            )
 
     # Pod is currently stable if Running+Ready with no container waiting states
     pod_currently_ok = (
@@ -1976,11 +2294,30 @@ def _build_describe_response(
     pod_name = str(meta.get("name") or "")
     phase = str(status.get("phase") or "")
     total_restarts = sum(int(c.get("restart_count") or 0) for c in containers)
+    restart_summary = _restart_window_summary(containers)
 
     diagnosis = _diagnose_pod_from_description(status, containers, events)
     workload = _workload_from_pod_name(pod_name)
 
     historical = diagnosis.get("historical_warnings") or []
+    observations = _pod_observations(
+        healthy=bool(diagnosis["healthy"]),
+        total_restarts=total_restarts,
+        last_restart_at=restart_summary["last_restart_at"],
+        historical_warnings=historical,
+    )
+    recommendations = _pod_recommendations(
+        diagnosis["recommendations"],
+        healthy=bool(diagnosis["healthy"]),
+        total_restarts=total_restarts,
+    )
+    next_actions = _pod_next_actions(
+        namespace=str(meta.get("namespace") or ""),
+        pod=pod_name,
+        healthy=bool(diagnosis["healthy"]),
+        total_restarts=total_restarts,
+        source_tool="k8s_describe_pod",
+    )
 
     if diagnosis["healthy"]:
         if historical:
@@ -2009,15 +2346,27 @@ def _build_describe_response(
             for i in diagnosis["current_issues"]
         ]
 
-    container_summaries = [
-        {
+    containers_missing_resources = _containers_without_explicit_resources(
+        containers=containers,
+        resources=resources if isinstance(resources, dict) else {},
+    )
+    for container_name in containers_missing_resources:
+        findings.append(
+            f"⚠ {container_name} has no explicit CPU or memory requests/limits"
+        )
+
+    container_summaries = []
+    for c in containers:
+        container_summary = {
             "name": str(c.get("name") or ""),
             "ready": bool(c.get("ready")),
             "restart_count": int(c.get("restart_count") or 0),
             "image": _strip_image_digest(str(c.get("image") or "")),
         }
-        for c in containers
-    ]
+        last_restart_at = _format_k8s_timestamp(_container_last_restart_at(c))
+        if last_restart_at:
+            container_summary["last_restart_at"] = last_restart_at
+        container_summaries.append(container_summary)
     pod_summary = {
         "name": pod_name,
         "namespace": str(meta.get("namespace") or ""),
@@ -2036,6 +2385,7 @@ def _build_describe_response(
             "ready": bool(status.get("ready")),
             "conditions": status.get("conditions") or [],
             "restart_count": total_restarts,
+            **restart_summary,
             "reason": str(status.get("reason") or ""),
             "message": str(status.get("message") or ""),
         },
@@ -2051,6 +2401,8 @@ def _build_describe_response(
             for e in events[:20]
         ],
         "diagnosis": diagnosis,
+        "observations": observations,
+        "next_actions": next_actions,
     }
     if include_details:
         data["resources"] = resources
@@ -2060,7 +2412,9 @@ def _build_describe_response(
         "status": "success",
         "summary": summary,
         "findings": findings,
-        "recommendations": diagnosis["recommendations"],
+        "observations": observations,
+        "recommendations": recommendations,
+        "next_actions": next_actions,
         "data": data,
     }
 
@@ -2098,7 +2452,10 @@ def _unhealthy_pod_entry(pod: dict[str, Any]) -> dict[str, Any]:
     else:
         reason = f"Phase: {phase}"
         likely_cause = "Unexpected pod state"
-        recommendation = "Run k8s_describe_pod for details"
+        recommendation = (
+            "No immediate action required if the pod is Running and Ready. "
+            "Check the previous container termination reason if restarts are recent or recurring."
+        )
 
     return {
         "name": str(pod.get("name") or ""),
@@ -2291,7 +2648,167 @@ def _compact_log_payload(
             "compact": True,
         }
     )
-    return {**payload, "data": compact_data}
+    truncated = len(selected) > 120
+    if truncated:
+        compact_data["truncated"] = True
+    return {
+        **payload,
+        "truncated": bool(payload.get("truncated")) or truncated,
+        "data": compact_data,
+    }
+
+
+_INTERNAL_LOGGER_PATTERNS = (
+    "httpcore.",
+    "httpx",
+    "platform_api.domain.services.agent_registry_service",
+    "mcp.server.lowlevel.server",
+    "mcp.server.streamable_http",
+    "sse_starlette.sse",
+)
+
+
+def _redact_platform_internal_log_line(line: str) -> str:
+    redacted = _redact_sensitive_text(line)
+    redacted = re.sub(r"\b[\w.-]+\.svc\.cluster\.local\b", "<internal-service>", redacted)
+    redacted = re.sub(
+        r"\b(workspace_id|agent_id|cluster_id|request_id|command_id)=['\"]?[\w:.-]+",
+        r"\1=<redacted>",
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(
+        r'"(workspace_id|agent_id|cluster_id|request_id|command_id)"\s*:\s*"[^"]+"',
+        r'"\1":"<redacted>"',
+        redacted,
+        flags=re.IGNORECASE,
+    )
+    redacted = re.sub(r"/internal/[A-Za-z0-9_./-]+", "/internal/<redacted>", redacted)
+    return redacted
+
+
+def _log_category(line: str, *, exclude_loggers: list[str] | None = None) -> str:
+    lowered = line.lower()
+    extra_patterns = tuple(pattern.lower().rstrip("*") for pattern in (exclude_loggers or []))
+    if any(pattern in lowered for pattern in (*_INTERNAL_LOGGER_PATTERNS, *extra_patterns)):
+        return "internal_debug"
+    if any(token in lowered for token in ("status_code", "method=", "path=", "http request")):
+        return "http_access"
+    dependency_tokens = ("redis", "postgres", "database", "upstream", "dependency")
+    if any(token in lowered for token in dependency_tokens):
+        return "dependency"
+    return "application"
+
+
+def _log_pattern(line: str) -> str:
+    text = _redact_platform_internal_log_line(line)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, dict):
+        event = parsed.get("event") or parsed.get("message") or parsed.get("msg")
+        if event:
+            return str(event)[:120]
+    match = re.search(r"\bevent=['\"]([^'\"]+)['\"]", text)
+    if match:
+        return match.group(1)[:120]
+    simplified = re.sub(r"\b\d+(?:\.\d+)?\b", "<num>", text)
+    simplified = re.sub(r"\s+", " ", simplified).strip()
+    return simplified[:120] or "unclassified log line"
+
+
+def _extract_latency_ms(line: str) -> float | None:
+    patterns = (
+        r"\b(?:duration|duration_ms|latency|latency_ms|elapsed_ms)=['\"]?([0-9]+(?:\.[0-9]+)?)",
+        r'"(?:duration_ms|latency_ms|elapsed_ms)"\s*:\s*([0-9]+(?:\.[0-9]+)?)',
+        r"\bin\s+([0-9]+(?:\.[0-9]+)?)\s*ms\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, line, flags=re.IGNORECASE)
+        if match:
+            return float(match.group(1))
+    return None
+
+
+def _analyze_workload_logs(
+    logs_data: dict[str, Any] | None,
+    *,
+    exclude_loggers: list[str] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(logs_data, dict):
+        return {
+            "lines_scanned": 0,
+            "errors": 0,
+            "warnings": 0,
+            "top_patterns": [],
+            "latency": {"p50_ms": None, "max_ms": None},
+            "notable_lines": [],
+            "log_categories": {
+                "application": 0,
+                "http_access": 0,
+                "dependency": 0,
+                "internal_debug": 0,
+            },
+        }
+
+    raw_lines = [str(line) for line in (logs_data.get("lines") or []) if isinstance(line, str)]
+    category_counts = {
+        "application": 0,
+        "http_access": 0,
+        "dependency": 0,
+        "internal_debug": int(logs_data.get("skipped_debug_lines") or 0),
+    }
+    pattern_counts: dict[str, int] = {}
+    notable_lines: list[str] = []
+    latency_values: list[float] = []
+    error_count = 0
+    warning_count = 0
+
+    for line in raw_lines:
+        redacted_line = _redact_platform_internal_log_line(line)
+        lowered = redacted_line.lower()
+        category = _log_category(redacted_line, exclude_loggers=exclude_loggers)
+        category_counts[category] = category_counts.get(category, 0) + 1
+
+        if any(token in lowered for token in ("error", "exception", "traceback", "fatal", "panic")):
+            error_count += 1
+            notable_lines.append(redacted_line)
+        elif any(token in lowered for token in ("warn", "warning", "failed", "timeout")):
+            warning_count += 1
+            notable_lines.append(redacted_line)
+
+        latency_ms = _extract_latency_ms(redacted_line)
+        if latency_ms is not None:
+            latency_values.append(latency_ms)
+
+        if category != "internal_debug":
+            pattern = _log_pattern(redacted_line)
+            pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+
+    latency_values.sort()
+    p50_ms: float | None = None
+    if latency_values:
+        p50_ms = latency_values[len(latency_values) // 2]
+
+    top_patterns = [
+        {"event": event, "count": count}
+        for event, count in sorted(pattern_counts.items(), key=lambda item: item[1], reverse=True)[
+            :5
+        ]
+    ]
+    return {
+        "lines_scanned": int(logs_data.get("line_count") or len(raw_lines)),
+        "errors": error_count,
+        "warnings": warning_count,
+        "top_patterns": top_patterns,
+        "latency": {
+            "p50_ms": p50_ms,
+            "max_ms": max(latency_values) if latency_values else None,
+        },
+        "notable_lines": notable_lines[-10:],
+        "log_categories": category_counts,
+    }
 
 
 def _resolve_job_workspace_id(
@@ -3213,6 +3730,7 @@ def create_mcp_server() -> FastMCP:
         namespace: str | None = None,
         tags: list[str] | None = None,
         workspace_id: str | None = None,
+        score_threshold: float = 0.55,
     ) -> dict[str, Any] | None:
         """Best-effort semantic memory lookup to enrich a diagnostic tool's response.
 
@@ -3243,6 +3761,7 @@ def create_mcp_server() -> FastMCP:
                     cluster=cluster,
                     namespace=namespace,
                     tags=tags,
+                    score_threshold=score_threshold,
                 ),
                 timeout=settings.platform_api_timeout_seconds,
             )
@@ -3256,7 +3775,7 @@ def create_mcp_server() -> FastMCP:
         """Shared consult for pod-describe results (k8s_describe_pod / k8s_debug_pod).
 
         Builds the query from the detected failure signature and only consults when the
-        pod actually looks unhealthy (issues present, not ready, or restarting).
+        pod actually looks unhealthy (issues present or not ready).
         """
         data = describe.get("data") or {}
         diagnosis = data.get("diagnosis") or {}
@@ -3267,8 +3786,7 @@ def create_mcp_server() -> FastMCP:
             if isinstance(i, dict) and i.get("type")
         ]
         not_ready = not bool(status.get("ready"))
-        restarts = int(status.get("restart_count") or 0)
-        if not (issue_types or not_ready or restarts > 0):
+        if not (issue_types or not_ready):
             return None
         query = " ".join([*issue_types, pod, namespace]).strip() or f"{pod} {namespace}"
         return await _consult_memory(query=query, namespace=namespace)
@@ -3696,6 +4214,34 @@ def create_mcp_server() -> FastMCP:
             return {"status": "failed", "error": guard}
         if not namespace:
             return {"status": "failed", "error": _MISSING_NAMESPACE_MESSAGE}
+        if level is not None and level.lower().strip() not in {
+            "trace",
+            "debug",
+            "info",
+            "warn",
+            "warning",
+            "error",
+            "critical",
+            "fatal",
+        }:
+            return {
+                "status": "failed",
+                "error": {
+                    "code": "INVALID_ARGUMENT",
+                    "message": (
+                        "level must be one of: trace, debug, info, warn, warning, "
+                        "error, critical, fatal"
+                    ),
+                },
+            }
+        if since_minutes is not None and not 1 <= since_minutes <= 10080:
+            return {
+                "status": "failed",
+                "error": {
+                    "code": "INVALID_ARGUMENT",
+                    "message": "since_minutes must be between 1 and 10080",
+                },
+            }
         params: dict[str, Any] = {
             "namespace": namespace,
             "pod": pod,
@@ -3910,6 +4456,7 @@ def create_mcp_server() -> FastMCP:
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
+        include_memory_context: bool = False,
         timeout_seconds: int = 30,
     ) -> dict[str, Any]:
         guard = await _require_k8s_context("k8s_show_unhealthy_pods")
@@ -3959,7 +4506,7 @@ def create_mcp_server() -> FastMCP:
             "error": None,
         }
         # Consult memory only when there is a problem to match against.
-        if unhealthy:
+        if include_memory_context and unhealthy:
             reasons = list(dict.fromkeys(e["reason"] for e in unhealthy_entries if e.get("reason")))
             query = " ".join(reasons + ([namespace] if namespace else [])) or "unhealthy pods"
             ctx = await _consult_memory(query=query, namespace=namespace)
@@ -3991,6 +4538,9 @@ def create_mcp_server() -> FastMCP:
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         tail_lines: Annotated[int, Field(ge=1, le=1000)] = 100,
+        include_memory_context: bool = True,
+        include_raw_logs: bool = False,
+        exclude_loggers: list[str] | None = None,
         timeout_seconds: int = 30,
     ) -> dict[str, Any]:
         guard = await _require_k8s_context("k8s_analyze_workload")
@@ -4050,6 +4600,7 @@ def create_mcp_server() -> FastMCP:
             workload,
         )
         logs_data = None
+        log_analysis = _analyze_workload_logs(None, exclude_loggers=exclude_loggers)
         if selected_pod:
             logs = await _send_k8s_agent_command(
                 settings=settings,
@@ -4072,9 +4623,79 @@ def create_mcp_server() -> FastMCP:
                 logs_payload, level=None, contains=None, exclude=None, compact=True
             )
             logs_data = logs_compact.get("data") if isinstance(logs_compact, dict) else None
+            log_analysis = _analyze_workload_logs(
+                logs_data if isinstance(logs_data, dict) else None,
+                exclude_loggers=exclude_loggers,
+            )
         rollout_status = json.loads(rollout).get("data")
+        rollout_inner = (rollout_status or {}).get("rollout") or {}
+        rollout_complete = rollout_inner.get("complete")
+        ready_pods = [
+            p
+            for p in related_pods
+            if isinstance(p, dict)
+            and str(p.get("phase") or "").lower() == "running"
+            and bool([c for c in (p.get("containers") or []) if isinstance(c, dict)])
+            and all(
+                bool(c.get("ready"))
+                for c in (p.get("containers") or [])
+                if isinstance(c, dict)
+            )
+        ]
+        total_restarts = sum(
+            _pod_restart_count(p) for p in related_pods if isinstance(p, dict)
+        )
+        unhealthy_related = [
+            p for p in related_pods if isinstance(p, dict) and _is_unhealthy_pod(p)
+        ]
+        health = "healthy"
+        severity = "info"
+        if unhealthy_related or rollout_complete is False or log_analysis["errors"] > 0:
+            health = "degraded"
+            severity = "critical" if log_analysis["errors"] > 0 else "warning"
+        elif log_analysis["warnings"] > 0 or total_restarts > 0:
+            health = "warning"
+            severity = "warning"
+
+        findings: list[str] = []
+        recommendations: list[str] = []
+        if rollout_complete is True:
+            findings.append("Deployment rollout is complete")
+        elif rollout_complete is False:
+            findings.append("Deployment rollout is not complete")
+            recommendations.append("Check rollout events and deployment conditions")
+        else:
+            findings.append("Deployment rollout status is unknown")
+
+        findings.append(f"{len(ready_pods)}/{len(related_pods)} pods are ready")
+        if total_restarts == 0:
+            findings.append("No restarts detected")
+        else:
+            suffix = "s" if total_restarts != 1 else ""
+            findings.append(f"{total_restarts} restart{suffix} detected")
+            recommendations.append(
+                "Review pod restart timestamps and previous container termination reasons"
+            )
+        if log_analysis["errors"] == 0 and log_analysis["warnings"] == 0:
+            findings.append(
+                f"No error or warning logs found in the last {log_analysis['lines_scanned']} lines"
+            )
+        else:
+            findings.append(
+                f"{log_analysis['errors']} error and "
+                f"{log_analysis['warnings']} warning log lines found"
+            )
+            recommendations.append("Inspect notable log lines and dependency failures")
+
+        summary_state = "healthy" if health == "healthy" else health
+        summary = f"{workload} is {summary_state}"
         report: dict[str, Any] = {
             "status": "success",
+            "summary": summary,
+            "health": health,
+            "severity": severity,
+            "findings": findings,
+            "recommendations": list(dict.fromkeys(recommendations)),
             "data": {
                 "rollout_status": rollout_status,
                 "pods": [
@@ -4083,7 +4704,8 @@ def create_mcp_server() -> FastMCP:
                     if isinstance(p, dict)
                 ],
                 "pods_total": len(related_pods),
-                "logs": logs_data,
+                "log_analysis": log_analysis,
+                "raw_logs": logs_data if include_raw_logs else None,
                 "selected_pod": selected_pod,
                 "hint": (
                     "No matching pod was found for logs."
@@ -4095,11 +4717,7 @@ def create_mcp_server() -> FastMCP:
             "error": None,
         }
         # Consult memory only when the workload looks unhealthy (bad rollout or bad pods).
-        rollout_inner = (rollout_status or {}).get("rollout") or {}
-        unhealthy_related = [
-            p for p in related_pods if isinstance(p, dict) and _is_unhealthy_pod(p)
-        ]
-        if unhealthy_related or rollout_inner.get("complete") is False:
+        if include_memory_context and (unhealthy_related or rollout_inner.get("complete") is False):
             ctx = await _consult_memory(
                 query=f"{workload} {namespace} rollout pod failure", namespace=namespace
             )
@@ -4124,9 +4742,12 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("argocd_connection_health")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _argocd_tools.argocd_connection_health(
-            _argocd_client(), integration_id=integration_id
-        )
+        try:
+            result = await _argocd_tools.argocd_connection_health(
+                _argocd_client(), integration_id=integration_id
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["argocd_list_applications"]))
@@ -4143,17 +4764,20 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("argocd_list_applications")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _argocd_tools.argocd_list_applications(
-            _argocd_client(),
-            integration_id=integration_id,
-            search=search,
-            project=project,
-            namespace=namespace,
-            destination_cluster=destination_cluster,
-            health_status=health_status,
-            sync_status=sync_status,
-            limit=limit,
-        )
+        try:
+            result = await _argocd_tools.argocd_list_applications(
+                _argocd_client(),
+                integration_id=integration_id,
+                search=search,
+                project=project,
+                namespace=namespace,
+                destination_cluster=destination_cluster,
+                health_status=health_status,
+                sync_status=sync_status,
+                limit=limit,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["argocd_get_application"]))
@@ -4166,13 +4790,16 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("argocd_get_application")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _argocd_tools.argocd_get_application(
-            _argocd_client(),
-            name=name,
-            integration_id=integration_id,
-            response_mode=response_mode,
-            history_limit=history_limit,
-        )
+        try:
+            result = await _argocd_tools.argocd_get_application(
+                _argocd_client(),
+                name=name,
+                integration_id=integration_id,
+                response_mode=response_mode,
+                history_limit=history_limit,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["argocd_get_application_resources"]))
@@ -4185,13 +4812,16 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("argocd_get_application_resources")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _argocd_tools.argocd_get_application_resources(
-            _argocd_client(),
-            name=name,
-            integration_id=integration_id,
-            limit=limit,
-            response_mode=response_mode,
-        )
+        try:
+            result = await _argocd_tools.argocd_get_application_resources(
+                _argocd_client(),
+                name=name,
+                integration_id=integration_id,
+                limit=limit,
+                response_mode=response_mode,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["argocd_get_sync_history"]))
@@ -4203,9 +4833,12 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("argocd_get_sync_history")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _argocd_tools.argocd_get_sync_history(
-            _argocd_client(), name=name, integration_id=integration_id, limit=limit
-        )
+        try:
+            result = await _argocd_tools.argocd_get_sync_history(
+                _argocd_client(), name=name, integration_id=integration_id, limit=limit
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["argocd_get_last_operation"]))
@@ -4216,9 +4849,12 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("argocd_get_last_operation")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _argocd_tools.argocd_get_last_operation(
-            _argocd_client(), name=name, integration_id=integration_id
-        )
+        try:
+            result = await _argocd_tools.argocd_get_last_operation(
+                _argocd_client(), name=name, integration_id=integration_id
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["argocd_find_recent_deployments"]))
@@ -4231,13 +4867,16 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("argocd_find_recent_deployments")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _argocd_tools.argocd_find_recent_deployments(
-            _argocd_client(),
-            integration_id=integration_id,
-            project=project,
-            namespace=namespace,
-            limit=limit,
-        )
+        try:
+            result = await _argocd_tools.argocd_find_recent_deployments(
+                _argocd_client(),
+                integration_id=integration_id,
+                project=project,
+                namespace=namespace,
+                limit=limit,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["argocd_analyze_application"]))
@@ -4250,13 +4889,16 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("argocd_analyze_application")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _argocd_tools.argocd_analyze_application(
-            _argocd_client(),
-            name=name,
-            integration_id=integration_id,
-            response_mode=response_mode,
-            history_limit=history_limit,
-        )
+        try:
+            result = await _argocd_tools.argocd_analyze_application(
+                _argocd_client(),
+                name=name,
+                integration_id=integration_id,
+                response_mode=response_mode,
+                history_limit=history_limit,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     def _grafana_client(workspace_id: str | None) -> PlatformGrafanaClient:
@@ -4273,7 +4915,10 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("grafana_list_dashboards")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _grafana_tools.grafana_list_dashboards(_grafana_client(workspace_id))
+        try:
+            result = await _grafana_tools.grafana_list_dashboards(_grafana_client(workspace_id))
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["grafana_get_dashboard"]))
@@ -4286,12 +4931,15 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("grafana_get_dashboard")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _grafana_tools.grafana_get_dashboard(
-            _grafana_client(workspace_id),
-            dashboard_uid=dashboard_uid,
-            response_mode=response_mode,
-            panel_limit=panel_limit,
-        )
+        try:
+            result = await _grafana_tools.grafana_get_dashboard(
+                _grafana_client(workspace_id),
+                dashboard_uid=dashboard_uid,
+                response_mode=response_mode,
+                panel_limit=panel_limit,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["grafana_extract_panel_queries"]))
@@ -4301,9 +4949,12 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("grafana_extract_panel_queries")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _grafana_tools.grafana_extract_panel_queries(
-            _grafana_client(workspace_id), dashboard_uid=dashboard_uid
-        )
+        try:
+            result = await _grafana_tools.grafana_extract_panel_queries(
+                _grafana_client(workspace_id), dashboard_uid=dashboard_uid
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["grafana_metrics_query"]))
@@ -4319,15 +4970,18 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("grafana_metrics_query")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _grafana_tools.grafana_metrics_query(
-            _grafana_client(workspace_id),
-            datasource_uid=datasource_uid,
-            query=query,
-            time=time,
-            response_mode=response_mode,
-            max_series=max_series,
-            max_points=max_points,
-        )
+        try:
+            result = await _grafana_tools.grafana_metrics_query(
+                _grafana_client(workspace_id),
+                datasource_uid=datasource_uid,
+                query=query,
+                time=time,
+                response_mode=response_mode,
+                max_series=max_series,
+                max_points=max_points,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["grafana_metrics_query_range"]))
@@ -4345,17 +4999,20 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("grafana_metrics_query_range")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _grafana_tools.grafana_metrics_query_range(
-            _grafana_client(workspace_id),
-            datasource_uid=datasource_uid,
-            query=query,
-            start=start,
-            end=end,
-            step=step,
-            response_mode=response_mode,
-            max_series=max_series,
-            max_points=max_points,
-        )
+        try:
+            result = await _grafana_tools.grafana_metrics_query_range(
+                _grafana_client(workspace_id),
+                datasource_uid=datasource_uid,
+                query=query,
+                start=start,
+                end=end,
+                step=step,
+                response_mode=response_mode,
+                max_series=max_series,
+                max_points=max_points,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["analyze_dashboard_health"]))
@@ -4373,17 +5030,20 @@ def create_mcp_server() -> FastMCP:
         guard = await _resolve_tool_guard("analyze_dashboard_health")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
-        result = await _grafana_tools.analyze_dashboard_health(
-            _grafana_client(workspace_id),
-            dashboard_uid=dashboard_uid,
-            start=start,
-            end=end,
-            step=step,
-            response_mode=response_mode,
-            panel_limit=panel_limit,
-            max_series=max_series,
-            max_points=max_points,
-        )
+        try:
+            result = await _grafana_tools.analyze_dashboard_health(
+                _grafana_client(workspace_id),
+                dashboard_uid=dashboard_uid,
+                start=start,
+                end=end,
+                step=step,
+                response_mode=response_mode,
+                panel_limit=panel_limit,
+                max_series=max_series,
+                max_points=max_points,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
         return result.model_dump(mode="json")
 
     @mcp.tool(**_tool_metadata(_specs["grafana_get_panel_view"]))
@@ -4398,16 +5058,19 @@ def create_mcp_server() -> FastMCP:
     ) -> dict[str, Any]:
         guard = await _resolve_tool_guard("grafana_get_panel_view")
         if isinstance(guard, str):
-            return {"content": [{"type": "text", "text": guard}]}
-        result = await _grafana_tools.grafana_get_panel_view(
-            _grafana_client(workspace_id),
-            dashboard_uid=dashboard_uid,
-            panel_id=panel_id,
-            start=start,
-            end=end,
-            variables=variables or {},
-            max_points=max_points,
-        )
+            return _structured_guard_error(guard)
+        try:
+            result = await _grafana_tools.grafana_get_panel_view(
+                _grafana_client(workspace_id),
+                dashboard_uid=dashboard_uid,
+                panel_id=panel_id,
+                start=start,
+                end=end,
+                variables=variables or {},
+                max_points=max_points,
+            )
+        except httpx.HTTPStatusError as exc:
+            return _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
         panel_view = result.model_dump(mode="json")
         return {
             "structuredContent": panel_view,
@@ -4434,6 +5097,7 @@ def create_mcp_server() -> FastMCP:
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
+        include_memory_context: bool = False,
         timeout_seconds: int = 30,
     ) -> dict[str, Any]:
         guard = await _require_k8s_context("k8s_describe_pod")
@@ -4460,9 +5124,10 @@ def create_mcp_server() -> FastMCP:
             return payload if isinstance(payload, dict) else {"status": "failed", "error": raw_str}
 
         describe = _build_describe_response(desc, include_details=include_details)
-        ctx = await _consult_pod_memory(describe, pod=pod, namespace=namespace)
-        if ctx:
-            describe["memory_context"] = ctx
+        if include_memory_context:
+            ctx = await _consult_pod_memory(describe, pod=pod, namespace=namespace)
+            if ctx:
+                describe["memory_context"] = ctx
         return _with_integration_context(
             describe,
             guard if isinstance(guard, ResolvedIntegrationContext) else None,
@@ -4478,6 +5143,7 @@ def create_mcp_server() -> FastMCP:
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
+        include_memory_context: bool = True,
         timeout_seconds: int = 30,
     ) -> dict[str, Any]:
         guard = await _require_k8s_context("k8s_debug_pod")
@@ -4564,6 +5230,8 @@ def create_mcp_server() -> FastMCP:
         containers = describe["data"]["containers"]
         historical = diagnosis.get("historical_warnings") or []
         current_issues = diagnosis.get("current_issues") or []
+        observations = describe.get("observations") or describe["data"].get("observations") or []
+        next_actions = describe.get("next_actions") or describe["data"].get("next_actions") or []
 
         total_restarts = int(pod_status.get("restart_count") or 0)
         pod_ready = bool(pod_status.get("ready"))
@@ -4612,11 +5280,15 @@ def create_mcp_server() -> FastMCP:
             "pod_ready": pod_ready,
             "phase": pod_status.get("phase"),
             "restart_count": total_restarts,
+            "last_restart_at": pod_status.get("last_restart_at"),
+            "restarts_last_1h": pod_status.get("restarts_last_1h", 0),
+            "restarts_last_24h": pod_status.get("restarts_last_24h", 0),
             "rollout_complete": rollout_complete,
             "warning_reasons": list(dict.fromkeys(warning_reasons)),
             "log_error_count": log_error_count,
             "log_warning_count": log_warning_count,
             "latest_warning_age_minutes": latest_warning_age_minutes,
+            "observations": observations,
         }
         if include_evidence_details:
             evidence["highlighted_log_lines"] = highlighted[-10:]
@@ -4625,6 +5297,7 @@ def create_mcp_server() -> FastMCP:
                     "name": c.get("name"),
                     "ready": c.get("ready"),
                     "restart_count": c.get("restart_count"),
+                    "last_restart_at": c.get("last_restart_at"),
                     "state": c.get("state"),
                 }
                 for c in containers
@@ -4646,12 +5319,15 @@ def create_mcp_server() -> FastMCP:
             "status": "success",
             "summary": describe["summary"],
             "findings": findings,
+            "observations": observations,
             "recommendations": recommendations,
+            "next_actions": next_actions,
             "evidence": evidence,
         }
-        ctx = await _consult_pod_memory(describe, pod=pod, namespace=namespace)
-        if ctx:
-            report["memory_context"] = ctx
+        if include_memory_context:
+            ctx = await _consult_pod_memory(describe, pod=pod, namespace=namespace)
+            if ctx:
+                report["memory_context"] = ctx
         return _with_integration_context(
             report,
             guard if isinstance(guard, ResolvedIntegrationContext) else None,
@@ -4708,6 +5384,7 @@ def create_mcp_server() -> FastMCP:
         except (MemoryAPIError, ValueError) as exc:
             return {"error": str(exc)}
 
+    _harden_fastmcp_tool_contracts(mcp)
     register_resources(mcp)
 
     return mcp

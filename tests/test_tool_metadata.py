@@ -331,6 +331,7 @@ async def test_submission_risky_tool_inputs_are_structured() -> None:
 
     pod_schema = tools["k8s_get_pod"].inputSchema
     assert pod_schema["properties"]["detail_level"]["enum"] == ["summary", "standard", "debug"]
+    assert pod_schema["additionalProperties"] is False
     assert tools["k8s_get_pod"].outputSchema["type"] == "object"
 
     deployments_schema = tools["k8s_list_deployments"].inputSchema
@@ -345,28 +346,57 @@ async def test_submission_risky_tool_inputs_are_structured() -> None:
     assert "namespace" in logs_schema["required"]
     assert "pod" in logs_schema["required"]
     assert logs_schema["properties"]["tail_lines"]["maximum"] == 1000
+    assert logs_schema["additionalProperties"] is False
     assert tools["k8s_get_pod_logs"].outputSchema["type"] == "object"
 
     unhealthy_schema = tools["k8s_show_unhealthy_pods"].inputSchema
     assert "namespace" in unhealthy_schema["properties"]
+    assert unhealthy_schema["properties"]["include_memory_context"]["default"] is False
     assert tools["k8s_show_unhealthy_pods"].outputSchema["type"] == "object"
 
     analyze_schema = tools["k8s_analyze_workload"].inputSchema
     assert analyze_schema["properties"]["tail_lines"]["maximum"] == 1000
+    assert analyze_schema["properties"]["include_memory_context"]["default"] is True
+    assert analyze_schema["properties"]["include_raw_logs"]["default"] is False
+    exclude_loggers_field = analyze_schema["properties"]["exclude_loggers"]
+    exclude_loggers_variants = exclude_loggers_field.get("anyOf", [exclude_loggers_field])
+    exclude_loggers_array = next(
+        variant for variant in exclude_loggers_variants if variant.get("type") == "array"
+    )
+    assert exclude_loggers_array["items"]["type"] == "string"
     assert tools["k8s_analyze_workload"].outputSchema["type"] == "object"
 
     describe_schema = tools["k8s_describe_pod"].inputSchema
     assert describe_schema["properties"]["include_details"]["default"] is False
+    assert describe_schema["properties"]["include_memory_context"]["default"] is False
     assert tools["k8s_describe_pod"].outputSchema["type"] == "object"
 
     debug_schema = tools["k8s_debug_pod"].inputSchema
     assert debug_schema["properties"]["tail_lines"]["maximum"] == 500
+    assert debug_schema["properties"]["include_memory_context"]["default"] is True
     assert tools["k8s_debug_pod"].outputSchema["type"] == "object"
 
     workload_schema = tools["k8s_analyze_workload"].inputSchema
     assert workload_schema["properties"]["workload"]["type"] == "string"
     assert workload_schema["properties"]["namespace"]["type"] == "string"
     assert workload_schema["required"] == ["workload", "namespace"]
+
+
+def test_registry_k8s_schemas_reject_unknown_arguments() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+
+    assert specs["k8s_get_pod"].input_schema["additionalProperties"] is False
+    assert specs["k8s_get_pod_logs"].input_schema["additionalProperties"] is False
+    assert specs["k8s_get_pod_logs"].input_schema["properties"]["level"]["enum"] == [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "warning",
+        "error",
+        "critical",
+        "fatal",
+    ]
 
 
 @pytest.mark.asyncio

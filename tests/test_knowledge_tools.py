@@ -306,7 +306,14 @@ async def test_memory_consult_single_search_and_grouping() -> None:
         return resp
 
     with patch("httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=fake_post):
-        ctx = await memory_consult(s, "ws-1", "redis oom", service="redis", namespace="prod")
+        ctx = await memory_consult(
+            s,
+            "ws-1",
+            "redis oom",
+            service="redis",
+            namespace="prod",
+            score_threshold=0.55,
+        )
 
     # A single search across all knowledge types, archived excluded.
     assert len(captured) == 1
@@ -315,6 +322,7 @@ async def test_memory_consult_single_search_and_grouping() -> None:
     assert body["exclude_status"] == ["archived"]
     assert body["service"] == "redis"
     assert body["namespace"] == "prod"
+    assert body["score_threshold"] == 0.55
     assert ctx is not None
     assert ctx["total"] == 2
     assert ctx["runbooks"][0]["id"] == "rb-1"
