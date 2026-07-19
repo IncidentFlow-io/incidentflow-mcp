@@ -167,7 +167,9 @@ def _append_warning(payload: dict[str, Any], warning: str) -> None:
         warnings.append(warning)
 
 
-def _trim_samples(series: list[dict[str, Any]], *, max_points: int) -> tuple[list[dict[str, Any]], bool]:
+def _trim_samples(
+    series: list[dict[str, Any]], *, max_points: int
+) -> tuple[list[dict[str, Any]], bool]:
     truncated = False
     compact_series: list[dict[str, Any]] = []
     for item in series:
@@ -311,9 +313,18 @@ async def grafana_extract_panel_queries(
 
 
 async def grafana_metrics_query(
-    client: GrafanaReadClient, *, datasource_uid: str, query: str, time: str | None = None
+    client: GrafanaReadClient,
+    *,
+    datasource_uid: str,
+    query: str,
+    time: str | None = None,
+    response_mode: ResponseMode = "compact",
+    max_series: int = 20,
+    max_points: int = 120,
 ) -> QueryOutput:
     payload = await client.query(datasource_uid=datasource_uid, query=query, time=time)
+    if response_mode == "compact":
+        payload = _compact_query_payload(payload, max_series=max_series, max_points=max_points)
     return QueryOutput.model_validate(payload)
 
 

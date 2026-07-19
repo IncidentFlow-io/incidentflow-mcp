@@ -1314,7 +1314,8 @@ _TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Use this when you need a point-in-time PromQL result from an approved Grafana "
             "datasource. Runs an instant query through platform-api, where PromQL guardrails, "
-            "workspace policy, and label sanitization are enforced server-side."
+            "workspace policy, and label sanitization are enforced server-side. Defaults to "
+            "response_mode=compact with bounded series and samples."
         ),
         input_schema={
             "type": "object",
@@ -1326,6 +1327,26 @@ _TOOL_SPECS: list[ToolSpec] = [
                     "description": "Optional evaluation time (RFC3339 or unix seconds).",
                 },
                 "workspace_id": {"type": "string", "description": "Optional workspace scope."},
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "compact trims series/samples; full returns API payload.",
+                },
+                "max_series": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 100,
+                    "description": "Maximum metric series in compact mode.",
+                },
+                "max_points": {
+                    "type": "integer",
+                    "default": 120,
+                    "minimum": 1,
+                    "maximum": 1000,
+                    "description": "Maximum samples per series in compact mode.",
+                },
             },
             "required": ["datasource_uid", "query"],
         },

@@ -86,6 +86,10 @@ def _load_submission_tools() -> dict:
     return payload["tools"]
 
 
+def _payload(result: object) -> dict:
+    return result if isinstance(result, dict) else json.loads(result)
+
+
 def test_all_registry_tools_have_submission_metadata() -> None:
     specs = get_tool_specs()
 
@@ -155,7 +159,7 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     mcp = create_mcp_server()
     tool_manager = mcp._tool_manager
     result = await tool_manager.call_tool("incidentflow_capabilities", {})
-    payload = result if isinstance(result, dict) else json.loads(result)
+    payload = _payload(result)
 
     operational_names = EXPECTED_TOOL_NAMES - {
         "incidentflow_capabilities",
@@ -194,7 +198,7 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     full_result = await tool_manager.call_tool(
         "incidentflow_capabilities", {"response_mode": "full", "category": "knowledge"}
     )
-    full_payload = full_result if isinstance(full_result, dict) else json.loads(full_result)
+    full_payload = _payload(full_result)
     assert [category["id"] for category in full_payload["categories"]] == ["knowledge"]
     assert "description" in full_payload["categories"][0]["tools"][0]
 
@@ -256,7 +260,7 @@ async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatc
     mcp = create_mcp_server()
     tool_manager = mcp._tool_manager
     result = await tool_manager.call_tool("mcp_version", {})
-    payload = json.loads(result)
+    payload = _payload(result)
 
     assert payload["service"] == "incidentflow-mcp"
     assert payload["version"] == "1.0.0"
@@ -299,7 +303,7 @@ async def test_mcp_version_normalizes_prod_tag(monkeypatch: pytest.MonkeyPatch) 
     mcp = create_mcp_server()
     tool_manager = mcp._tool_manager
     result = await tool_manager.call_tool("mcp_version", {})
-    payload = json.loads(result)
+    payload = _payload(result)
 
     assert payload["version"] == "1.0.0"
     assert payload["environment"] == "prod"

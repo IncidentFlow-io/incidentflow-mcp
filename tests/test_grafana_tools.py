@@ -187,6 +187,44 @@ class TestMetricsQuery:
         assert out.series[0].samples[0].value == 1.0
         assert client.calls[0][1]["time"] == "123"
 
+    async def test_instant_query_compact_mode_trims_series_and_samples(self) -> None:
+        client = FakeClient(
+            query={
+                "datasource_uid": "ds1",
+                "query": "up",
+                "result_type": "vector",
+                "series": [
+                    {
+                        "metric": {"job": "a"},
+                        "samples": [
+                            {"timestamp": 1.0, "value": 1.0},
+                            {"timestamp": 2.0, "value": 2.0},
+                        ],
+                    },
+                    {
+                        "metric": {"job": "b"},
+                        "samples": [{"timestamp": 1.0, "value": 1.0}],
+                    },
+                ],
+            }
+        )
+
+        out = await grafana_metrics_query(
+            client,
+            datasource_uid="ds1",
+            query="up",
+            max_series=1,
+            max_points=1,
+        )
+        payload = out.model_dump()
+
+        assert payload["truncated"] is True
+        assert payload["series_returned"] == 1
+        assert payload["series_total"] == 2
+        assert len(payload["series"]) == 1
+        assert payload["series"][0]["samples"][0]["timestamp"] == 2.0
+        assert payload["series"][0]["samples_truncated"] is True
+
     async def test_range_query_passthrough(self) -> None:
         client = FakeClient(
             query_range={

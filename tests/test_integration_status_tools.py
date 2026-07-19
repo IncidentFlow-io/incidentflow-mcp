@@ -28,6 +28,10 @@ def _set_context() -> None:
     )
 
 
+def _payload(result: object) -> dict:
+    return result if isinstance(result, dict) else json.loads(result)
+
+
 @pytest.fixture(autouse=True)
 def _clear_auth_context() -> None:
     clear_current_auth_context()
@@ -71,7 +75,7 @@ async def test_incidentflow_auth_status_returns_safe_principal(
     _set_context()
 
     result = await create_mcp_server()._tool_manager.call_tool("incidentflow_auth_status", {})
-    payload = json.loads(result)
+    payload = _payload(result)
 
     assert payload == {
         "authenticated": True,
@@ -121,7 +125,7 @@ async def test_incidentflow_auth_status_redacts_token_like_client_id(
     set_current_auth_context(context)
 
     result = await create_mcp_server()._tool_manager.call_tool("incidentflow_auth_status", {})
-    payload = json.loads(result)
+    payload = _payload(result)
 
     assert payload["client"] == {"name": "OAuth MCP client", "type": "mcp"}
     assert "if_oac" not in json.dumps(payload)
@@ -163,7 +167,7 @@ async def test_incidentflow_auth_status_includes_connected_integrations(
             {},
         )
 
-    payload = json.loads(result)
+    payload = _payload(result)
 
     assert payload["connectedIntegrations"] == ["kubernetes", "grafana", "argocd"]
     assert payload["availableToolGroups"] == [
@@ -195,7 +199,7 @@ async def test_integrations_status_shows_shared_dev_kubernetes_fallback(
         "incidentflow_integrations_status",
         {},
     )
-    payload = json.loads(result)
+    payload = _payload(result)
 
     assert payload["kubernetes"]["status"] == "connected"
     assert payload["kubernetes"]["source"] == "shared_dev"
@@ -297,7 +301,7 @@ async def test_integrations_status_uses_workspace_platform_status(
         "incidentflow_integrations_status",
         {},
     )
-    payload = json.loads(result)
+    payload = _payload(result)
 
     assert payload["slack"]["status"] == "not_connected"
     assert payload["slack"]["actions"][0]["label"] == "Connect Slack"
@@ -381,7 +385,7 @@ async def test_integrations_status_prefers_internal_workspace_status(
         "incidentflow_integrations_status",
         {},
     )
-    payload = json.loads(result)
+    payload = _payload(result)
 
     assert payload["slack"]["status"] == "not_connected"
     assert payload["slack"]["actions"][0]["url"] == "https://app-dev.incidentflow.io/integrations"
@@ -405,7 +409,7 @@ async def test_grafana_tool_returns_standard_not_connected_response(
     _set_context()
 
     result = await create_mcp_server()._tool_manager.call_tool("grafana_list_dashboards", {})
-    payload = result if isinstance(result, dict) else json.loads(result)
+    payload = _payload(result)
 
     assert payload["ok"] is False
     assert payload["code"] == "INTEGRATION_NOT_CONNECTED"
@@ -425,7 +429,7 @@ async def test_argocd_tool_returns_standard_not_connected_response(
     _set_context()
 
     result = await create_mcp_server()._tool_manager.call_tool("argocd_connection_health", {})
-    payload = result if isinstance(result, dict) else json.loads(result)
+    payload = _payload(result)
 
     assert payload["ok"] is False
     assert payload["code"] == "INTEGRATION_NOT_CONNECTED"

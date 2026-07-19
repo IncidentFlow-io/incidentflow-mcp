@@ -59,6 +59,12 @@ async def test_server_registers_grafana_tools() -> None:
     )
     assert tools["grafana_get_dashboard"].inputSchema["properties"]["panel_limit"]["maximum"] == 100
     assert (
+        tools["grafana_metrics_query"].inputSchema["properties"]["response_mode"]["default"]
+        == "compact"
+    )
+    assert tools["grafana_metrics_query"].inputSchema["properties"]["max_series"]["maximum"] == 100
+    assert tools["grafana_metrics_query"].inputSchema["properties"]["max_points"]["maximum"] == 1000
+    assert (
         tools["grafana_metrics_query_range"].inputSchema["properties"]["max_points"]["maximum"]
         == 1000
     )
