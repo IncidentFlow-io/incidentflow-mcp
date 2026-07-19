@@ -30,6 +30,10 @@ from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
 from incidentflow_mcp.tools.registry import get_tool_specs
 
 
+def _payload(result: object) -> dict:
+    return result if isinstance(result, dict) else json.loads(result)
+
+
 class FakeAgentClusterClient:
     def __init__(self, clusters: list[dict]) -> None:
         self.clusters = clusters
@@ -813,7 +817,7 @@ def test_normalize_polled_incident_summary_job_running_returns_async() -> None:
         job={"status": "running"},
         poll_after_seconds=2,
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert payload["mode"] == "async"
     assert payload["job_id"] == "sum_1"
@@ -833,7 +837,7 @@ def test_normalize_polled_incident_summary_job_terminal_returns_completed_payloa
         },
         poll_after_seconds=2,
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert payload["mode"] == "completed"
     assert payload["job_id"] == "sum_2"
@@ -857,7 +861,7 @@ def test_normalize_polled_incident_summary_job_rejects_external_status_result() 
         },
         poll_after_seconds=2,
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert payload["status"] == "failed"
     assert payload["error"]["code"] == "JOB_OPERATION_MISMATCH"
@@ -875,11 +879,11 @@ def test_normalize_polled_incident_summary_job_rejects_wrong_job_type() -> None:
         },
         poll_after_seconds=2,
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert payload["status"] == "failed"
     assert payload["error"]["expected_job_type"] == "incident.summary.generate"
-    assert "Should not leak" not in output
+    assert "Should not leak" not in json.dumps(payload)
 
 
 def test_normalize_polled_incident_summary_job_failed_returns_error() -> None:
@@ -888,7 +892,7 @@ def test_normalize_polled_incident_summary_job_failed_returns_error() -> None:
         job={"status": "failed", "error": "runner crashed"},
         poll_after_seconds=2,
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert payload["mode"] == "completed"
     assert payload["status"] == "failed"
@@ -902,7 +906,7 @@ def test_normalize_polled_external_status_job_running_returns_async() -> None:
         poll_after_seconds=2,
         response_mode="compact",
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert payload["mode"] == "async"
     assert payload["job_id"] == "job_1"
@@ -951,7 +955,7 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
         poll_after_seconds=2,
         response_mode="compact",
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert payload["status"] == "ok"
     assert payload["checked_at"] == "2026-03-17T18:00:00Z"
@@ -985,7 +989,7 @@ def test_normalize_polled_external_status_job_terminal_returns_full_payload() ->
         poll_after_seconds=2,
         response_mode="full",
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert payload["mode"] == "completed"
     assert payload["response_mode"] == "full"
@@ -1025,7 +1029,7 @@ async def test_external_status_check_starts_new_job_when_check_id_missing() -> N
         wait_for_result=False,
         response_mode="compact",
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert fake_client.submit_calls == 1
     assert fake_client.get_calls == 0
@@ -1069,7 +1073,7 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
         check_id="existing_job",
         response_mode="compact",
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert fake_client.submit_calls == 0
     assert fake_client.get_calls == 1
@@ -1138,7 +1142,7 @@ async def test_external_status_check_uses_default_workspace_when_omitted() -> No
         wait_for_result=False,
         response_mode="compact",
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert fake_client.payload is not None
     assert fake_client.payload["workspace_id"] == "35b02121-716b-4097-a851-84485d39b76f"
@@ -1177,7 +1181,7 @@ async def test_external_status_check_uses_token_workspace_when_omitted() -> None
         response_mode="compact",
         token_workspace_id="7b6f0f1d-8e89-4a53-85ef-bc2e4cd9ba9b",
     )
-    payload = json.loads(output)
+    payload = _payload(output)
 
     assert fake_client.payload is not None
     assert fake_client.payload["workspace_id"] == "7b6f0f1d-8e89-4a53-85ef-bc2e4cd9ba9b"

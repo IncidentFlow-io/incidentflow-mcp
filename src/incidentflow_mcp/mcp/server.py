@@ -2384,7 +2384,7 @@ def _build_async_result(
     status: str,
     poll_after_seconds: int,
     extra: dict[str, Any] | None = None,
-) -> str:
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "mode": "async",
         "job_id": job_id,
@@ -2393,7 +2393,7 @@ def _build_async_result(
     }
     if extra:
         payload.update(extra)
-    return json.dumps(payload, indent=2)
+    return payload
 
 
 def _compact_incident(incident: Any) -> dict[str, Any]:
@@ -2543,7 +2543,7 @@ def _normalize_polled_external_status_job(
     job: dict[str, Any],
     poll_after_seconds: int,
     response_mode: str,
-) -> str:
+) -> dict[str, Any]:
     status = str(job.get("status", "unknown"))
     if not _polled_job_matches(job, expected_job_type="alert.group.summary.generate"):
         return _polled_job_mismatch_result(
@@ -2567,7 +2567,11 @@ def _normalize_polled_external_status_job(
             else job.get("result")
         )
         if response_mode == "compact" and status == "succeeded":
-            return json.dumps(normalized_result, indent=2)
+            return (
+                normalized_result
+                if isinstance(normalized_result, dict)
+                else {"status": status, "result": normalized_result}
+            )
         payload: dict[str, Any] = {
             "mode": "completed",
             "job_id": job_id,
@@ -2579,7 +2583,7 @@ def _normalize_polled_external_status_job(
             "updated_at": job.get("updated_at"),
             "response_mode": response_mode,
         }
-        return json.dumps(payload, indent=2)
+        return payload
 
     return _build_async_result(
         job_id=job_id,
@@ -2593,7 +2597,7 @@ def _normalize_polled_incident_summary_job(
     job_id: str,
     job: dict[str, Any],
     poll_after_seconds: int,
-) -> str:
+) -> dict[str, Any]:
     status = str(job.get("status", "unknown"))
     if not _polled_job_matches(job, expected_job_type="incident.summary.generate"):
         return _polled_job_mismatch_result(
@@ -2614,7 +2618,7 @@ def _normalize_polled_incident_summary_job(
             "usage": job.get("usage"),
             "updated_at": job.get("updated_at"),
         }
-        return json.dumps(payload, indent=2)
+        return payload
 
     # Still in flight (admitted/queued/dispatched/running or unknown) — report status.
     return _build_async_result(
@@ -2656,24 +2660,21 @@ def _polled_job_mismatch_result(
     status: str,
     expected_tool: str,
     expected_job_type: str,
-) -> str:
-    return json.dumps(
-        {
-            "mode": "completed",
-            "job_id": job_id,
-            "status": "failed",
-            "error": {
-                "code": "JOB_OPERATION_MISMATCH",
-                "message": (
-                    "check_id belongs to a different async operation; start a new "
-                    f"{expected_tool} job or poll the matching tool."
-                ),
-                "expected_job_type": expected_job_type,
-                "observed_status": status,
-            },
+) -> dict[str, Any]:
+    return {
+        "mode": "completed",
+        "job_id": job_id,
+        "status": "failed",
+        "error": {
+            "code": "JOB_OPERATION_MISMATCH",
+            "message": (
+                "check_id belongs to a different async operation; start a new "
+                f"{expected_tool} job or poll the matching tool."
+            ),
+            "expected_job_type": expected_job_type,
+            "observed_status": status,
         },
-        indent=2,
-    )
+    }
 
 
 async def _poll_until_done(
@@ -2709,7 +2710,7 @@ async def _execute_external_status_check(
     days_back: int = 30,
     response_mode: str = "compact",
     token_workspace_id: str | None = None,
-) -> str:
+) -> dict[str, Any]:
     resolved_token_workspace_id = token_workspace_id or _current_token_workspace_id()
     resolved_workspace_id = _resolve_job_workspace_id(
         workspace_id,
@@ -2820,25 +2821,21 @@ def create_mcp_server() -> FastMCP:
         return _incidentflow_capabilities_payload(response_mode=response_mode, category=category)
 
     @mcp.tool(**_tool_metadata(_specs["mcp_version"]))
-    async def mcp_version() -> str:
-        return _json(_mcp_version_payload(settings))
+    async def mcp_version() -> dict[str, Any]:
+        return _mcp_version_payload(settings)
 
     @mcp.tool(**_tool_metadata(_specs["incidentflow_auth_status"]))
-    async def incidentflow_auth_status() -> str:
-        return _json(
-            await _incidentflow_auth_status_payload(
-                settings=settings,
-                principal=_current_principal(settings),
-            )
+    async def incidentflow_auth_status() -> dict[str, Any]:
+        return await _incidentflow_auth_status_payload(
+            settings=settings,
+            principal=_current_principal(settings),
         )
 
     @mcp.tool(**_tool_metadata(_specs["incidentflow_integrations_status"]))
-    async def incidentflow_integrations_status() -> str:
-        return _json(
-            await _incidentflow_integrations_status_payload(
-                settings=settings,
-                principal=_current_principal(settings),
-            )
+    async def incidentflow_integrations_status() -> dict[str, Any]:
+        return await _incidentflow_integrations_status_payload(
+            settings=settings,
+            principal=_current_principal(settings),
         )
 
     from incidentflow_mcp.tools.knowledge_search_tools import (
@@ -2917,7 +2914,7 @@ def create_mcp_server() -> FastMCP:
         workspace_id: str | None = None,
         check_id: str | None = None,
         wait_for_result: bool = True,
-    ) -> str:
+    ) -> dict[str, Any]:
         # Poll/fetch an existing async summary job instead of creating a new one.
         if check_id:
             client = PlatformAPIJobsClient(settings)
@@ -2958,7 +2955,7 @@ def create_mcp_server() -> FastMCP:
             ctx = await _consult_memory(query=query, service=service, workspace_id=workspace_id)
             if ctx:
                 data["memory_context"] = ctx
-            return json.dumps(data, indent=2)
+            return data
 
         client = PlatformAPIJobsClient(settings)
         submitted = await client.submit_job(
@@ -3011,7 +3008,7 @@ def create_mcp_server() -> FastMCP:
         min_cluster_size: int = 2,
         execution_mode: str = "auto",
         workspace_id: str | None = None,
-    ) -> str:
+    ) -> dict[str, Any]:
         normalized_alerts = _normalize_correlation_alerts(alerts, alerts_json)
         input_data = CorrelateAlertsInput(
             alerts=normalized_alerts,
@@ -3033,7 +3030,7 @@ def create_mcp_server() -> FastMCP:
             )
             if ctx:
                 data["memory_context"] = ctx
-        return json.dumps(data, indent=2)
+        return data
 
     @mcp.tool(**_tool_metadata(_specs["external_status_check"]))
     async def external_status_check(
@@ -3044,7 +3041,7 @@ def create_mcp_server() -> FastMCP:
         wait_for_result: bool = True,
         days_back: int = 30,
         response_mode: str = "compact",
-    ) -> str:
+    ) -> dict[str, Any]:
         mode = _resolve_external_status_mode(execution_mode)
         if mode != "async":
             raise ValueError("external_status_check supports async orchestration only")
@@ -3324,23 +3321,21 @@ def create_mcp_server() -> FastMCP:
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
-    ) -> str:
+    ) -> dict[str, Any]:
         guard = await _require_k8s_context("k8s_connection_health")
         if isinstance(guard, str):
-            return guard
+            return _structured_guard_error(guard)
         if isinstance(guard, ResolvedIntegrationContext) and guard.source == "shared_dev":
             cluster_id = cluster_id or guard.resource_id
         client = PlatformAPIAgentCommandsClient(settings)
-        return attach_integration_context(
-            _json(
-                await _k8s_connection_health_payload(
-                    client=client,
-                    bearer_token=_current_bearer_token(),
-                    cluster_id=cluster_id,
-                    environment=environment,
-                    cluster_name=cluster_name,
-                    timeout_seconds=timeout_seconds,
-                )
+        return _with_integration_context(
+            await _k8s_connection_health_payload(
+                client=client,
+                bearer_token=_current_bearer_token(),
+                cluster_id=cluster_id,
+                environment=environment,
+                cluster_name=cluster_name,
+                timeout_seconds=timeout_seconds,
             ),
             guard if isinstance(guard, ResolvedIntegrationContext) else None,
             settings,
@@ -3443,10 +3438,10 @@ def create_mcp_server() -> FastMCP:
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
-    ) -> str:
+    ) -> dict[str, Any]:
         guard = await _require_k8s_context("k8s_rbac_check")
         if isinstance(guard, str):
-            return guard
+            return _structured_guard_error(guard)
         if isinstance(guard, ResolvedIntegrationContext) and guard.source == "shared_dev":
             cluster_id = cluster_id or guard.resource_id
         client = PlatformAPIAgentCommandsClient(settings)
@@ -3465,8 +3460,8 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
         )
         payload["cluster_id"] = resolved_cluster_id
-        return attach_integration_context(
-            _json(payload),
+        return _with_integration_context(
+            payload,
             guard if isinstance(guard, ResolvedIntegrationContext) else None,
             settings,
         )
@@ -3477,23 +3472,21 @@ def create_mcp_server() -> FastMCP:
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
-    ) -> str:
+    ) -> dict[str, Any]:
         guard = await _require_k8s_context("k8s_agent_status")
         if isinstance(guard, str):
-            return guard
+            return _structured_guard_error(guard)
         if isinstance(guard, ResolvedIntegrationContext) and guard.source == "shared_dev":
             cluster_id = cluster_id or guard.resource_id
         _ = timeout_seconds
         client = PlatformAPIAgentCommandsClient(settings)
-        return attach_integration_context(
-            _json(
-                await _k8s_agent_status_payload(
-                    client=client,
-                    bearer_token=_current_bearer_token(),
-                    cluster_id=cluster_id,
-                    environment=environment,
-                    cluster_name=cluster_name,
-                )
+        return _with_integration_context(
+            await _k8s_agent_status_payload(
+                client=client,
+                bearer_token=_current_bearer_token(),
+                cluster_id=cluster_id,
+                environment=environment,
+                cluster_name=cluster_name,
             ),
             guard if isinstance(guard, ResolvedIntegrationContext) else None,
             settings,
@@ -4315,12 +4308,21 @@ def create_mcp_server() -> FastMCP:
         query: str,
         time: str | None = None,
         workspace_id: str | None = None,
+        response_mode: Literal["compact", "full"] = "compact",
+        max_series: Annotated[int, Field(ge=1, le=100)] = 20,
+        max_points: Annotated[int, Field(ge=1, le=1000)] = 120,
     ) -> dict[str, Any]:
         guard = await _resolve_tool_guard("grafana_metrics_query")
         if isinstance(guard, str):
             return _structured_guard_error(guard)
         result = await _grafana_tools.grafana_metrics_query(
-            _grafana_client(workspace_id), datasource_uid=datasource_uid, query=query, time=time
+            _grafana_client(workspace_id),
+            datasource_uid=datasource_uid,
+            query=query,
+            time=time,
+            response_mode=response_mode,
+            max_series=max_series,
+            max_points=max_points,
         )
         return result.model_dump(mode="json")
 
