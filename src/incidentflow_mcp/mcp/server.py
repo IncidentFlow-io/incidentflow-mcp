@@ -878,7 +878,7 @@ def _event_pod_name(event: dict[str, Any]) -> str | None:
             return name
     value = event.get("object") or event.get("involved_object_name") or event.get("name")
     if isinstance(value, str):
-        match = re.search(r"\bpod/([^\s]+)", value)
+        match = re.search(r"\bpod/([^\s]+)", value, flags=re.IGNORECASE)
         if match:
             return match.group(1)
     return None
@@ -907,11 +907,15 @@ def _classify_warning_event(
     pod = pods_by_name.get(pod_name or "")
     pod_ready = _is_ready_pod(pod) if pod is not None else False
     stale = age_minutes is not None and age_minutes >= stale_after_minutes
-    classification = "stale_rollout_warning" if stale and pod_ready else "active_warning"
+    pod_was_replaced = pod_name is not None and pod is None
+    classification = (
+        "stale_rollout_warning" if stale and (pod_ready or pod_was_replaced) else "active_warning"
+    )
 
     return {
         **event,
         "pod": pod_name,
+        "pod_exists": pod is not None if pod_name else None,
         "pod_ready": pod_ready,
         "age_minutes": age_minutes,
         "classification": classification,
@@ -1373,7 +1377,7 @@ def _is_unhealthy_pod(pod: dict[str, Any]) -> bool:
         if container.get("ready") is False:
             return True
         try:
-            if int(container.get("restart_count") or container.get("restartCount") or 0) > 0:
+            if int(container.get("restart_count") or container.get("restartCount") or 0) > 5:
                 return True
         except (TypeError, ValueError):
             continue

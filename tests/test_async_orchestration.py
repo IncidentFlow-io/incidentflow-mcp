@@ -644,6 +644,67 @@ def test_overview_downgrades_stale_warning_for_ready_pod() -> None:
     assert payload["warning_event_summary"]["stale_rollout_warning_events"] == 1
 
 
+def test_overview_downgrades_stale_warning_for_replaced_pod() -> None:
+    last_seen = (datetime.now(UTC) - timedelta(minutes=20)).isoformat()
+    payload = _overview_payload(
+        namespaces=["incidentflow-dev"],
+        pods=[
+            {
+                "name": "incidentflow-mcp-new",
+                "namespace": "incidentflow-dev",
+                "phase": "Running",
+                "containers": [{"ready": True, "restart_count": 0}],
+            }
+        ],
+        deployments=[],
+        services=[],
+        events=[
+            {
+                "type": "Warning",
+                "reason": "Unhealthy",
+                "object": "Pod/incidentflow-mcp-old",
+                "last_seen": last_seen,
+            }
+        ],
+        namespace="incidentflow-dev",
+    )
+
+    stale_example = payload["warning_event_summary"]["stale_examples"][0]
+    assert payload["warning_event_summary"]["active_warning_events"] == 0
+    assert payload["warning_event_summary"]["stale_rollout_warning_events"] == 1
+    assert stale_example["pod"] == "incidentflow-mcp-old"
+    assert stale_example["pod_exists"] is False
+
+
+def test_overview_treats_single_restart_ready_pod_as_healthy() -> None:
+    payload = _overview_payload(
+        namespaces=["observability"],
+        pods=[
+            {
+                "name": "prometheus-server-abc",
+                "namespace": "observability",
+                "phase": "Running",
+                "containers": [{"ready": True, "restart_count": 1}],
+            }
+        ],
+        deployments=[],
+        services=[],
+        events=[],
+        namespace="observability",
+    )
+
+    assert payload["pods_unhealthy"] == 0
+    assert payload["top_restarts"] == [
+        {
+            "namespace": "observability",
+            "pod": "prometheus-server-abc",
+            "phase": "Running",
+            "node": None,
+            "restarts": 1,
+        }
+    ]
+
+
 def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
     payload = {
         "status": "succeeded",
