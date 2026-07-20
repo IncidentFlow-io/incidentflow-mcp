@@ -211,6 +211,13 @@ def _compact_dashboard_payload(payload: dict[str, Any], *, panel_limit: int) -> 
     if not isinstance(dashboard, dict):
         return compact
 
+    if not compact.get("uid") and dashboard.get("uid"):
+        compact["uid"] = dashboard.get("uid")
+    if not compact.get("title") and dashboard.get("title"):
+        compact["title"] = dashboard.get("title")
+    if not compact.get("folder") and dashboard.get("folder"):
+        compact["folder"] = dashboard.get("folder")
+
     panels = dashboard.get("panels")
     compact_dashboard = {
         key: dashboard.get(key)
@@ -277,6 +284,21 @@ def _compact_analyze_payload(
                 f"per panel, and {max_points} samples per series."
             ),
         )
+    return compact
+
+
+def _with_panel_view_cardinality(payload: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(payload)
+    series = compact.get("series")
+    data = compact.get("data")
+
+    if isinstance(series, list):
+        compact.setdefault("series_returned", len(series))
+        compact.setdefault("series_total", len(series))
+    if isinstance(data, list):
+        compact.setdefault("samples_returned", len(data))
+        compact.setdefault("samples_total", len(data))
+    compact.setdefault("truncated", bool(compact.get("warnings")))
     return compact
 
 
@@ -386,4 +408,5 @@ async def grafana_get_panel_view(
         variables=variables or {},
         max_points=max_points,
     )
+    payload = _with_panel_view_cardinality(payload)
     return PanelViewOutput.model_validate(payload)

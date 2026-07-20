@@ -155,6 +155,26 @@ class TestGetDashboard:
         assert payload["dashboard"]["panels"][0] == {"id": 1, "title": "A", "type": "timeseries"}
         assert "Dashboard panels trimmed to 1." in payload["warnings"]
 
+    async def test_compact_mode_populates_top_level_metadata_from_nested_dashboard(self) -> None:
+        client = FakeClient(
+            get_dashboard={
+                "uid": "",
+                "title": "",
+                "dashboard": {
+                    "uid": "incidentflow-platform-api",
+                    "title": "IncidentFlow Platform API",
+                    "folder": "IncidentFlow",
+                    "panels": [],
+                },
+            }
+        )
+
+        out = await grafana_get_dashboard(client, dashboard_uid="incidentflow-platform-api")
+
+        assert out.uid == "incidentflow-platform-api"
+        assert out.title == "IncidentFlow Platform API"
+        assert out.folder == "IncidentFlow"
+
 
 class TestExtractQueries:
     async def test_maps_queries(self) -> None:
@@ -416,3 +436,30 @@ class TestPanelView:
         assert out.data[0].model_extra == {"series_0": 1.0}
         assert client.calls[0][0] == "get_panel_view"
         assert client.calls[0][1]["max_points"] == 200
+
+    async def test_panel_view_adds_top_level_cardinality_metadata(self) -> None:
+        client = FakeClient(
+            get_panel_view={
+                "version": "1",
+                "panel": {"id": 7, "title": "Request rate", "type": "timeseries"},
+                "dashboard": {"uid": "platform", "title": "Platform"},
+                "source": {"type": "grafana", "datasourceUid": "prom"},
+                "visualization": {"type": "line"},
+                "timeRange": {"from": 1000, "to": 2000},
+                "variables": {},
+                "series": [{"key": "series_0", "name": "api"}, {"key": "series_1", "name": "web"}],
+                "data": [{"timestamp": 1000, "series_0": 1.0, "series_1": 2.0}],
+                "annotations": [],
+                "links": {"grafana": "https://grafana.test/d/platform/platform?viewPanel=7"},
+                "warnings": [],
+            }
+        )
+
+        out = await grafana_get_panel_view(client, dashboard_uid="platform", panel_id=7)
+        payload = out.model_dump()
+
+        assert payload["series_returned"] == 2
+        assert payload["series_total"] == 2
+        assert payload["samples_returned"] == 1
+        assert payload["samples_total"] == 1
+        assert payload["truncated"] is False
