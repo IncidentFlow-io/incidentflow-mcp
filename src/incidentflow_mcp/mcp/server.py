@@ -2553,7 +2553,7 @@ def _cluster_health_assessment(overview: dict[str, Any]) -> dict[str, Any]:
         "cluster_health": cluster_health,
         "summary": summary,
         "findings": findings,
-        "recommendations": recommendations,
+        "recommendations": list(dict.fromkeys(recommendations)),
     }
 
 
@@ -2945,7 +2945,14 @@ def _compact_incident(incident: Any) -> dict[str, Any]:
     latest_update = None
     updates = incident.get("incident_updates")
     if isinstance(updates, list) and updates:
-        latest_update = next((item for item in reversed(updates) if isinstance(item, dict)), None)
+        update_dicts = [item for item in updates if isinstance(item, dict)]
+        latest_update = max(
+            update_dicts,
+            key=lambda item: (
+                _compact_incident_update_timestamp(item) or datetime.min.replace(tzinfo=UTC)
+            ),
+            default=None,
+        )
 
     return {
         "id": incident.get("id"),
@@ -2966,6 +2973,16 @@ def _compact_incident(incident: Any) -> dict[str, Any]:
             else None
         ),
     }
+
+
+def _compact_incident_update_timestamp(update: dict[str, Any]) -> datetime | None:
+    timestamp = update.get("updated_at") or update.get("created_at") or update.get("display_at")
+    if not isinstance(timestamp, str) or not timestamp:
+        return None
+    try:
+        return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _compact_degraded_component(component: Any) -> dict[str, Any]:
@@ -4678,8 +4695,7 @@ def create_mcp_server() -> FastMCP:
             if code in {"", "unknown"}:
                 code = "NOT_FOUND"
             message = (
-                f"No deployment or pods found for workload {workload} "
-                f"in namespace {namespace}"
+                f"No deployment or pods found for workload {workload} in namespace {namespace}"
             )
             return _with_integration_context(
                 _k8s_failed_response(

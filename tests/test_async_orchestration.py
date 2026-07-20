@@ -11,6 +11,7 @@ from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import (
     _analyze_workload_logs,
     _build_describe_response,
+    _cluster_health_assessment,
     _compact_external_status_result,
     _compact_log_payload,
     _describe_pod_structured,
@@ -735,6 +736,20 @@ def test_overview_treats_single_restart_ready_pod_as_healthy() -> None:
     ]
 
 
+def test_cluster_health_assessment_deduplicates_warning_recommendations() -> None:
+    health = _cluster_health_assessment(
+        {
+            "pods_total": 3,
+            "pods_unhealthy": 0,
+            "warning_event_summary": {"active_warning_events": 1},
+            "top_restarts": [],
+        }
+    )
+
+    assert health["cluster_health"] == "Warning"
+    assert health["recommendations"] == ["Review active warning events with k8s_list_events"]
+
+
 @pytest.mark.asyncio
 async def test_k8s_namespace_overview_returns_namespace_error_before_empty_overview(
     monkeypatch: pytest.MonkeyPatch,
@@ -1189,9 +1204,9 @@ def test_build_describe_response_keeps_running_ready_restart_healthy() -> None:
         "reason": "Error",
         "finished_at": "2000-01-01T00:00:00Z",
     }
-    assert "⚠ prometheus-server has no explicit CPU or memory requests/limits" in response[
-        "findings"
-    ]
+    assert (
+        "⚠ prometheus-server has no explicit CPU or memory requests/limits" in response["findings"]
+    )
     assert response["recommendations"] == [
         (
             "No immediate action required. Check the previous container termination reason "
@@ -1531,6 +1546,54 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
     assert compact_incident["latest_update_at"] == "2026-03-17T00:10:00Z"
     assert "incident_updates" not in compact_incident
     assert provider["regional_status_errors"] == {"eu": "404 Not Found"}
+
+
+def test_compact_external_status_uses_latest_update_timestamp_not_list_order() -> None:
+    output = _normalize_polled_external_status_job(
+        job_id="job_123",
+        job={
+            "id": "job_123",
+            "status": "succeeded",
+            "result": {
+                "status": "success",
+                "external_status": [
+                    {
+                        "provider": "github",
+                        "indicator": "none",
+                        "description": "All Systems Operational",
+                        "fetched_at": "2026-03-17T18:00:00Z",
+                        "incidents": [
+                            {
+                                "id": "inc_1",
+                                "name": "Incident 1",
+                                "status": "resolved",
+                                "incident_updates": [
+                                    {
+                                        "status": "resolved",
+                                        "created_at": "2026-03-17T00:30:00Z",
+                                    },
+                                    {
+                                        "status": "monitoring",
+                                        "created_at": "2026-03-17T00:20:00Z",
+                                    },
+                                    {
+                                        "status": "investigating",
+                                        "created_at": "2026-03-17T00:10:00Z",
+                                    },
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+        },
+        poll_after_seconds=2,
+        response_mode="compact",
+    )
+
+    incident = _payload(output)["providers"][0]["historical_incidents"][0]
+    assert incident["latest_update_status"] == "resolved"
+    assert incident["latest_update_at"] == "2026-03-17T00:30:00Z"
 
 
 def test_normalize_polled_external_status_job_terminal_returns_full_payload() -> None:

@@ -267,9 +267,7 @@ def _alert_context_risks(alert_context: dict[str, Any] | None) -> tuple[list[str
     ).strip()
 
     if expected_cluster and alert_cluster and alert_cluster != expected_cluster:
-        risks.append(
-            f"Slack evidence is from cluster {alert_cluster}, not {expected_cluster}."
-        )
+        risks.append(f"Slack evidence is from cluster {alert_cluster}, not {expected_cluster}.")
         open_questions.append(
             "Is this Slack thread relevant to the current incident or only historical context?"
         )

@@ -395,6 +395,12 @@ class TestAnalyze:
         assert payload["panels"][0]["series_returned"] == 1
         assert payload["panels"][0]["series_total"] == 2
         assert payload["panels"][0]["series"][0]["samples_truncated"] is True
+        assert payload["summary_hints"] == [
+            "1 panel queries analyzed",
+            "0 rejected by guardrails",
+            "0 failed to query",
+            "0 with anomalies flagged",
+        ]
 
 
 class TestPanelView:
