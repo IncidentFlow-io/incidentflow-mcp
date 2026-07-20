@@ -77,7 +77,23 @@ async def test_incidentflow_auth_status_returns_safe_principal(
     result = await create_mcp_server()._tool_manager.call_tool("incidentflow_auth_status", {})
     payload = _payload(result)
 
-    assert payload == {
+    assert payload["schemaVersion"] == "v1"
+    assert payload["schemaId"] == "platform.incidentflow-auth-status"
+    assert payload["warnings"] == []
+    assert {
+        key: payload[key]
+        for key in (
+            "authenticated",
+            "authMethod",
+            "client",
+            "user",
+            "workspace",
+            "permissions",
+            "connectedIntegrations",
+            "availableToolGroups",
+            "environment",
+        )
+    } == {
         "authenticated": True,
         "authMethod": "oauth",
         "client": {"name": "OAuth MCP client", "type": "mcp"},
