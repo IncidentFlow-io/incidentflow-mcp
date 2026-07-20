@@ -57,7 +57,13 @@ jobs:
         run: uv run python scripts/generate_tool_schemas.py
 
       - name: Ensure generated schemas are committed
-        run: git diff --exit-code -- schemas/tools
+        run: |
+          if [[ -n "$(git status --porcelain -- schemas/tools)" ]]; then
+            echo "Generated tool schemas are stale or uncommitted."
+            git status --short -- schemas/tools
+            git diff -- schemas/tools
+            exit 1
+          fi
 
       - name: Lint contract code
         run: |
