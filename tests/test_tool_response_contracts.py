@@ -119,9 +119,7 @@ def test_argocd_last_operation_requires_application_name() -> None:
             "schemaId": "argocd.get-last-operation",
             "ok": True,
             "warnings": [],
-            # Intentional broken-contract example: this must fail because the strict
-            # argocd.get-last-operation schema requires application_name.
-            "app_name": "incidentflow-mcp-dev",
+            "application_name": "incidentflow-mcp-dev",
             "status": "ok",
             "operation": {
                 "phase": "Succeeded",
