@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import create_mcp_server
@@ -27,6 +28,8 @@ def test_every_registered_tool_has_response_model() -> None:
 
     assert set(models) == {spec.name for spec in specs}
     for spec in specs:
+        if spec.name == "argocd_get_last_operation":
+            continue
         schema_id = schema_id_for_tool(spec.name)
         model = models[spec.name]
         payload = model.model_validate(
@@ -105,6 +108,57 @@ def test_export_tool_schemas_includes_canonical_ids(tmp_path: Path) -> None:
 
 def test_reserved_contract_keys_are_documented() -> None:
     assert RESERVED_CONTRACT_KEYS == {"schemaVersion", "schemaId", "warnings"}
+
+
+def test_argocd_last_operation_requires_application_name() -> None:
+    model = tool_response_model("argocd_get_last_operation")
+
+    valid = model.model_validate(
+        {
+            "schemaVersion": "v1",
+            "schemaId": "argocd.get-last-operation",
+            "ok": True,
+            "warnings": [],
+            "application_name": "incidentflow-mcp-dev",
+            "status": "ok",
+            "operation": {
+                "phase": "Succeeded",
+                "resource_results": [
+                    {
+                        "kind": "Deployment",
+                        "namespace": "incidentflow-dev",
+                        "name": "incidentflow-mcp",
+                        "status": "Synced",
+                    }
+                ],
+            },
+        }
+    )
+
+    assert valid.application_name == "incidentflow-mcp-dev"
+
+
+def test_argocd_last_operation_rejects_app_name_rename() -> None:
+    model = tool_response_model("argocd_get_last_operation")
+
+    with pytest.raises(ValidationError) as exc_info:
+        model.model_validate(
+            {
+                "schemaVersion": "v1",
+                "schemaId": "argocd.get-last-operation",
+                "ok": True,
+                "warnings": [],
+                "app_name": "incidentflow-mcp-dev",
+                "status": "ok",
+                "operation": None,
+            }
+        )
+
+    errors = exc_info.value.errors()
+    assert any(error["loc"] == ("application_name",) for error in errors)
+    assert any(
+        error["loc"] == ("app_name",) and error["type"] == "extra_forbidden" for error in errors
+    )
 
 
 @pytest.mark.asyncio

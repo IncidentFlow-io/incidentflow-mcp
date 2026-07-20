@@ -41,6 +41,49 @@ class ToolContractEnvelope(BaseModel):
     error: ToolError | dict[str, Any] | str | None = None
 
 
+class ArgoCDOperationResourceResult(BaseModel):
+    """One resource result from an Argo CD sync operation."""
+
+    model_config = ConfigDict(extra="allow")
+
+    group: str | None = None
+    kind: str | None = None
+    namespace: str | None = None
+    name: str | None = None
+    status: str | None = None
+    message: str | None = None
+
+
+class ArgoCDLastOperation(BaseModel):
+    """Latest Argo CD operation summary."""
+
+    model_config = ConfigDict(extra="allow")
+
+    phase: str | None = None
+    message: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    sync_revision: str | None = None
+    resource_results: list[ArgoCDOperationResourceResult] = Field(default_factory=list)
+
+
+class ArgoCDLastOperationResponse(ToolContractEnvelope):
+    """Strict v1 payload contract for argocd_get_last_operation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schemaId: Literal["argocd.get-last-operation"] = "argocd.get-last-operation"
+    ok: bool
+    application_name: str
+    status: Literal["ok", "no_operation_found", "permission_denied", "not_found", "failed"]
+    operation: ArgoCDLastOperation | None = None
+
+
+_STRICT_RESPONSE_MODELS: dict[str, type[ToolContractEnvelope]] = {
+    "argocd_get_last_operation": ArgoCDLastOperationResponse,
+}
+
+
 def schema_id_for_tool(tool_name: str) -> str:
     """Return the stable schema id for one MCP tool."""
 
@@ -91,6 +134,8 @@ def schema_url(schema_name: str) -> str:
 def tool_response_model(tool_name: str) -> type[ToolContractEnvelope]:
     """Build the Pydantic response model for one registered MCP tool."""
 
+    if tool_name in _STRICT_RESPONSE_MODELS:
+        return _STRICT_RESPONSE_MODELS[tool_name]
     schema_id = schema_id_for_tool(tool_name)
     return create_model(
         f"{_pascal(tool_name)}Response",
