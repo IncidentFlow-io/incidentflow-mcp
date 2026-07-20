@@ -244,9 +244,14 @@ def _merge_duplicate_alerts(alerts: list[SlackAlertMessage]) -> list[SlackAlertM
         current = merged[fingerprint]
         current.occurrences += 1
         current.deduplicated = True
-        current.alert_count = max(
-            value for value in [current.alert_count or 0, alert.alert_count or 0] if value is not None
-        ) or None
+        current.alert_count = (
+            max(
+                value
+                for value in [current.alert_count or 0, alert.alert_count or 0]
+                if value is not None
+            )
+            or None
+        )
         if seen_at:
             current.first_seen = min(
                 value for value in [current.first_seen, seen_at] if value is not None
@@ -354,14 +359,20 @@ def _parse_alert_message(
         parts = display_name.split()
         if len(parts) >= 2:
             service = _clean_field(parts[1])
-    monitoring_job = service if service and re.search(r"\b(kubernetes|prometheus|scrape|pods)\b", service) else None
+    monitoring_job = (
+        service
+        if service and re.search(r"\b(kubernetes|prometheus|scrape|pods)\b", service)
+        else None
+    )
     cluster = _clean_field(_first_match([r"Cluster:\s*([^,\n]+)", r"\bcluster:\s*([^\n]+)"], text))
     namespace = _clean_field(
         _first_match([r"Namespace:\s*([^,\n]+)", r"\bnamespace:\s*([^\n]+)"], text)
     )
     pod = _clean_field(_first_match([r"^Pod:\s*(.+)$", r"\bpod:\s*([^\n]+)"], text))
     workload = _clean_field(
-        _first_match([r"^Workload:\s*(.+)$", r"\bdeployment:\s*([^\n]+)", r"\bworkload:\s*([^\n]+)"], text)
+        _first_match(
+            [r"^Workload:\s*(.+)$", r"\bdeployment:\s*([^\n]+)", r"\bworkload:\s*([^\n]+)"], text
+        )
     )
     severity = _infer_severity(text)
     labels = {

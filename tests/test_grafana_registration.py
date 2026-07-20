@@ -53,10 +53,10 @@ async def test_server_registers_grafana_tools() -> None:
     for name in GRAFANA_TOOLS:
         assert tools[name].outputSchema["type"] == "object"
 
-    assert (
-        tools["grafana_get_dashboard"].inputSchema["properties"]["response_mode"]["enum"]
-        == ["compact", "full"]
-    )
+    assert tools["grafana_get_dashboard"].inputSchema["properties"]["response_mode"]["enum"] == [
+        "compact",
+        "full",
+    ]
     assert tools["grafana_get_dashboard"].inputSchema["properties"]["panel_limit"]["maximum"] == 100
     assert (
         tools["grafana_metrics_query"].inputSchema["properties"]["response_mode"]["default"]
@@ -69,6 +69,5 @@ async def test_server_registers_grafana_tools() -> None:
         == 1000
     )
     assert (
-        tools["analyze_dashboard_health"].inputSchema["properties"]["panel_limit"]["maximum"]
-        == 50
+        tools["analyze_dashboard_health"].inputSchema["properties"]["panel_limit"]["maximum"] == 50
     )

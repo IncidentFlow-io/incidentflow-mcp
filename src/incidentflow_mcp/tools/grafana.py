@@ -276,6 +276,7 @@ def _compact_analyze_payload(
     compact["panels_returned"] = len(compact_panels)
     compact["panels_total"] = total_panels
     if truncated:
+        compact["summary_hints"] = _analyze_summary_hints(compact_panels)
         compact["truncated"] = True
         _append_warning(
             compact,
@@ -285,6 +286,28 @@ def _compact_analyze_payload(
             ),
         )
     return compact
+
+
+def _analyze_summary_hints(panels: list[dict[str, Any]]) -> list[str]:
+    if not panels:
+        return ["no Prometheus panels found on this dashboard"]
+    rejected = sum(
+        1
+        for panel in panels
+        if isinstance(panel.get("warning"), str) and panel["warning"].startswith("rejected")
+    )
+    failed = sum(
+        1
+        for panel in panels
+        if isinstance(panel.get("warning"), str) and panel["warning"].startswith("query failed")
+    )
+    with_anomalies = sum(1 for panel in panels if panel.get("anomalies"))
+    return [
+        f"{len(panels)} panel queries analyzed",
+        f"{rejected} rejected by guardrails",
+        f"{failed} failed to query",
+        f"{with_anomalies} with anomalies flagged",
+    ]
 
 
 def _with_panel_view_cardinality(payload: dict[str, Any]) -> dict[str, Any]:
