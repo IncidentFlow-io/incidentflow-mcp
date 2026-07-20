@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -230,6 +231,7 @@ def summarize_thread_for_sre(
             or title
         )[:160]
 
+    risks, open_questions = _alert_context_risks(alert_context)
     return {
         "title": title,
         "status": status,
@@ -242,9 +244,71 @@ def summarize_thread_for_sre(
         "next_actions": analysis.suggested_actions,
         "runbooks": [link.model_dump() for link in analysis.runbook_links],
         "commands": analysis.commands_found,
-        "risks": [],
-        "open_questions": [],
+        "risks": risks,
+        "open_questions": open_questions,
     }
+
+
+def _alert_context_risks(alert_context: dict[str, Any] | None) -> tuple[list[str], list[str]]:
+    if not isinstance(alert_context, dict):
+        return [], []
+
+    risks: list[str] = []
+    open_questions: list[str] = []
+    labels = alert_context.get("labels")
+    labels = labels if isinstance(labels, dict) else {}
+    alert_cluster = str(alert_context.get("cluster") or labels.get("cluster") or "").strip()
+    expected_cluster = str(
+        alert_context.get("expected_cluster")
+        or alert_context.get("target_cluster")
+        or alert_context.get("current_cluster")
+        or alert_context.get("environment")
+        or ""
+    ).strip()
+
+    if expected_cluster and alert_cluster and alert_cluster != expected_cluster:
+        risks.append(
+            f"Slack evidence is from cluster {alert_cluster}, not {expected_cluster}."
+        )
+        open_questions.append(
+            "Is this Slack thread relevant to the current incident or only historical context?"
+        )
+
+    observed_at = _alert_context_timestamp(alert_context)
+    if observed_at is not None:
+        age_seconds = (datetime.now(tz=UTC) - observed_at).total_seconds()
+        if age_seconds > 7 * 24 * 60 * 60:
+            age_days = int(age_seconds // (24 * 60 * 60))
+            risks.append(f"Slack evidence is stale: approximately {age_days} days old.")
+            if not open_questions:
+                open_questions.append(
+                    "Is this Slack thread still current, or only historical incident context?"
+                )
+
+    return risks, open_questions
+
+
+def _alert_context_timestamp(alert_context: dict[str, Any]) -> datetime | None:
+    for key in ("fired_at", "datetime_utc", "started_at", "ts"):
+        value = alert_context.get(key)
+        if value is None:
+            continue
+        if key == "ts":
+            try:
+                return datetime.fromtimestamp(float(value), tz=UTC)
+            except (TypeError, ValueError, OSError):
+                continue
+        text = str(value).strip()
+        if not text:
+            continue
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    return None
 
 
 def _link(url: str, label: str | None) -> NormalizedLink:

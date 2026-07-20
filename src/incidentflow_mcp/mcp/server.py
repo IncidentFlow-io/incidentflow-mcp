@@ -835,6 +835,28 @@ def _command_error(response: dict[str, Any]) -> dict[str, Any] | None:
     return error if isinstance(error, dict) else None
 
 
+def _k8s_failed_response(
+    *,
+    code: str,
+    message: str,
+    summary: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    error: dict[str, Any] = {"code": code, "message": message}
+    if details:
+        error["details"] = details
+    return {
+        "status": "failed",
+        "summary": summary or message,
+        "health": "unknown",
+        "severity": "warning",
+        "findings": [message],
+        "recommendations": ["Verify namespace and workload name"],
+        "data": details or {},
+        "error": error,
+    }
+
+
 def _permission_result(response: dict[str, Any]) -> dict[str, Any]:
     error = _command_error(response)
     return {
@@ -2920,6 +2942,11 @@ def _compact_incident(incident: Any) -> dict[str, Any]:
     if not isinstance(incident, dict):
         return {"name": str(incident)}
 
+    latest_update = None
+    updates = incident.get("incident_updates")
+    if isinstance(updates, list) and updates:
+        latest_update = next((item for item in reversed(updates) if isinstance(item, dict)), None)
+
     return {
         "id": incident.get("id"),
         "name": incident.get("name") or incident.get("title"),
@@ -2927,7 +2954,17 @@ def _compact_incident(incident: Any) -> dict[str, Any]:
         "impact": incident.get("impact"),
         "created_at": incident.get("created_at"),
         "updated_at": incident.get("updated_at"),
-        "shortlink": incident.get("shortlink"),
+        "shortlink": incident.get("shortlink") or incident.get("link"),
+        "updates_count": incident.get("updates_count")
+        or (len(updates) if isinstance(updates, list) else None),
+        "latest_update_status": latest_update.get("status") if latest_update else None,
+        "latest_update_at": (
+            latest_update.get("updated_at")
+            or latest_update.get("created_at")
+            or latest_update.get("display_at")
+            if latest_update
+            else None
+        ),
     }
 
 
@@ -3598,19 +3635,18 @@ def create_mcp_server() -> FastMCP:
             return _structured_guard_error(_workspace_context_required_error())
 
         try:
-            token, platform_client = _resolve_slack_tool_access(
-                settings,
-                workspace_id=workspace_id,
-                token_workspace_id=token_workspace_id,
-            )
-
             selected_channel = (channel or settings.slack_alerts_channel).strip() or "alerts"
-            selected_limit = limit or settings.slack_alerts_default_limit
+            selected_limit = settings.slack_alerts_default_limit if limit is None else limit
             if selected_limit < 1 or selected_limit > 200:
                 raise ValueError("limit must be between 1 and 200")
             selected_thread_mode = _normalize_slack_thread_mode(thread_mode)
             if max_thread_replies < 0 or max_thread_replies > 200:
                 raise ValueError("max_thread_replies must be between 0 and 200")
+            token, platform_client = _resolve_slack_tool_access(
+                settings,
+                workspace_id=workspace_id,
+                token_workspace_id=token_workspace_id,
+            )
 
             result = await fetch_slack_alerts(
                 token=token,
@@ -3645,13 +3681,13 @@ def create_mcp_server() -> FastMCP:
             return _structured_guard_error(_workspace_context_required_error())
 
         try:
+            if max_replies < 0 or max_replies > 200:
+                raise ValueError("max_replies must be between 0 and 200")
             token, platform_client = _resolve_slack_tool_access(
                 settings,
                 workspace_id=workspace_id,
                 token_workspace_id=token_workspace_id,
             )
-            if max_replies < 0 or max_replies > 200:
-                raise ValueError("max_replies must be between 0 and 200")
 
             result = await fetch_slack_alert_thread(
                 token=token,
@@ -3939,6 +3975,21 @@ def create_mcp_server() -> FastMCP:
             environment=environment,
             cluster_name=cluster_name,
         )
+        namespace_check = await _send_k8s_command(
+            client=client,
+            bearer_token=bearer_token,
+            cluster_id=resolved_cluster_id,
+            action="k8s.list_pods",
+            params={"namespace": namespace},
+            timeout_seconds=timeout_seconds,
+        )
+        if not _command_ok(namespace_check):
+            namespace_check["cluster_id"] = resolved_cluster_id
+            return _with_integration_context(
+                namespace_check,
+                guard if isinstance(guard, ResolvedIntegrationContext) else None,
+                settings,
+            )
         overview = await _k8s_cluster_overview_payload(
             client=client,
             bearer_token=bearer_token,
@@ -4574,6 +4625,11 @@ def create_mcp_server() -> FastMCP:
         )
         pods_data = pods.get("data") if isinstance(pods, dict) else None
         pod_items = pods_data.get("pods") if isinstance(pods_data, dict) else []
+        pods_error = _command_error(pods)
+        rollout_payload = json.loads(rollout)
+        rollout_status = rollout_payload.get("data")
+        rollout_inner = (rollout_status or {}).get("rollout") or {}
+        rollout_error = _command_error(rollout_payload)
         deployments = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
@@ -4584,7 +4640,9 @@ def create_mcp_server() -> FastMCP:
             timeout_seconds=timeout_seconds,
             integration_context=guard if isinstance(guard, ResolvedIntegrationContext) else None,
         )
-        deployments_data = json.loads(deployments).get("data")
+        deployments_payload = json.loads(deployments)
+        deployments_data = deployments_payload.get("data")
+        deployments_error = _command_error(deployments_payload)
         deployment_items = (
             deployments_data.get("deployments") if isinstance(deployments_data, dict) else []
         )
@@ -4598,6 +4656,48 @@ def create_mcp_server() -> FastMCP:
             deployment_items if isinstance(deployment_items, list) else [],
             workload,
         )
+        blocking_error = pods_error or deployments_error
+        if blocking_error and not related_pods and not rollout_inner:
+            code = str(blocking_error.get("code") or "K8S_LOOKUP_FAILED")
+            message = str(
+                blocking_error.get("message")
+                or f"Unable to inspect namespace {namespace} for workload {workload}"
+            )
+            return _with_integration_context(
+                _k8s_failed_response(
+                    code=code,
+                    message=message,
+                    summary=f"Unable to inspect {workload} in namespace {namespace}",
+                    details={"namespace": namespace, "workload": workload},
+                ),
+                guard if isinstance(guard, ResolvedIntegrationContext) else None,
+                settings,
+            )
+        if not related_pods and not rollout_inner:
+            code = str((rollout_error or {}).get("code") or "NOT_FOUND")
+            if code in {"", "unknown"}:
+                code = "NOT_FOUND"
+            message = (
+                f"No deployment or pods found for workload {workload} "
+                f"in namespace {namespace}"
+            )
+            return _with_integration_context(
+                _k8s_failed_response(
+                    code=code,
+                    message=message,
+                    summary=f"No matching workload found for {workload}",
+                    details={
+                        "namespace": namespace,
+                        "workload": workload,
+                        "rollout_status": rollout_status,
+                        "pods": [],
+                        "pods_total": 0,
+                        "selected_pod": None,
+                    },
+                ),
+                guard if isinstance(guard, ResolvedIntegrationContext) else None,
+                settings,
+            )
         logs_data = None
         log_analysis = _analyze_workload_logs(None, exclude_loggers=exclude_loggers)
         if selected_pod:
@@ -4626,8 +4726,6 @@ def create_mcp_server() -> FastMCP:
                 logs_data if isinstance(logs_data, dict) else None,
                 exclude_loggers=exclude_loggers,
             )
-        rollout_status = json.loads(rollout).get("data")
-        rollout_inner = (rollout_status or {}).get("rollout") or {}
         rollout_complete = rollout_inner.get("complete")
         ready_pods = [
             p
@@ -5048,7 +5146,7 @@ def create_mcp_server() -> FastMCP:
         start: str = "now-1h",
         end: str = "now",
         variables: dict[str, str | list[str]] | None = None,
-        max_points: int = 300,
+        max_points: Annotated[int, Field(ge=1, le=500)] = 300,
         workspace_id: str | None = None,
     ) -> dict[str, Any]:
         guard = await _resolve_tool_guard("grafana_get_panel_view")

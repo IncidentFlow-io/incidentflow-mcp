@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
+from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import (
     _analyze_workload_logs,
@@ -31,7 +32,9 @@ from incidentflow_mcp.mcp.server import (
     _restart_window_summary,
     _select_workload_pod,
     _structured_tool_exception,
+    create_mcp_server,
 )
+from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
 from incidentflow_mcp.tools.registry import get_tool_specs
 
@@ -93,6 +96,24 @@ class FailingK8sDispatchClient(FakeAgentClusterClient):
     ) -> dict:
         _ = bearer_token, cluster_id, action, params, timeout_seconds
         raise httpx.ConnectError("agent gateway unavailable")
+
+
+def _set_k8s_tool_context() -> None:
+    set_current_auth_context(
+        {
+            "authenticated": True,
+            "auth_method": "oauth",
+            "bearer_token": "token",
+            "client_id": "oauth-client",
+            "workspace_id": "ws_123",
+            "workspace_name": "Demo Workspace",
+            "workspace_slug": "demo",
+            "workspace_role": "owner",
+            "user_id": "user_123",
+            "email": "demo@example.com",
+            "plan": None,
+        }
+    )
 
 
 def test_resolve_execution_mode_auto_sync_in_dev() -> None:
@@ -714,6 +735,166 @@ def test_overview_treats_single_restart_ready_pod_as_healthy() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_k8s_namespace_overview_returns_namespace_error_before_empty_overview(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "incidentflow_mcp.config._settings",
+        Settings(
+            _env_file=None,
+            environment="development",
+            platform_api_base_url="http://platform.test",
+            redis_url="redis://test-only",
+        ),
+    )
+
+    async def allow_tool(*args: object, **kwargs: object) -> None:
+        _ = args, kwargs
+        return None
+
+    async def list_clusters(
+        self: PlatformAPIAgentCommandsClient,
+        *,
+        bearer_token: str,
+    ) -> list[dict[str, object]]:
+        _ = self
+        assert bearer_token == "token"
+        return [{"cluster_id": "cluster_prod", "name": "prod", "connected": True}]
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def send_agent_command(
+        self: PlatformAPIAgentCommandsClient,
+        *,
+        bearer_token: str,
+        cluster_id: str,
+        action: str,
+        params: dict[str, object],
+        timeout_seconds: int | None = None,
+    ) -> dict[str, object]:
+        _ = self, timeout_seconds
+        assert bearer_token == "token"
+        assert cluster_id == "cluster_prod"
+        calls.append((action, params))
+        if action == "k8s.list_pods":
+            return {
+                "command_id": "cmd_ns",
+                "status": "failed",
+                "data": None,
+                "error": {
+                    "code": "NAMESPACE_DENIED",
+                    "message": 'namespace "does-not-exist" is not allowed',
+                },
+            }
+        raise AssertionError(f"unexpected action after namespace preflight: {action}")
+
+    monkeypatch.setattr(
+        "incidentflow_mcp.mcp.server.resolve_tool_integration_context",
+        allow_tool,
+    )
+    monkeypatch.setattr(PlatformAPIAgentCommandsClient, "list_clusters", list_clusters)
+    monkeypatch.setattr(PlatformAPIAgentCommandsClient, "send_agent_command", send_agent_command)
+
+    _set_k8s_tool_context()
+    try:
+        result = await create_mcp_server()._tool_manager.call_tool(
+            "k8s_namespace_overview",
+            {"namespace": "does-not-exist"},
+        )
+    finally:
+        clear_current_auth_context()
+
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "NAMESPACE_DENIED"
+    assert result["cluster_id"] == "cluster_prod"
+    assert calls == [("k8s.list_pods", {"namespace": "does-not-exist"})]
+
+
+@pytest.mark.asyncio
+async def test_k8s_analyze_workload_missing_workload_is_not_healthy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "incidentflow_mcp.config._settings",
+        Settings(
+            _env_file=None,
+            environment="development",
+            platform_api_base_url="http://platform.test",
+            redis_url="redis://test-only",
+        ),
+    )
+
+    async def allow_tool(*args: object, **kwargs: object) -> None:
+        _ = args, kwargs
+        return None
+
+    async def list_clusters(
+        self: PlatformAPIAgentCommandsClient,
+        *,
+        bearer_token: str,
+    ) -> list[dict[str, object]]:
+        _ = self
+        assert bearer_token == "token"
+        return [{"cluster_id": "cluster_prod", "name": "prod", "connected": True}]
+
+    async def send_agent_command(
+        self: PlatformAPIAgentCommandsClient,
+        *,
+        bearer_token: str,
+        cluster_id: str,
+        action: str,
+        params: dict[str, object],
+        timeout_seconds: int | None = None,
+    ) -> dict[str, object]:
+        _ = self, timeout_seconds
+        assert bearer_token == "token"
+        assert cluster_id == "cluster_prod"
+        assert params.get("namespace") == "incidentflow-dev"
+        if action == "k8s.get_rollout_status":
+            return {
+                "command_id": "cmd_rollout",
+                "status": "failed",
+                "data": None,
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": 'deployments.apps "does-not-exist" not found',
+                },
+            }
+        if action == "k8s.list_pods":
+            return {"command_id": "cmd_pods", "status": "succeeded", "data": {"pods": []}}
+        if action == "k8s.list_deployments":
+            return {
+                "command_id": "cmd_deployments",
+                "status": "succeeded",
+                "data": {"deployments": []},
+            }
+        raise AssertionError(f"unexpected action for missing workload: {action}")
+
+    monkeypatch.setattr(
+        "incidentflow_mcp.mcp.server.resolve_tool_integration_context",
+        allow_tool,
+    )
+    monkeypatch.setattr(PlatformAPIAgentCommandsClient, "list_clusters", list_clusters)
+    monkeypatch.setattr(PlatformAPIAgentCommandsClient, "send_agent_command", send_agent_command)
+
+    _set_k8s_tool_context()
+    try:
+        result = await create_mcp_server()._tool_manager.call_tool(
+            "k8s_analyze_workload",
+            {"namespace": "incidentflow-dev", "workload": "does-not-exist"},
+        )
+    finally:
+        clear_current_auth_context()
+
+    assert result["status"] == "failed"
+    assert result["health"] == "unknown"
+    assert result["severity"] == "warning"
+    assert result["summary"] == "No matching workload found for does-not-exist"
+    assert result["error"]["code"] == "NOT_FOUND"
+    assert result["data"]["pods_total"] == 0
+
+
 def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
     payload = {
         "status": "succeeded",
@@ -738,6 +919,34 @@ def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
 
     assert compact["data"]["skipped_debug_lines"] == 1
     assert compact["data"]["highlighted"] == ["ERROR timeout talking to db"]
+
+
+def test_compact_log_payload_count_metadata_matches_returned_lines_after_filtering() -> None:
+    payload = {
+        "status": "succeeded",
+        "data": {
+            "logs": "\n".join(
+                [
+                    "DEBUG httpcore.connection noise",
+                    "INFO started",
+                    "DEBUG httpx noise",
+                    "WARNING dependency timeout",
+                ]
+            )
+        },
+    }
+
+    compact = _compact_log_payload(
+        payload,
+        level=None,
+        contains=None,
+        exclude=None,
+        compact=True,
+    )
+
+    assert compact["data"]["line_count"] == 4
+    assert compact["data"]["skipped_debug_lines"] == 2
+    assert compact["data"]["returned_line_count"] == len(compact["data"]["lines"]) == 2
 
 
 def test_compact_log_payload_redacts_secrets() -> None:
@@ -1287,7 +1496,13 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
                                 "created_at": "2026-03-17T00:00:00Z",
                                 "updated_at": "2026-03-17T00:10:00Z",
                                 "shortlink": "https://status/1",
-                                "incident_updates": [{"body": "very large payload"}],
+                                "incident_updates": [
+                                    {
+                                        "status": "investigating",
+                                        "body": "very large payload",
+                                        "created_at": "2026-03-17T00:10:00Z",
+                                    }
+                                ],
                             }
                         ],
                         "degraded_components": [
@@ -1311,6 +1526,9 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
     provider = payload["providers"][0]
     compact_incident = provider["active_incidents"][0]
     assert compact_incident["id"] == "inc_1"
+    assert compact_incident["updates_count"] == 1
+    assert compact_incident["latest_update_status"] == "investigating"
+    assert compact_incident["latest_update_at"] == "2026-03-17T00:10:00Z"
     assert "incident_updates" not in compact_incident
     assert provider["regional_status_errors"] == {"eu": "404 Not Found"}
 

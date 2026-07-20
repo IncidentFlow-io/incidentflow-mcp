@@ -74,8 +74,8 @@ class SlackAlertMessage(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)
     summary: str
     raw_text: str | None = None
-    # Commands (kubectl/helm/curl/...) extracted from the message when raw_text
-    # is omitted (include_raw=False), so the compact response stays actionable.
+    # Commands (kubectl/helm/curl/...) extracted from the message regardless of
+    # raw_text inclusion, so raw mode adds evidence without removing next steps.
     extracted_commands: list[str] = Field(default_factory=list)
     slack: SlackAlertContext | None = None
     thread: SlackThreadContext | None = None
@@ -374,11 +374,10 @@ def _parse_alert_message(
         if value
     }
 
-    # Compact mode (default): drop raw_text, surface commands separately and
-    # redact IPs so the response stays small and safe for LLM safety layers.
-    extracted_commands: list[str] = []
+    # Compact mode (default): drop raw_text and redact IPs so the response stays
+    # small and safe for LLM safety layers. Commands stay available in all modes.
+    extracted_commands = extract_commands(text)
     if not include_raw:
-        extracted_commands = extract_commands(text)
         summary = _redact_ips(summary)
 
     alert = SlackAlertMessage(
