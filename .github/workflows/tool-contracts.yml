@@ -1,0 +1,78 @@
+name: Tool Contracts
+
+on:
+  pull_request:
+    paths:
+      - 'schemas/tools/**'
+      - 'scripts/generate_tool_schemas.py'
+      - 'src/incidentflow_mcp/mcp/server.py'
+      - 'src/incidentflow_mcp/tools/**'
+      - 'tests/test_tool_response_contracts.py'
+      - 'tests/test_tool_metadata.py'
+      - 'tests/test_integration_status_tools.py'
+      - 'tests/test_async_orchestration.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/tool-contracts.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'schemas/tools/**'
+      - 'scripts/generate_tool_schemas.py'
+      - 'src/incidentflow_mcp/mcp/server.py'
+      - 'src/incidentflow_mcp/tools/**'
+      - 'tests/test_tool_response_contracts.py'
+      - 'tests/test_tool_metadata.py'
+      - 'tests/test_integration_status_tools.py'
+      - 'tests/test_async_orchestration.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/tool-contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate schemaVersion contract
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install Python dependencies
+        run: uv sync --extra dev --group dev
+
+      - name: Generate tool response schemas
+        run: uv run python scripts/generate_tool_schemas.py
+
+      - name: Ensure generated schemas are committed
+        run: git diff --exit-code -- schemas/tools
+
+      - name: Lint contract code
+        run: |
+          uv run ruff check \
+            src/incidentflow_mcp/tools/contracts.py \
+            src/incidentflow_mcp/mcp/server.py \
+            scripts/generate_tool_schemas.py \
+            tests/test_tool_response_contracts.py \
+            tests/test_integration_status_tools.py
+
+      - name: Validate runtime response contracts
+        run: |
+          uv run pytest \
+            tests/test_tool_response_contracts.py \
+            tests/test_tool_metadata.py \
+            tests/test_integration_status_tools.py \
+            tests/test_async_orchestration.py::test_structured_tool_exception_wraps_http_status_body \
+            tests/test_async_orchestration.py::test_fastmcp_unknown_tool_arguments_return_structured_validation_error

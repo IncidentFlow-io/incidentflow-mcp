@@ -37,6 +37,7 @@ from incidentflow_mcp.platform_api.grafana_client import PlatformGrafanaClient
 from incidentflow_mcp.platform_api.slack_client import PlatformSlackAPIError, PlatformSlackClient
 from incidentflow_mcp.tools import argocd as _argocd_tools
 from incidentflow_mcp.tools import grafana as _grafana_tools
+from incidentflow_mcp.tools.contracts import apply_tool_contract
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
 from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
 from incidentflow_mcp.tools.registry import build_tool_description, get_tool_specs
@@ -441,7 +442,7 @@ def _structured_tool_exception(exc: Exception, *, code: str = "TOOL_ERROR") -> d
             body = exc.response.text
         if body:
             error["upstream_response"] = body
-    return {"ok": False, "status": "failed", "error": error}
+    return {"ok": False, "status": "failed", "warnings": [], "error": error}
 
 
 async def _run_tool_with_structured_errors(
@@ -460,11 +461,11 @@ async def _run_tool_with_structured_errors(
         )
         if convert_result:
             result = tool.fn_metadata.convert_result(result)
-        return result
+        return apply_tool_contract(result, tool_name=tool.name)
     except UrlElicitationRequiredError:
         raise
     except Exception as exc:
-        return _structured_tool_exception(exc)
+        return apply_tool_contract(_structured_tool_exception(exc), tool_name=tool.name)
 
 
 def _harden_fastmcp_tool_contracts(mcp: FastMCP) -> None:
@@ -2351,9 +2352,7 @@ def _build_describe_response(
         resources=resources if isinstance(resources, dict) else {},
     )
     for container_name in containers_missing_resources:
-        findings.append(
-            f"⚠ {container_name} has no explicit CPU or memory requests/limits"
-        )
+        findings.append(f"⚠ {container_name} has no explicit CPU or memory requests/limits")
 
     container_summaries = []
     for c in containers:
@@ -4637,14 +4636,10 @@ def create_mcp_server() -> FastMCP:
             and str(p.get("phase") or "").lower() == "running"
             and bool([c for c in (p.get("containers") or []) if isinstance(c, dict)])
             and all(
-                bool(c.get("ready"))
-                for c in (p.get("containers") or [])
-                if isinstance(c, dict)
+                bool(c.get("ready")) for c in (p.get("containers") or []) if isinstance(c, dict)
             )
         ]
-        total_restarts = sum(
-            _pod_restart_count(p) for p in related_pods if isinstance(p, dict)
-        )
+        total_restarts = sum(_pod_restart_count(p) for p in related_pods if isinstance(p, dict))
         unhealthy_related = [
             p for p in related_pods if isinstance(p, dict) and _is_unhealthy_pod(p)
         ]
