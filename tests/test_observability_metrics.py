@@ -5,6 +5,16 @@ import re
 
 from fastapi.testclient import TestClient
 
+from incidentflow_mcp.observability.metrics import classify_traffic
+
+
+def test_classify_traffic_uses_operational_categories() -> None:
+    assert classify_traffic("/healthz") == "health"
+    assert classify_traffic("/readyz") == "health"
+    assert classify_traffic("/metrics") == "metrics"
+    assert classify_traffic("/mcp") == "business"
+    assert classify_traffic("/install.sh") == "internal"
+
 
 def test_metrics_endpoint_exposes_observability_metrics(auth_client: TestClient) -> None:
     auth_client.get("/healthz")
@@ -33,7 +43,7 @@ def test_metrics_endpoint_exposes_observability_metrics(auth_client: TestClient)
     assert "tool_duration_seconds" in payload
 
 
-def test_probe_and_business_traffic_are_labeled_separately(
+def test_health_and_business_traffic_are_labeled_separately(
     auth_client: TestClient,
     valid_auth_headers: dict[str, str],
 ) -> None:
@@ -47,11 +57,11 @@ def test_probe_and_business_traffic_are_labeled_separately(
 
     payload = auth_client.get("/metrics").text
 
-    healthz_probe = (
-        'http_requests_total{method="GET",route="/healthz",status_code="200",traffic="probe"}'
+    healthz_traffic = (
+        'http_requests_total{method="GET",route="/healthz",status_code="200",traffic="health"}'
     )
-    readyz_probe = (
-        'http_requests_total{method="GET",route="/readyz",status_code="200",traffic="probe"}'
+    readyz_traffic = (
+        'http_requests_total{method="GET",route="/readyz",status_code="200",traffic="health"}'
     )
     mcp_200 = 'http_requests_total{method="POST",route="/mcp",status_code="200",traffic="business"}'
     mcp_202 = 'http_requests_total{method="POST",route="/mcp",status_code="202",traffic="business"}'
@@ -60,8 +70,8 @@ def test_probe_and_business_traffic_are_labeled_separately(
     mcp_type_202 = 'mcp_request_type_total{request_type="ListToolsRequest",status_code="202"}'
     mcp_type_500 = 'mcp_request_type_total{request_type="ListToolsRequest",status_code="500"}'
 
-    assert healthz_probe in payload
-    assert readyz_probe in payload
+    assert healthz_traffic in payload
+    assert readyz_traffic in payload
     assert mcp_200 in payload or mcp_202 in payload or mcp_500 in payload
     assert mcp_type_200 in payload or mcp_type_202 in payload or mcp_type_500 in payload
     assert 'route="/metrics"' not in payload
@@ -176,13 +186,13 @@ def test_request_with_session_header_tracks_session_lifecycle(
     assert re.search(r"mcp_sessions_active\s+[1-9]", payload) is not None
 
 
-def test_probe_requests_do_not_pollute_tool_metrics(auth_client: TestClient) -> None:
+def test_health_requests_do_not_pollute_tool_metrics(auth_client: TestClient) -> None:
     auth_client.get("/healthz")
     auth_client.get("/readyz")
     payload = auth_client.get("/metrics").text
     for line in payload.splitlines():
         if line.startswith("mcp_tool_requests_total{"):
-            assert 'traffic_type="probe"' not in line
+            assert 'traffic_type="health"' not in line
 
 
 def test_in_flight_gauges_return_to_zero_on_mcp_error(

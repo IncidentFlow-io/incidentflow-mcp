@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.registration.meta import _CAPABILITY_CATEGORIES
 from incidentflow_mcp.mcp.server import create_mcp_server
 from incidentflow_mcp.tools.registry import get_tool_specs
 
@@ -127,6 +128,20 @@ def test_chatgpt_app_submission_tools_match_registry() -> None:
             assert justifications[justification_name].strip(), (
                 f"{name} is missing {justification_name}"
             )
+
+
+def test_capability_categories_reference_only_registry_tools() -> None:
+    specs = {spec.name for spec in get_tool_specs()}
+    meta_tools = {
+        "incidentflow_capabilities",
+        "mcp_version",
+        "incidentflow_auth_status",
+        "incidentflow_integrations_status",
+    }
+    operational_specs = specs - meta_tools
+    categorized = {name for _, _, names in _CAPABILITY_CATEGORIES for name in names}
+
+    assert categorized <= operational_specs
 
 
 @pytest.mark.asyncio

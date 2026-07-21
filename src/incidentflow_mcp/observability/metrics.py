@@ -223,10 +223,12 @@ def normalize_route(path: str) -> str:
 
 def classify_traffic(route: str) -> str:
     if route in ("/healthz", "/readyz"):
-        return "probe"
+        return "health"
+    if route == "/metrics":
+        return "metrics"
     if route == "/mcp":
         return "business"
-    return "other"
+    return "internal"
 
 
 def classify_status(status_code: int) -> str:

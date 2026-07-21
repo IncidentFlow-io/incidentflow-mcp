@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from incidentflow_mcp.mcp.server import _sanitize_pod, _strip_image_digest
+from incidentflow_mcp.mcp.services.kubernetes_analysis import _sanitize_pod, _strip_image_digest
 
 # ---------------------------------------------------------------------------
 # _strip_image_digest
