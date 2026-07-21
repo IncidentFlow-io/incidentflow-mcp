@@ -6,7 +6,7 @@ import re
 from fastapi.testclient import TestClient
 
 from incidentflow_mcp.config import Settings
-from incidentflow_mcp.observability.metrics import classify_traffic, normalize_route
+from incidentflow_mcp.observability.metrics import classify_traffic, normalize_route, tool_category
 from incidentflow_mcp.observability.middleware import (
     MCPObservabilityMiddleware,
     _mcp_tool_event_from_body,
@@ -24,6 +24,17 @@ def test_classify_traffic_uses_operational_categories() -> None:
     assert classify_traffic("/metrics") == "metrics"
     assert classify_traffic("/mcp") == "business"
     assert classify_traffic("/install.sh") == "internal"
+
+
+def test_tool_category_uses_runtime_registry_categories() -> None:
+    assert tool_category("mcp_version") == "meta"
+    assert tool_category("k8s_list_pods") == "kubernetes"
+    assert tool_category("argocd_get_application") == "argocd"
+    assert tool_category("grafana_metrics_query") == "grafana_prometheus"
+    assert tool_category("slack_alerts_list") == "slack_incidents"
+    assert tool_category("knowledge_upsert") == "knowledge"
+    assert tool_category("unknown") == "unknown"
+    assert tool_category("future_tool") == "uncategorized"
 
 
 def test_known_well_known_routes_are_not_unmatched() -> None:
@@ -131,8 +142,13 @@ def test_call_tool_request_captures_tool_labels(
     payload = auth_client.get("/metrics").text
     assert "mcp_tool_requests_total{" in payload
     assert re.search(r'mcp_tool_requests_total\{[^}]*tool="incident_summary"[^}]*\}', payload)
+    assert re.search(r'mcp_tool_requests_total\{[^}]*category="slack_incidents"[^}]*\}', payload)
     assert re.search(r'mcp_tool_requests_total\{[^}]*method="CallToolRequest"[^}]*\}', payload)
     assert re.search(r'mcp_tool_requests_total\{[^}]*traffic_type="business"[^}]*\}', payload)
+    assert re.search(
+        r'mcp_tool_request_duration_seconds_count\{[^}]*category="slack_incidents"[^}]*tool="incident_summary"[^}]*\}',
+        payload,
+    )
     # Clean per-tool latency metric records the bounded tool + status labels.
     assert re.search(r'tool_duration_seconds_count\{[^}]*tool="incident_summary"[^}]*\}', payload)
     assert re.search(r'tool_duration_seconds_count\{[^}]*status="(success|error)"[^}]*\}', payload)
@@ -155,6 +171,7 @@ def test_call_tool_without_name_uses_unknown_tool(
     payload = auth_client.get("/metrics").text
     assert "mcp_tool_requests_total{" in payload
     assert 'tool="unknown"' in payload
+    assert 'category="unknown"' in payload
     # The clean per-tool latency metric must never record the "unknown" placeholder.
     for line in payload.splitlines():
         if line.startswith("tool_duration_seconds"):

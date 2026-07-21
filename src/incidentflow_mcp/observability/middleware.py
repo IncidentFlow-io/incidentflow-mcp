@@ -38,6 +38,7 @@ from incidentflow_mcp.observability.metrics import (
     normalize_route,
     pod_label_values,
     status_class_from_code,
+    tool_category,
     tool_duration_seconds,
 )
 from incidentflow_mcp.observability.tool_events import (
@@ -197,9 +198,11 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                     status_code=status_code_str,
                 ).observe(elapsed)
                 if is_call_tool:
+                    category = tool_category(tool_name)
                     mcp_tool_requests_total.labels(
                         namespace=self._namespace,
                         pod=self._pod,
+                        category=category,
                         tool=tool_name,
                         method=request_type,
                         status_code=status_code_str,
@@ -211,6 +214,7 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                     mcp_tool_request_duration_seconds.labels(
                         namespace=self._namespace,
                         pod=self._pod,
+                        category=category,
                         tool=tool_name,
                         method=request_type,
                         outcome=tool_outcome,
@@ -685,17 +689,7 @@ def _start_tool_span(
         span.set_attribute("mcp.request.type", "CallToolRequest")
         span.set_attribute("mcp.transport", "http")
 
-        # Tool category based on name prefix
-        if tool_name.startswith("k8s_"):
-            span.set_attribute("tool.category", "kubernetes")
-        elif tool_name.startswith("memory_"):
-            span.set_attribute("tool.category", "memory")
-        elif tool_name.startswith("slack_"):
-            span.set_attribute("tool.category", "slack")
-        elif tool_name.startswith("ai_"):
-            span.set_attribute("tool.category", "ai")
-        else:
-            span.set_attribute("tool.category", "general")
+        span.set_attribute("tool.category", tool_category(tool_name))
 
         # Best-effort: read workspace/request-id from auth/request state
         request_id = getattr(request.state, "request_id", None)
