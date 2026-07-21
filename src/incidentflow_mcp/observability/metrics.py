@@ -175,6 +175,11 @@ mcp_tool_requests_in_flight = Gauge(
     "Current in-flight MCP tool requests.",
     ("namespace", "pod", "tool", "traffic_type"),
 )
+mcp_registered_tools = Gauge(
+    "mcp_registered_tools",
+    "Registered MCP tools from the runtime registry. Value is always 1 for each tool.",
+    ("tool", "category", "read_only"),
+)
 mcp_tool_errors_total = Counter(
     "mcp_tool_errors_total",
     "Total MCP tool request errors.",
@@ -218,6 +223,18 @@ mcp_request_duration_seconds = Histogram(
 
 def render_prometheus_metrics() -> bytes:
     return generate_latest()
+
+
+def publish_registered_tools(
+    rows: list[tuple[str, str, bool]] | tuple[tuple[str, str, bool], ...],
+) -> None:
+    """Publish registry inventory as a stable gauge independent of tool traffic."""
+    for tool, category, read_only in rows:
+        mcp_registered_tools.labels(
+            tool=tool,
+            category=category,
+            read_only="true" if read_only else "false",
+        ).set(1)
 
 
 def normalize_route(path: str) -> str:

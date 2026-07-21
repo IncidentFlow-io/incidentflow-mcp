@@ -124,6 +124,21 @@ def _capability_tool_entry(spec: Any, *, response_mode: str) -> dict[str, Any]:
     return entry
 
 
+def registered_tool_metric_rows() -> tuple[tuple[str, str, bool], ...]:
+    """Return tool/category/read-only rows for mcp_registered_tools."""
+    category_by_name = {
+        name: category_id for category_id, _, names in _CAPABILITY_CATEGORIES for name in names
+    }
+    rows: list[tuple[str, str, bool]] = []
+    for spec in sorted(get_tool_specs(), key=lambda item: item.name):
+        if spec.name in _META_TOOL_NAMES:
+            category = "meta"
+        else:
+            category = category_by_name.get(spec.name, "uncategorized")
+        rows.append((spec.name, category, bool(spec.annotations.get("readOnlyHint"))))
+    return tuple(rows)
+
+
 def _incidentflow_capabilities_payload(
     *, response_mode: str = "compact", category: str | None = None
 ) -> dict[str, Any]:

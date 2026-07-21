@@ -53,12 +53,30 @@ def test_metrics_endpoint_exposes_observability_metrics(auth_client: TestClient)
     assert "mcp_tool_requests_total" in payload
     assert "mcp_tool_request_duration_seconds" in payload
     assert "mcp_tool_requests_in_flight" in payload
+    assert "mcp_registered_tools" in payload
     assert "mcp_tool_errors_total" in payload
     assert "mcp_integration_guard_total" in payload
     assert "mcp_auth_failures_total" in payload
     assert "mcp_auth_success_total" in payload
     assert "mcp_request_duration_seconds" in payload
     assert "tool_duration_seconds" in payload
+
+
+def test_metrics_endpoint_exposes_registered_tool_inventory(auth_client: TestClient) -> None:
+    payload = auth_client.get("/metrics").text
+
+    assert (
+        'mcp_registered_tools{category="meta",read_only="true",tool="mcp_version"} 1.0'
+        in payload
+    )
+    assert (
+        'mcp_registered_tools{category="kubernetes",read_only="true",tool="k8s_list_pods"} 1.0'
+        in payload
+    )
+    assert (
+        'mcp_registered_tools{category="knowledge",read_only="false",tool="knowledge_upsert"} 1.0'
+        in payload
+    )
 
 
 def test_health_and_business_traffic_are_labeled_separately(

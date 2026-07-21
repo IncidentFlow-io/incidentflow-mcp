@@ -15,12 +15,13 @@ from incidentflow_mcp.mcp.registration.async_jobs import register_async_tools
 from incidentflow_mcp.mcp.registration.grafana import register_grafana_tools
 from incidentflow_mcp.mcp.registration.knowledge import register_knowledge_tools
 from incidentflow_mcp.mcp.registration.kubernetes import register_kubernetes_tools
-from incidentflow_mcp.mcp.registration.meta import register_meta_tools
+from incidentflow_mcp.mcp.registration.meta import register_meta_tools, registered_tool_metric_rows
 from incidentflow_mcp.mcp.request_context import MCPRequestContext
 from incidentflow_mcp.mcp.resources import register_resources
 from incidentflow_mcp.mcp.services import slack_access as _slack_access_service
 from incidentflow_mcp.mcp.services.memory_context import MemoryContextService
 from incidentflow_mcp.mcp.workspace import WorkspaceResolver
+from incidentflow_mcp.observability.metrics import publish_registered_tools
 from incidentflow_mcp.tools.registry import get_tool_specs
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ def create_mcp_server() -> FastMCP:
         current_token_workspace_id=workspace_resolver.token_workspace_id,
     )
 
+    publish_registered_tools(registered_tool_metric_rows())
     harden_fastmcp_tool_contracts(mcp)
     register_resources(mcp)
 
