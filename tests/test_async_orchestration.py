@@ -8,33 +8,40 @@ import pytest
 
 from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.mcp.server import (
+    create_mcp_server,
+)
+from incidentflow_mcp.mcp.services.async_jobs import (
+    compact_external_status_result,
+    execute_external_status_check,
+    normalize_correlation_alerts,
+    normalize_polled_external_status_job,
+    normalize_polled_incident_summary_job,
+    resolve_correlation_mode,
+    resolve_execution_mode,
+    resolve_job_workspace_id,
+)
+from incidentflow_mcp.mcp.services.kubernetes_analysis import (
     _analyze_workload_logs,
     _build_describe_response,
     _cluster_health_assessment,
-    _compact_external_status_result,
     _compact_log_payload,
     _describe_pod_structured,
     _diagnose_pod,
-    _execute_external_status_check,
     _filter_workload_pods,
+    _parse_k8s_timestamp,
+    _restart_window_summary,
+    _select_workload_pod,
+)
+from incidentflow_mcp.mcp.services.kubernetes_commands import (
     _k8s_cluster_overview_payload,
     _k8s_connection_health_payload,
     _k8s_rbac_check_payload,
-    _normalize_correlation_alerts,
-    _normalize_polled_external_status_job,
-    _normalize_polled_incident_summary_job,
     _overview_payload,
-    _resolve_correlation_mode,
-    _resolve_execution_mode,
-    _resolve_job_workspace_id,
     _resolve_k8s_cluster_id,
-    _resolve_slack_tool_access,
-    _restart_window_summary,
-    _select_workload_pod,
-    _structured_tool_exception,
-    create_mcp_server,
 )
+from incidentflow_mcp.mcp.services.slack_access import resolve_slack_tool_access
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
 from incidentflow_mcp.tools.registry import get_tool_specs
@@ -119,19 +126,19 @@ def _set_k8s_tool_context() -> None:
 
 def test_resolve_execution_mode_auto_sync_in_dev() -> None:
     settings = Settings(_env_file=None, environment="development", mcp_async_tools_enabled=None)
-    assert _resolve_execution_mode(settings, "auto") == "sync"
+    assert resolve_execution_mode(settings, "auto") == "sync"
 
 
 def test_resolve_execution_mode_auto_async_in_production() -> None:
     settings = Settings(_env_file=None, environment="production", mcp_async_tools_enabled=None)
-    assert _resolve_execution_mode(settings, "auto") == "async"
+    assert resolve_execution_mode(settings, "auto") == "async"
 
 
 def test_correlate_alerts_auto_stays_sync_and_async_is_rejected() -> None:
-    assert _resolve_correlation_mode("auto") == "sync"
-    assert _resolve_correlation_mode("sync") == "sync"
+    assert resolve_correlation_mode("auto") == "sync"
+    assert resolve_correlation_mode("sync") == "sync"
     with pytest.raises(ValueError, match=r"alert\.correlation\.generate"):
-        _resolve_correlation_mode("async")
+        resolve_correlation_mode("async")
 
 
 def _sample_alert_payload() -> dict:
@@ -153,8 +160,8 @@ def _sample_alert_payload() -> dict:
 def test_correlate_alerts_accepts_alerts_and_legacy_alerts_json() -> None:
     payload = _sample_alert_payload()
 
-    direct = _normalize_correlation_alerts([payload], None)
-    legacy = _normalize_correlation_alerts(None, json.dumps([payload]))
+    direct = normalize_correlation_alerts([payload], None)
+    legacy = normalize_correlation_alerts(None, json.dumps([payload]))
 
     assert direct[0].name == "InstanceDown"
     assert legacy[0].alert_id == "slack-1779307031.278049"
@@ -162,7 +169,7 @@ def test_correlate_alerts_accepts_alerts_and_legacy_alerts_json() -> None:
 
 def test_correlate_alerts_rejects_invalid_payload_cleanly() -> None:
     with pytest.raises(ValueError, match="alerts must be a list"):
-        _normalize_correlation_alerts({"name": "InstanceDown"}, None)  # type: ignore[arg-type]
+        normalize_correlation_alerts({"name": "InstanceDown"}, None)  # type: ignore[arg-type]
 
 
 def test_select_workload_pod_prefers_exact_then_prefix() -> None:
@@ -193,24 +200,24 @@ def test_external_status_check_schema_contains_response_mode_and_check_id_pollin
 
 def test_resolve_job_workspace_id_prefers_explicit_scope_or_default() -> None:
     with pytest.raises(ValueError):
-        _resolve_job_workspace_id(None)
+        resolve_job_workspace_id(None)
     assert (
-        _resolve_job_workspace_id(
+        resolve_job_workspace_id(
             None,
             default_workspace_id="35b02121-716b-4097-a851-84485d39b76f",
         )
         == "35b02121-716b-4097-a851-84485d39b76f"
     )
     assert (
-        _resolve_job_workspace_id(
+        resolve_job_workspace_id(
             "   ",
             default_workspace_id="35b02121-716b-4097-a851-84485d39b76f",
         )
         == "35b02121-716b-4097-a851-84485d39b76f"
     )
-    assert _resolve_job_workspace_id("ws_1", default_workspace_id="ws_default") == "ws_1"
+    assert resolve_job_workspace_id("ws_1", default_workspace_id="ws_default") == "ws_1"
     assert (
-        _resolve_job_workspace_id(
+        resolve_job_workspace_id(
             None,
             token_workspace_id="35b02121-716b-4097-a851-84485d39b76f",
             default_workspace_id="ws_default",
@@ -221,7 +228,7 @@ def test_resolve_job_workspace_id_prefers_explicit_scope_or_default() -> None:
 
 def test_resolve_job_workspace_id_rejects_workspace_scope_mismatch() -> None:
     with pytest.raises(ValueError, match="workspace_scope_mismatch"):
-        _resolve_job_workspace_id(
+        resolve_job_workspace_id(
             "ws_explicit",
             token_workspace_id="ws_from_token",
             default_workspace_id="ws_default",
@@ -237,7 +244,7 @@ def test_slack_tool_access_prefers_platform_mode_over_legacy_token() -> None:
         slack_bot_token="xoxb-legacy",
     )
 
-    token, client = _resolve_slack_tool_access(
+    token, client = resolve_slack_tool_access(
         settings,
         workspace_id=None,
         token_workspace_id="ws_from_token",
@@ -256,7 +263,7 @@ def test_slack_tool_access_rejects_direct_token_in_production() -> None:
     )
 
     with pytest.raises(ValueError, match="slack_platform_mode_required"):
-        _resolve_slack_tool_access(
+        resolve_slack_tool_access(
             settings,
             workspace_id=None,
             token_workspace_id="ws_from_token",
@@ -270,7 +277,7 @@ def test_slack_tool_access_allows_local_legacy_token_with_workspace_scope() -> N
         slack_bot_token="xoxb-local",
     )
 
-    token, client = _resolve_slack_tool_access(
+    token, client = resolve_slack_tool_access(
         settings,
         workspace_id="ws_from_token",
         token_workspace_id="ws_from_token",
@@ -280,7 +287,7 @@ def test_slack_tool_access_allows_local_legacy_token_with_workspace_scope() -> N
     assert client is None
 
     with pytest.raises(ValueError, match="workspace_scope_mismatch"):
-        _resolve_slack_tool_access(
+        resolve_slack_tool_access(
             settings,
             workspace_id="ws_other",
             token_workspace_id="ws_from_token",
@@ -729,7 +736,10 @@ def test_overview_treats_single_restart_ready_pod_as_healthy() -> None:
             "phase": "Running",
             "node": None,
             "restarts": 1,
+            "restart_count_total": 1,
             "last_restart_at": None,
+            "has_restart_in_last_1h": False,
+            "has_restart_in_last_24h": False,
             "restarts_last_1h": 0,
             "restarts_last_24h": 0,
         }
@@ -1123,10 +1133,40 @@ def test_restart_window_summary_uses_last_restart_timestamp() -> None:
     )
 
     assert summary == {
+        "restart_count_total": 3,
         "last_restart_at": "2026-07-19T15:30:00Z",
-        "restarts_last_1h": 2,
-        "restarts_last_24h": 2,
+        "has_restart_in_last_1h": True,
+        "has_restart_in_last_24h": True,
+        "restarts_last_1h": 1,
+        "restarts_last_24h": 1,
     }
+
+
+def test_restart_window_summary_does_not_treat_total_restarts_as_window_count() -> None:
+    summary = _restart_window_summary(
+        [
+            {
+                "name": "api",
+                "restart_count": 20,
+                "last_restart_at": "2026-07-19T15:50:00Z",
+            },
+        ],
+        now=datetime(2026, 7, 19, 16, 0, tzinfo=UTC),
+    )
+
+    assert summary["restart_count_total"] == 20
+    assert summary["has_restart_in_last_1h"] is True
+    assert summary["has_restart_in_last_24h"] is True
+    assert summary["restarts_last_1h"] == 1
+    assert summary["restarts_last_24h"] == 1
+
+
+def test_parse_k8s_timestamp_accepts_non_string_values_without_crashing() -> None:
+    parsed = _parse_k8s_timestamp(datetime(2026, 7, 19, 15, 30, tzinfo=UTC))
+
+    assert parsed == datetime(2026, 7, 19, 15, 30, tzinfo=UTC)
+    assert _parse_k8s_timestamp(None) is None
+    assert _parse_k8s_timestamp("") is None
 
 
 def test_build_describe_response_keeps_running_ready_restart_healthy() -> None:
@@ -1236,7 +1276,7 @@ def test_structured_tool_exception_wraps_http_status_body() -> None:
     )
     exc = httpx.HTTPStatusError("forbidden", request=request, response=response)
 
-    payload = _structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+    payload = structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
 
     assert payload["ok"] is False
     assert payload["status"] == "failed"
@@ -1261,7 +1301,7 @@ async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error
 
 
 def test_compact_external_status_includes_failed_provider_entries() -> None:
-    result = _compact_external_status_result(
+    result = compact_external_status_result(
         {
             "status": "partial",
             "external_status": [
@@ -1302,7 +1342,7 @@ def test_compact_external_status_limits_historical_incidents() -> None:
         for index in range(8)
     ]
 
-    result = _compact_external_status_result(
+    result = compact_external_status_result(
         {
             "status": "success",
             "external_status": [
@@ -1385,7 +1425,7 @@ async def test_platform_api_jobs_client_submit_includes_internal_key(
 
 
 def test_normalize_polled_incident_summary_job_running_returns_async() -> None:
-    output = _normalize_polled_incident_summary_job(
+    output = normalize_polled_incident_summary_job(
         job_id="sum_1",
         job={"status": "running"},
         poll_after_seconds=2,
@@ -1399,7 +1439,7 @@ def test_normalize_polled_incident_summary_job_running_returns_async() -> None:
 
 
 def test_normalize_polled_incident_summary_job_terminal_returns_completed_payload() -> None:
-    output = _normalize_polled_incident_summary_job(
+    output = normalize_polled_incident_summary_job(
         job_id="sum_2",
         job={
             "status": "succeeded",
@@ -1422,7 +1462,7 @@ def test_normalize_polled_incident_summary_job_terminal_returns_completed_payloa
 
 
 def test_normalize_polled_incident_summary_job_rejects_external_status_result() -> None:
-    output = _normalize_polled_incident_summary_job(
+    output = normalize_polled_incident_summary_job(
         job_id="sum_wrong",
         job={
             "status": "succeeded",
@@ -1443,7 +1483,7 @@ def test_normalize_polled_incident_summary_job_rejects_external_status_result() 
 
 
 def test_normalize_polled_incident_summary_job_rejects_wrong_job_type() -> None:
-    output = _normalize_polled_incident_summary_job(
+    output = normalize_polled_incident_summary_job(
         job_id="sum_wrong_type",
         job={
             "status": "succeeded",
@@ -1460,7 +1500,7 @@ def test_normalize_polled_incident_summary_job_rejects_wrong_job_type() -> None:
 
 
 def test_normalize_polled_incident_summary_job_failed_returns_error() -> None:
-    output = _normalize_polled_incident_summary_job(
+    output = normalize_polled_incident_summary_job(
         job_id="sum_3",
         job={"status": "failed", "error": "runner crashed"},
         poll_after_seconds=2,
@@ -1473,7 +1513,7 @@ def test_normalize_polled_incident_summary_job_failed_returns_error() -> None:
 
 
 def test_normalize_polled_external_status_job_running_returns_async() -> None:
-    output = _normalize_polled_external_status_job(
+    output = normalize_polled_external_status_job(
         job_id="job_1",
         job={"status": "running"},
         poll_after_seconds=2,
@@ -1488,7 +1528,7 @@ def test_normalize_polled_external_status_job_running_returns_async() -> None:
 
 
 def test_normalize_polled_external_status_job_terminal_returns_compact_payload() -> None:
-    output = _normalize_polled_external_status_job(
+    output = normalize_polled_external_status_job(
         job_id="job_2",
         job={
             "status": "succeeded",
@@ -1549,7 +1589,7 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
 
 
 def test_compact_external_status_uses_latest_update_timestamp_not_list_order() -> None:
-    output = _normalize_polled_external_status_job(
+    output = normalize_polled_external_status_job(
         job_id="job_123",
         job={
             "id": "job_123",
@@ -1613,7 +1653,7 @@ def test_normalize_polled_external_status_job_terminal_returns_full_payload() ->
         ],
     }
 
-    output = _normalize_polled_external_status_job(
+    output = normalize_polled_external_status_job(
         job_id="job_2",
         job={"status": "succeeded", "result": raw_result},
         poll_after_seconds=2,
@@ -1650,7 +1690,7 @@ async def test_external_status_check_starts_new_job_when_check_id_missing() -> N
     )
     fake_client = FakeClient()
 
-    output = await _execute_external_status_check(
+    output = await execute_external_status_check(
         settings=settings,
         client=fake_client,
         providers=["aws"],
@@ -1695,7 +1735,7 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
     )
     fake_client = FakeClient()
 
-    output = await _execute_external_status_check(
+    output = await execute_external_status_check(
         settings=settings,
         client=fake_client,
         providers=["aws", "github"],
@@ -1731,7 +1771,7 @@ async def test_external_status_check_rejects_missing_workspace_scope() -> None:
         platform_api_base_url="http://platform.test",
     )
     with pytest.raises(ValueError):
-        await _execute_external_status_check(
+        await execute_external_status_check(
             settings=settings,
             client=FakeClient(),
             providers=["aws"],
@@ -1763,7 +1803,7 @@ async def test_external_status_check_uses_default_workspace_when_omitted() -> No
     )
     fake_client = FakeClient()
 
-    output = await _execute_external_status_check(
+    output = await execute_external_status_check(
         settings=settings,
         client=fake_client,
         providers=["github"],
@@ -1801,7 +1841,7 @@ async def test_external_status_check_uses_token_workspace_when_omitted() -> None
     )
     fake_client = FakeClient()
 
-    output = await _execute_external_status_check(
+    output = await execute_external_status_check(
         settings=settings,
         client=fake_client,
         providers=["github"],
@@ -1836,7 +1876,7 @@ async def test_external_status_check_rejects_explicit_workspace_scope_mismatch()
     )
 
     with pytest.raises(ValueError, match="workspace_scope_mismatch"):
-        await _execute_external_status_check(
+        await execute_external_status_check(
             settings=settings,
             client=FakeClient(),
             providers=["github"],

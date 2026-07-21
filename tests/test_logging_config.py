@@ -17,6 +17,10 @@ def test_json_logging_outputs_parseable_structured_line(
             "http_route": "/mcp",
             "http_status_code": 200,
             "http_duration_ms": 12.34,
+            "log_message": "request completed token=secret",
+            "mcp_request_type": "unknown",
+            "workspace_id": "",
+            "cluster_id": None,
             "color_message": "ignored",
         },
     )
@@ -34,6 +38,11 @@ def test_json_logging_outputs_parseable_structured_line(
     assert payload["http_route"] == "/mcp"
     assert payload["http_status_code"] == 200
     assert payload["http_duration_ms"] == 12.34
+    assert payload["message"] == "request completed token=***"
+    assert "log_message" not in payload
+    assert "mcp_request_type" not in payload
+    assert "workspace_id" not in payload
+    assert "cluster_id" not in payload
     assert "color_message" not in payload
     assert "timestamp" in payload
     assert "trace_id" not in payload

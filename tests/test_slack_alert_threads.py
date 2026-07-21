@@ -6,7 +6,8 @@ import pytest
 
 from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.config import Settings
-from incidentflow_mcp.mcp.server import _normalize_slack_thread_mode, create_mcp_server
+from incidentflow_mcp.mcp.registration.slack import normalize_slack_thread_mode
+from incidentflow_mcp.mcp.server import create_mcp_server
 from incidentflow_mcp.slack.slack_client import SlackThreadFetchResult
 from incidentflow_mcp.tools import slack_alerts
 
@@ -523,14 +524,14 @@ async def test_incident_thread_summary_flags_stale_cross_cluster_context(
 
 
 def test_thread_mode_aliases_normalize_to_full() -> None:
-    assert _normalize_slack_thread_mode("summarize") == "full"
-    assert _normalize_slack_thread_mode("analysis") == "full"
-    assert _normalize_slack_thread_mode(" full ") == "full"
+    assert normalize_slack_thread_mode("summarize") == "full"
+    assert normalize_slack_thread_mode("analysis") == "full"
+    assert normalize_slack_thread_mode(" full ") == "full"
 
 
 def test_unknown_thread_mode_still_raises() -> None:
     with pytest.raises(ValueError, match="none, metadata, full"):
-        _normalize_slack_thread_mode("deep")
+        normalize_slack_thread_mode("deep")
 
 
 @pytest.mark.asyncio

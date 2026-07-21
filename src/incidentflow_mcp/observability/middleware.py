@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from time import monotonic, perf_counter
 from typing import Any
@@ -11,6 +12,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.logging_config import compact_log_fields
 from incidentflow_mcp.observability.metrics import (
     SessionTracker,
     classify_outcome,
@@ -38,6 +40,11 @@ from incidentflow_mcp.observability.metrics import (
     status_class_from_code,
     tool_duration_seconds,
 )
+from incidentflow_mcp.observability.tool_events import (
+    current_tool_event,
+    reset_tool_event_context,
+    start_tool_event_context,
+)
 from incidentflow_mcp.observability.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
@@ -53,6 +60,8 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._session_tracker = SessionTracker()
         self._session_idle_timeout_seconds = settings.mcp_session_idle_timeout_seconds
+        self._http_slow_request_threshold_ms = settings.http_slow_request_threshold_ms
+        self._mcp_slow_tool_threshold_ms = settings.mcp_slow_tool_threshold_ms
         self._namespace, self._pod = pod_label_values()
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -95,8 +104,10 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
 
         status_code = 500
         response: Response | None = None
+        response_tool_event: dict[str, Any] | None = None
         _otel_span = None
         _otel_token = None
+        _tool_event_token = start_tool_event_context() if is_call_tool else None
         try:
             if is_call_tool:
                 _otel_span, _otel_token = _start_tool_span(tool_name, request)
@@ -112,6 +123,11 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                         _otel_span.set_status(StatusCode.OK)
                 except Exception:
                     pass
+            if is_call_tool:
+                response, response_tool_event = await _capture_mcp_tool_response_event(
+                    response=response,
+                    tool_name=tool_name,
+                )
             return response
         except Exception as exc:
             if _otel_span is not None:
@@ -136,6 +152,8 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
             status_code_str = str(status_code)
             status_class = status_class_from_code(status_code)
             outcome = classify_outcome(status_code)
+            tool_event = response_tool_event or current_tool_event()
+            tool_outcome = _tool_metric_outcome(http_outcome=outcome, tool_event=tool_event)
 
             http_requests_in_flight.labels(method=method, route=route, traffic=traffic).dec()
             mcp_connections_active.labels(
@@ -186,7 +204,7 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                         method=request_type,
                         status_code=status_code_str,
                         status_class=status_class,
-                        outcome=outcome,
+                        outcome=tool_outcome,
                         traffic_type=traffic,
                         session_mode=session_mode,
                     ).inc()
@@ -195,14 +213,14 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                         pod=self._pod,
                         tool=tool_name,
                         method=request_type,
-                        outcome=outcome,
+                        outcome=tool_outcome,
                         traffic_type=traffic,
                     ).observe(elapsed)
                     if tool_name != "unknown":
-                        tool_duration_seconds.labels(tool=tool_name, status=outcome).observe(
+                        tool_duration_seconds.labels(tool=tool_name, status=tool_outcome).observe(
                             elapsed
                         )
-                    if outcome == "error":
+                    if tool_outcome == "error":
                         mcp_tool_errors_total.labels(
                             namespace=self._namespace,
                             pod=self._pod,
@@ -225,34 +243,33 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                 )
 
             request_id = getattr(request.state, "request_id", None)
-            log_extra: dict[str, Any] = {
-                "http_method": method,
-                "http_route": route,
-                "traffic": traffic,
-                "http_status_code": status_code,
-                "http_status_class": status_class,
-                "outcome": outcome,
-                "http_duration_ms": round(elapsed * 1000.0, 2),
-                "request_id": request_id,
-            }
-            if route == "/mcp":
-                log_extra["mcp_request_type"] = request_type
-                log_extra["session_mode"] = session_mode
-                if is_call_tool and tool_name != "unknown":
-                    log_extra["tool_name"] = tool_name
-
-            auth_context = getattr(request.state, "auth_context", None)
-            if isinstance(auth_context, dict):
-                workspace_id = auth_context.get("workspace_id")
-                auth_method = auth_context.get("auth_method")
-                if workspace_id:
-                    log_extra["workspace_id"] = str(workspace_id)
-                if auth_method:
-                    log_extra["auth_method"] = str(auth_method)
+            duration_ms = round(elapsed * 1000.0, 2)
+            workspace_id = _workspace_id_from_request(request)
 
             # Log while OTel context is still attached so _TraceContextFilter
             # can inject non-empty trace_id/span_id into this log record.
-            logger.info("http_request_completed", extra=log_extra)
+            self._log_http_request(
+                method=method,
+                route=route,
+                path=request.url.path,
+                status_code=status_code,
+                duration_ms=duration_ms,
+                request_id=request_id,
+                workspace_id=workspace_id,
+            )
+            if is_call_tool:
+                self._log_mcp_tool(
+                    tool_name=tool_name,
+                    request_type=request_type,
+                    status_code=status_code,
+                    outcome=outcome,
+                    duration_ms=duration_ms,
+                    request_id=request_id,
+                    workspace_id=workspace_id,
+                    tool_event=tool_event,
+                )
+            if _tool_event_token is not None:
+                reset_tool_event_context(_tool_event_token)
             if _otel_token is not None:
                 try:
                     import opentelemetry.context as otel_ctx
@@ -260,6 +277,122 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                     otel_ctx.detach(_otel_token)
                 except Exception:
                     pass
+
+    def _log_http_request(
+        self,
+        *,
+        method: str,
+        route: str,
+        path: str,
+        status_code: int,
+        duration_ms: float,
+        request_id: object,
+        workspace_id: str | None,
+    ) -> None:
+        base_fields = compact_log_fields(
+            http_method=method,
+            http_route=route,
+            http_path=path if route == "unmatched" else None,
+            http_status_code=status_code,
+            http_duration_ms=duration_ms,
+            request_id=request_id,
+            workspace_id=workspace_id,
+        )
+
+        if status_code >= 500:
+            logger.error(
+                "http_request_failed",
+                extra=compact_log_fields(
+                    **base_fields,
+                    error_code=f"http_{status_code}",
+                    error_type="HTTPServerError",
+                    log_message=f"HTTP request failed with status {status_code}",
+                ),
+            )
+        elif status_code >= 400:
+            logger.warning(
+                "http_request_failed",
+                extra=compact_log_fields(
+                    **base_fields,
+                    error_code=f"http_{status_code}",
+                    error_type="HTTPClientError",
+                    log_message=f"HTTP request failed with status {status_code}",
+                ),
+            )
+        else:
+            logger.info("http_request_completed", extra=base_fields)
+            if duration_ms >= self._http_slow_request_threshold_ms:
+                logger.warning(
+                    "http_request_slow",
+                    extra=compact_log_fields(
+                        **base_fields,
+                        slow_threshold_ms=self._http_slow_request_threshold_ms,
+                    ),
+                )
+
+    def _log_mcp_tool(
+        self,
+        *,
+        tool_name: str,
+        request_type: str,
+        status_code: int,
+        outcome: str,
+        duration_ms: float,
+        request_id: object,
+        workspace_id: str | None,
+        tool_event: dict[str, Any] | None,
+    ) -> None:
+        if request_type != "CallToolRequest":
+            return
+
+        base_fields = compact_log_fields(
+            tool_name=tool_name,
+            integration=_integration_for_tool(tool_name),
+            duration_ms=duration_ms,
+            request_id=request_id,
+            workspace_id=workspace_id,
+        )
+        if outcome == "error":
+            logger.error(
+                "mcp_tool_failed",
+                extra=compact_log_fields(
+                    **base_fields,
+                    error_code=f"http_{status_code}",
+                    error_type="MCPToolTransportError",
+                    log_message=f"MCP tool request failed with HTTP status {status_code}",
+                ),
+            )
+            return
+
+        event_fields = (
+            {key: value for key, value in tool_event.items() if key != "outcome"}
+            if tool_event
+            else {}
+        )
+
+        if tool_event and tool_event.get("outcome") == "rejected":
+            logger.warning(
+                "mcp_tool_rejected",
+                extra=compact_log_fields(**(base_fields | event_fields)),
+            )
+            return
+
+        if tool_event and tool_event.get("outcome") == "failed":
+            logger.error(
+                "mcp_tool_failed",
+                extra=compact_log_fields(**(base_fields | event_fields)),
+            )
+            return
+
+        logger.info("mcp_tool_succeeded", extra=base_fields)
+        if duration_ms >= self._mcp_slow_tool_threshold_ms:
+            logger.warning(
+                "mcp_tool_slow",
+                extra=compact_log_fields(
+                    **base_fields,
+                    slow_threshold_ms=self._mcp_slow_tool_threshold_ms,
+                ),
+            )
 
     def _update_session_metrics(
         self,
@@ -312,11 +445,219 @@ def _detect_session_mode(request: Request) -> str:
     return "none"
 
 
+def _workspace_id_from_request(request: Request) -> str | None:
+    auth_context = getattr(request.state, "auth_context", None)
+    if not isinstance(auth_context, dict):
+        return None
+    workspace_id = auth_context.get("workspace_id")
+    return str(workspace_id) if workspace_id else None
+
+
+def _integration_for_tool(tool_name: str) -> str | None:
+    prefix, _, _ = tool_name.partition("_")
+    return {
+        "argocd": "argocd",
+        "grafana": "grafana",
+        "k8s": "kubernetes",
+        "kubectl": "kubernetes",
+        "memory": "memory",
+        "slack": "slack",
+    }.get(prefix)
+
+
+def _integration_remediation(integration: object) -> str | None:
+    if not integration:
+        return None
+    return f"connect_{integration!s}_integration"
+
+
+def _tool_metric_outcome(
+    *,
+    http_outcome: str,
+    tool_event: dict[str, Any] | None,
+) -> str:
+    if not tool_event:
+        return http_outcome
+    if tool_event.get("outcome") == "rejected":
+        return "rejected"
+    if tool_event.get("outcome") == "failed":
+        return "error"
+    return http_outcome
+
+
 async def _extract_payload(request: Request) -> Any:
     try:
         return await request.json()
     except Exception:
         return None
+
+
+async def _capture_mcp_tool_response_event(
+    *,
+    response: Response,
+    tool_name: str,
+) -> tuple[Response, dict[str, Any] | None]:
+    content_type = response.headers.get("content-type", "")
+    if "application/json" not in content_type and "text/event-stream" not in content_type:
+        return response, None
+
+    body = await _response_body(response)
+    rebuilt = Response(
+        content=body,
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        media_type=response.media_type,
+        background=response.background,
+    )
+    return rebuilt, _mcp_tool_event_from_body(
+        body=body,
+        content_type=content_type,
+        tool_name=tool_name,
+    )
+
+
+async def _response_body(response: Response) -> bytes:
+    body = getattr(response, "body", None)
+    if isinstance(body, bytes):
+        return body
+
+    chunks: list[bytes] = []
+    async for chunk in response.body_iterator:  # type: ignore[attr-defined]
+        if isinstance(chunk, bytes):
+            chunks.append(chunk)
+        else:
+            chunks.append(str(chunk).encode())
+    return b"".join(chunks)
+
+
+def _mcp_tool_event_from_body(
+    *,
+    body: bytes,
+    content_type: str,
+    tool_name: str,
+) -> dict[str, Any] | None:
+    payload = _mcp_json_payload_from_body(body=body, content_type=content_type)
+    if not isinstance(payload, dict):
+        return None
+
+    error = payload.get("error")
+    if isinstance(error, dict):
+        error_code = _optional_error_code(error.get("code"))
+        return {
+            "outcome": "rejected",
+            "reason": _reason_from_mcp_error_code(error_code),
+            "error_code": error_code,
+            "error_type": "MCPJsonRpcError",
+            "log_message": str(error["message"]) if error.get("message") else None,
+            "retryable": _is_retryable_mcp_error(error_code),
+        }
+
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return None
+
+    structured = result.get("structuredContent")
+    structured_payload = structured if isinstance(structured, dict) else {}
+    if structured_payload.get("ok") is False:
+        code = _structured_error_code(structured_payload)
+        message = _structured_error_message(structured_payload)
+        if code == "INTEGRATION_NOT_CONNECTED":
+            integration = structured_payload.get("integration") or _integration_for_tool(tool_name)
+            return {
+                "outcome": "rejected",
+                "reason": "integration_missing",
+                "integration": integration,
+                "error_code": code,
+                "log_message": message,
+                "retryable": False,
+                "remediation": _integration_remediation(integration),
+            }
+        return {
+            "outcome": "failed",
+            "error_code": code or "mcp_tool_error",
+            "error_type": "MCPToolStructuredError",
+            "log_message": message,
+            "retryable": False,
+        }
+
+    if result.get("isError") is True:
+        return {
+            "outcome": "failed",
+            "error_code": "mcp_tool_error",
+            "error_type": "MCPToolStructuredError",
+            "log_message": _text_content_message(result),
+            "retryable": False,
+        }
+
+    return None
+
+
+def _mcp_json_payload_from_body(*, body: bytes, content_type: str) -> Any:
+    text = body.decode("utf-8", errors="replace").strip()
+    if not text:
+        return None
+    if "text/event-stream" in content_type:
+        data_lines = [
+            line.removeprefix("data:").strip()
+            for line in text.splitlines()
+            if line.startswith("data:")
+        ]
+        text = "\n".join(data_lines).strip()
+        if not text:
+            return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def _structured_error_code(payload: dict[str, Any]) -> str | None:
+    code = payload.get("code")
+    if code:
+        return str(code)
+    error = payload.get("error")
+    if isinstance(error, dict) and error.get("code"):
+        return str(error["code"])
+    return None
+
+
+def _structured_error_message(payload: dict[str, Any]) -> str | None:
+    message = payload.get("message")
+    if message:
+        return str(message)
+    error = payload.get("error")
+    if isinstance(error, dict) and error.get("message"):
+        return str(error["message"])
+    return None
+
+
+def _optional_error_code(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
+def _reason_from_mcp_error_code(error_code: str | None) -> str:
+    return {
+        "-32029": "rate_limited",
+        "-32030": "timeout",
+        "-32031": "concurrency_limit",
+    }.get(str(error_code), "mcp_error")
+
+
+def _is_retryable_mcp_error(error_code: str | None) -> bool:
+    return str(error_code) in {"-32029", "-32030", "-32031"}
+
+
+def _text_content_message(result: dict[str, Any]) -> str | None:
+    content = result.get("content")
+    if not isinstance(content, list):
+        return None
+    first = next((item for item in content if isinstance(item, dict)), None)
+    if not first:
+        return None
+    text = first.get("text")
+    return str(text)[:500] if text else None
 
 
 def _start_tool_span(

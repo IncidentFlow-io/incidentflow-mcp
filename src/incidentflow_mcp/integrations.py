@@ -13,7 +13,9 @@ import httpx
 from incidentflow_mcp.auth.context import get_current_auth_context
 from incidentflow_mcp.auth.principal import IncidentFlowPrincipal
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.logging_config import compact_log_fields
 from incidentflow_mcp.observability.metrics import mcp_integration_guard_total
+from incidentflow_mcp.observability.tool_events import record_tool_rejection
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.integration_status_client import (
     IntegrationStatusEndpoint,
@@ -108,8 +110,7 @@ class IntegrationStatusService:
         principal: IncidentFlowPrincipal,
     ) -> dict[IntegrationType, IntegrationStatus] | None:
         if not (
-            self._settings.platform_api_base_url
-            and self._settings.platform_api_internal_api_key
+            self._settings.platform_api_base_url and self._settings.platform_api_internal_api_key
         ):
             return None
 
@@ -120,17 +121,41 @@ class IntegrationStatusService:
             # The endpoint is new; keep local development compatible with older platform-api.
             if exc.response.status_code == 404:
                 return None
-            logger.info(
-                "mcp_integrations_internal_status_failed workspace_id=%s status=%s",
-                principal.workspace.id,
-                exc.response.status_code,
+            logger.warning(
+                "integration_status_request_failed",
+                extra=compact_log_fields(
+                    integration="all",
+                    workspace_id=principal.workspace.id,
+                    operation="get_workspace_integration_status",
+                    upstream_service="platform-api",
+                    upstream_route="/internal/integrations/status/workspace",
+                    upstream_status=exc.response.status_code,
+                    error_code="platform_api_internal_error",
+                    error_type=type(exc).__name__,
+                    retryable=exc.response.status_code >= 500,
+                    log_message=(
+                        "Failed to fetch workspace integration status; "
+                        "using fallback status checks."
+                    ),
+                ),
             )
             return None
         except (ValueError, httpx.HTTPError) as exc:
-            logger.info(
-                "mcp_integrations_internal_status_unavailable workspace_id=%s error=%s",
-                principal.workspace.id,
-                type(exc).__name__,
+            logger.warning(
+                "integration_status_request_unavailable",
+                extra=compact_log_fields(
+                    integration="all",
+                    workspace_id=principal.workspace.id,
+                    operation="get_workspace_integration_status",
+                    upstream_service="platform-api",
+                    upstream_route="/internal/integrations/status/workspace",
+                    error_code="platform_api_unavailable",
+                    error_type=type(exc).__name__,
+                    retryable=True,
+                    log_message=(
+                        "Workspace integration status is unavailable; using fallback status checks."
+                    ),
+                ),
             )
             return None
 
@@ -214,9 +239,7 @@ class IntegrationStatusService:
         raw_clusters = payload.get("clusters")
         clusters = raw_clusters if isinstance(raw_clusters, list) else []
         connected = [
-            item
-            for item in clusters
-            if isinstance(item, dict) and item.get("connected") is True
+            item for item in clusters if isinstance(item, dict) and item.get("connected") is True
         ]
         if not connected:
             return IntegrationStatus(
@@ -311,9 +334,7 @@ class IntegrationStatusService:
             resource_count=resource_count(payload) if resource_count else None,
             resource_id=resource_id(payload) if resource_id else None,
             message=(
-                None
-                if connected
-                else str(payload.get("error_message") or not_connected_message)
+                None if connected else str(payload.get("error_message") or not_connected_message)
             ),
         )
 
@@ -341,9 +362,7 @@ class IntegrationStatusService:
             resource_count=resource_count(payload) if resource_count else None,
             resource_id=resource_id(payload) if resource_id else None,
             message=(
-                None
-                if connected
-                else str(payload.get("error_message") or not_connected_message)
+                None if connected else str(payload.get("error_message") or not_connected_message)
             ),
         )
 
@@ -443,13 +462,14 @@ async def resolve_tool_integration_context(
             principal=principal,
         )
         logger.info(
-            "mcp_tool_integration_resolved tool=%s workspace_id=%s "
-            "integration=%s source=%s environment=%s",
-            tool.name,
-            principal.workspace.id,
-            integration,
-            status.source,
-            principal.runtime.environment,
+            "mcp_tool_integration_resolved",
+            extra=compact_log_fields(
+                tool_name=tool.name,
+                workspace_id=principal.workspace.id,
+                integration=integration,
+                source=status.source,
+                requested_environment=principal.runtime.environment,
+            ),
         )
         return ResolvedIntegrationContext(
             integration=integration,
@@ -471,12 +491,14 @@ async def resolve_tool_integration_context(
             principal=principal,
         )
         logger.info(
-            "mcp_tool_integration_resolved tool=%s workspace_id=%s "
-            "integration=%s source=shared_dev environment=%s",
-            tool.name,
-            principal.workspace.id,
-            integration,
-            principal.runtime.environment,
+            "mcp_tool_integration_resolved",
+            extra=compact_log_fields(
+                tool_name=tool.name,
+                workspace_id=principal.workspace.id,
+                integration=integration,
+                source="shared_dev",
+                requested_environment=principal.runtime.environment,
+            ),
         )
         return ResolvedIntegrationContext(
             integration=integration,
@@ -492,12 +514,20 @@ async def resolve_tool_integration_context(
         result="not_connected",
         principal=principal,
     )
-    logger.info(
-        "mcp_tool_integration_missing tool=%s workspace_id=%s integration=%s environment=%s",
-        tool.name,
-        principal.workspace.id,
-        integration,
-        principal.runtime.environment,
+    record_tool_rejection(
+        reason="integration_missing",
+        integration=integration,
+        requested_environment=principal.runtime.environment,
+        remediation=f"connect_{integration}_integration",
+    )
+    logger.debug(
+        "mcp_tool_integration_missing",
+        extra=compact_log_fields(
+            tool_name=tool.name,
+            workspace_id=principal.workspace.id,
+            integration=integration,
+            requested_environment=principal.runtime.environment,
+        ),
     )
     return integration_required(integration, settings)
 

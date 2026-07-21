@@ -82,7 +82,13 @@ def serve(
         service_version=settings.mcp_server_version,
         environment=settings.runtime_environment(),
     )
-    logger.info("launching server on %s:%d", _host, _port)
+    logger.info(
+        "server_launching",
+        extra={
+            "host": _host,
+            "port": _port,
+        },
+    )
 
     uvicorn.run(
         "incidentflow_mcp.app:create_app",
