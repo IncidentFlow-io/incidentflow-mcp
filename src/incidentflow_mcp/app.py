@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from starlette.types import ASGIApp
 
 from incidentflow_mcp.auth.middleware import BearerAuthMiddleware
-from incidentflow_mcp.config import get_settings
+from incidentflow_mcp.config import Settings, get_settings
 from incidentflow_mcp.http.exception_handlers import register_exception_handlers
 from incidentflow_mcp.http.middleware.request_id import RequestIDMiddleware
 from incidentflow_mcp.http.routers.ops import create_ops_router
@@ -29,6 +29,16 @@ from incidentflow_mcp.rate_limit.redis_store import RedisRateLimitStore
 from incidentflow_mcp.rate_limit.tool_guard import ToolInvocationGuard
 
 logger = logging.getLogger(__name__)
+
+
+def _auth_mode_label(settings: Settings) -> str:
+    if settings.oauth_validation_enabled():
+        return "oauth_jwt"
+    if settings.managed_token_introspection_enabled():
+        return "managed_token_introspection"
+    if settings.incidentflow_pat is not None:
+        return "static_pat"
+    return "unprotected"
 
 
 def create_app() -> FastAPI:
@@ -94,31 +104,39 @@ def create_app() -> FastAPI:
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             if settings.oauth_validation_enabled():
-                logger.info(
-                    "auth: OAuth JWT validation is active (issuer=%s jwks=%s)",
-                    settings.oauth_expected_issuer,
-                    settings.oauth_jwks_url,
+                logger.debug(
+                    "auth_oauth_jwt_enabled",
+                    extra={
+                        "oauth_issuer": settings.oauth_expected_issuer,
+                        "oauth_jwks_url": settings.oauth_jwks_url,
+                    },
                 )
             if settings.managed_token_introspection_enabled():
-                logger.info(
-                    "auth: platform-api introspection is active at %s%s",
-                    settings.platform_api_base_url,
-                    settings.platform_api_introspect_path,
+                logger.debug(
+                    "auth_token_introspection_enabled",
+                    extra={
+                        "platform_api_base_url": settings.platform_api_base_url,
+                        "platform_api_introspect_path": settings.platform_api_introspect_path,
+                    },
                 )
             elif settings.incidentflow_pat is None:
                 logger.warning(
-                    "auth: no auth provider configured — MCP endpoint is UNPROTECTED. "
-                    "Set INCIDENTFLOW_PAT or PLATFORM_API_BASE_URL in your .env file."
+                    "auth_unprotected",
+                    extra={
+                        "log_message": ("No auth provider configured; MCP endpoint is unprotected.")
+                    },
                 )
-            else:
-                logger.info("auth: Bearer PAT protection is active")
 
             logger.info(
-                "starting %s v%s on %s:%d",
-                settings.mcp_server_name,
-                settings.mcp_server_version,
-                settings.host,
-                settings.port,
+                "server_started",
+                extra={
+                    "host": settings.host,
+                    "port": settings.port,
+                    "auth_mode": _auth_mode_label(settings),
+                    "token_introspection_enabled": (settings.managed_token_introspection_enabled()),
+                    "mcp_transport": "streamable_http",
+                    "mcp_stateless": True,
+                },
             )
 
             # Drive the StreamableHTTPSessionManager task group.
@@ -132,7 +150,10 @@ def create_app() -> FastAPI:
             raise
         finally:
             await rate_limit_store.close()
-            logger.info("shutdown complete")
+            logger.info(
+                "server_stopped",
+                extra={"shutdown_reason": "lifespan_shutdown"},
+            )
 
     app = FastAPI(
         title="IncidentFlow MCP",

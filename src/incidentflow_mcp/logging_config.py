@@ -44,6 +44,15 @@ _STANDARD_LOG_RECORD_KEYS = set(
 _IGNORED_EXTRA_KEYS = {"color_message"}
 
 
+def compact_log_fields(**fields: Any) -> dict[str, Any]:
+    """Return log fields without low-value placeholders."""
+    return {
+        key: value
+        for key, value in fields.items()
+        if value is not None and value != "" and value != "unknown"
+    }
+
+
 def _redact_sensitive_text(value: str) -> str:
     redacted = re.sub(r"(redis://)([^:@\s]+:)?([^@\s]+)@", r"\1***@", value)
     return re.sub(
@@ -131,7 +140,10 @@ class _JsonFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in _STANDARD_LOG_RECORD_KEYS or key in payload or key in _IGNORED_EXTRA_KEYS:
                 continue
-            if value is None or value == "":
+            if value is None or value == "" or value == "unknown":
+                continue
+            if key == "log_message":
+                payload["message"] = _json_safe(value)
                 continue
             payload[key] = _json_safe(value)
 
@@ -187,7 +199,10 @@ class _TextFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key in ignored:
                 continue
-            if value is None or value == "":
+            if value is None or value == "" or value == "unknown":
+                continue
+            if key == "log_message":
+                parts.append(f"message={_redact_sensitive_text(str(value))}")
                 continue
             parts.append(f"{key}={_redact_sensitive_text(str(value))}")
 

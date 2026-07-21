@@ -13,6 +13,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
+from incidentflow_mcp.observability.tool_events import record_tool_rejection
 from incidentflow_mcp.rate_limit.bucket_keys import BucketKeyResolver
 from incidentflow_mcp.rate_limit.identity import ResolvedIdentity
 from incidentflow_mcp.rate_limit.metrics import (
@@ -67,6 +68,12 @@ class ToolInvocationGuard:
         )
         if not tool_result.allowed:
             mcp_tool_rate_limited_total.inc()
+            record_tool_rejection(
+                reason="rate_limited",
+                error_code="mcp_tool_rate_limited",
+                error_type="MCPToolRateLimit",
+                retryable=True,
+            )
             logger.warning(
                 "rate_limit_hit type=tool policy=%s tool=%s identity=%s",
                 policy.name,
@@ -87,6 +94,12 @@ class ToolInvocationGuard:
             )
             if not expensive_result.allowed:
                 mcp_tool_rate_limited_total.inc()
+                record_tool_rejection(
+                    reason="rate_limited",
+                    error_code="mcp_tool_rate_limited",
+                    error_type="MCPToolRateLimit",
+                    retryable=True,
+                )
                 logger.warning(
                     "rate_limit_hit type=tool_expensive policy=%s tool=%s identity=%s",
                     policy.name,
@@ -116,6 +129,12 @@ class ToolInvocationGuard:
         )
         if not acquired:
             mcp_tool_concurrency_rejections_total.inc()
+            record_tool_rejection(
+                reason="concurrency_limit",
+                error_code="mcp_tool_concurrency_limit",
+                error_type="MCPToolConcurrencyLimit",
+                retryable=True,
+            )
             logger.warning(
                 "tool_concurrency_rejection policy=%s tool=%s identity=%s limit=%d",
                 policy.name,
@@ -133,6 +152,12 @@ class ToolInvocationGuard:
             return await asyncio.wait_for(call_next(request), timeout=timeout_seconds)
         except TimeoutError:
             mcp_tool_timeouts_total.inc()
+            record_tool_rejection(
+                reason="timeout",
+                error_code="mcp_tool_timeout",
+                error_type="MCPToolTimeout",
+                retryable=True,
+            )
             logger.warning(
                 "tool_timeout policy=%s tool=%s identity=%s timeout_seconds=%d",
                 policy.name,

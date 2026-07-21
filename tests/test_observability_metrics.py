@@ -5,7 +5,17 @@ import re
 
 from fastapi.testclient import TestClient
 
-from incidentflow_mcp.observability.metrics import classify_traffic
+from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.metrics import classify_traffic, normalize_route
+from incidentflow_mcp.observability.middleware import (
+    MCPObservabilityMiddleware,
+    _mcp_tool_event_from_body,
+    _tool_metric_outcome,
+)
+
+
+async def _empty_asgi_app(scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+    del scope, receive, send
 
 
 def test_classify_traffic_uses_operational_categories() -> None:
@@ -14,6 +24,14 @@ def test_classify_traffic_uses_operational_categories() -> None:
     assert classify_traffic("/metrics") == "metrics"
     assert classify_traffic("/mcp") == "business"
     assert classify_traffic("/install.sh") == "internal"
+
+
+def test_known_well_known_routes_are_not_unmatched() -> None:
+    assert normalize_route("/.well-known/oauth-protected-resource") == (
+        "/.well-known/oauth-protected-resource"
+    )
+    assert normalize_route("/.well-known/jwks.json") == "/.well-known/jwks.json"
+    assert normalize_route("/favicon.ico") == "unmatched"
 
 
 def test_metrics_endpoint_exposes_observability_metrics(auth_client: TestClient) -> None:
@@ -146,11 +164,7 @@ def test_request_log_uses_structured_http_fields(
 ) -> None:
     caplog.set_level(logging.INFO, logger="incidentflow_mcp.observability.middleware")
 
-    auth_client.post(
-        "/mcp",
-        headers=valid_auth_headers,
-        json={"jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {}},
-    )
+    auth_client.get("/healthz", headers=valid_auth_headers)
 
     record = next(
         item
@@ -159,15 +173,154 @@ def test_request_log_uses_structured_http_fields(
         and item.getMessage() == "http_request_completed"
     )
 
-    assert record.http_method == "POST"
-    assert record.http_route == "/mcp"
-    assert record.http_status_code in {200, 202, 500}
-    assert record.http_status_class in {"2xx", "5xx"}
-    assert record.outcome in {"success", "error"}
-    assert record.mcp_request_type == "ListToolsRequest"
-    assert record.session_mode == "headerless"
+    assert record.http_method == "GET"
+    assert record.http_route == "/healthz"
+    assert record.http_status_code == 200
+    assert record.http_duration_ms >= 0
+    assert record.request_id
+    assert not hasattr(record, "http_status_class")
+    assert not hasattr(record, "outcome")
+    assert not hasattr(record, "traffic")
+    assert not hasattr(record, "mcp_request_type")
+    assert not hasattr(record, "session_mode")
+    assert not hasattr(record, "auth_method")
     assert not hasattr(record, "tool_name")
     assert not hasattr(record, "tool")
+
+
+def test_mcp_tool_log_uses_tool_fields(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="incidentflow_mcp.observability.middleware")
+    middleware = MCPObservabilityMiddleware(
+        _empty_asgi_app,
+        settings=Settings(_env_file=None, redis_url="redis://test-only"),
+    )
+    middleware._log_mcp_tool(
+        tool_name="incidentflow_auth_status",
+        request_type="CallToolRequest",
+        status_code=200,
+        outcome="success",
+        duration_ms=5.16,
+        request_id="req-1",
+        workspace_id="ws-test",
+        tool_event=None,
+    )
+
+    record = next(
+        item
+        for item in caplog.records
+        if item.name == "incidentflow_mcp.observability.middleware"
+        and item.getMessage() == "mcp_tool_succeeded"
+    )
+
+    assert record.tool_name == "incidentflow_auth_status"
+    assert record.duration_ms >= 0
+    assert record.request_id
+    assert not hasattr(record, "integration")
+    assert not hasattr(record, "mcp_request_type")
+
+
+def test_mcp_tool_rejection_log_uses_tool_outcome_fields(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="incidentflow_mcp.observability.middleware")
+    middleware = MCPObservabilityMiddleware(
+        _empty_asgi_app,
+        settings=Settings(_env_file=None, redis_url="redis://test-only"),
+    )
+    tool_event = _mcp_tool_event_from_body(
+        body=(
+            b"event: message\r\n"
+            b'data: {"jsonrpc":"2.0","id":43,"result":{"structuredContent":'
+            b'{"ok":false,"code":"INTEGRATION_NOT_CONNECTED","integration":"argocd",'
+            b'"message":"Argo CD is not connected for the current workspace."}}}\r\n\r\n'
+        ),
+        content_type="text/event-stream",
+        tool_name="argocd_connection_health",
+    )
+    middleware._log_mcp_tool(
+        tool_name="argocd_connection_health",
+        request_type="CallToolRequest",
+        status_code=200,
+        outcome="success",
+        duration_ms=5.12,
+        request_id="req-2",
+        workspace_id="ws-test",
+        tool_event=tool_event,
+    )
+
+    record = next(
+        item
+        for item in caplog.records
+        if item.name == "incidentflow_mcp.observability.middleware"
+        and item.getMessage() == "mcp_tool_rejected"
+    )
+
+    assert record.tool_name == "argocd_connection_health"
+    assert record.integration == "argocd"
+    assert record.reason == "integration_missing"
+    assert record.error_code == "INTEGRATION_NOT_CONNECTED"
+    assert record.remediation == "connect_argocd_integration"
+    assert record.retryable is False
+    assert record.duration_ms >= 0
+    assert record.request_id
+    assert not hasattr(record, "error_type")
+
+
+def test_mcp_tool_metric_outcome_distinguishes_rejected_from_http_success() -> None:
+    assert (
+        _tool_metric_outcome(
+            http_outcome="success",
+            tool_event={"outcome": "rejected", "reason": "integration_missing"},
+        )
+        == "rejected"
+    )
+    assert (
+        _tool_metric_outcome(
+            http_outcome="success",
+            tool_event={"outcome": "failed", "error_code": "TOOL_ERROR"},
+        )
+        == "error"
+    )
+    assert _tool_metric_outcome(http_outcome="success", tool_event=None) == "success"
+
+
+def test_http_and_mcp_error_logs_include_diagnostics(
+    auth_client: TestClient,
+    caplog,
+) -> None:
+    caplog.set_level(logging.INFO, logger="incidentflow_mcp.observability.middleware")
+
+    auth_client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 42,
+            "method": "tools/call",
+            "params": {"name": "slack_post_update"},
+        },
+    )
+
+    http_record = next(
+        item
+        for item in caplog.records
+        if item.name == "incidentflow_mcp.observability.middleware"
+        and item.getMessage() == "http_request_failed"
+    )
+    tool_record = next(
+        item
+        for item in caplog.records
+        if item.name == "incidentflow_mcp.observability.middleware"
+        and item.getMessage() == "mcp_tool_failed"
+    )
+
+    assert http_record.error_code == "http_401"
+    assert http_record.error_type == "HTTPClientError"
+    assert http_record.log_message == "HTTP request failed with status 401"
+    assert http_record.request_id
+    assert tool_record.tool_name == "slack_post_update"
+    assert tool_record.integration == "slack"
+    assert tool_record.error_code == "http_401"
+    assert tool_record.error_type == "MCPToolTransportError"
+    assert tool_record.log_message == "MCP tool request failed with HTTP status 401"
+    assert tool_record.request_id
 
 
 def test_request_with_session_header_tracks_session_lifecycle(

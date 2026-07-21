@@ -324,6 +324,16 @@ class Settings(BaseSettings):
         default="otel-collector.observability.svc.cluster.local:4317",
         description="gRPC OTLP endpoint for trace export.",
     )
+    http_slow_request_threshold_ms: int = Field(
+        default=1000,
+        ge=1,
+        description="Emit a warning when an HTTP request is slower than this threshold.",
+    )
+    mcp_slow_tool_threshold_ms: int = Field(
+        default=3000,
+        ge=1,
+        description="Emit a warning when an MCP tool call is slower than this threshold.",
+    )
     service_version: str = Field(
         default="0.0.0",
         description="Service version attached to OTEL resource.",

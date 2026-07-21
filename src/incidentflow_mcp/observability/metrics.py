@@ -77,6 +77,11 @@ _KNOWN_ROUTES = frozenset(
         "/readyz",
         "/metrics",
         "/install.sh",
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/openid-configuration",
+        "/.well-known/jwks.json",
     }
 )
 
@@ -218,7 +223,7 @@ def render_prometheus_metrics() -> bytes:
 def normalize_route(path: str) -> str:
     if path in _KNOWN_ROUTES:
         return path
-    return "other"
+    return "unmatched"
 
 
 def classify_traffic(route: str) -> str:
