@@ -9,7 +9,6 @@ import pytest
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.platform_api.grafana_client import (
-    PlatformGrafanaAPIError,
     PlatformGrafanaClient,
 )
 

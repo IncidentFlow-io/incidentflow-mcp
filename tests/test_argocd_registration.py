@@ -27,7 +27,7 @@ def test_registry_declares_argocd_tools() -> None:
         assert spec.input_schema["type"] == "object"
         assert "workspace_id" not in spec.input_schema["properties"]
         assert spec.annotations["readOnlyHint"] is True
-        assert spec.annotations["openWorldHint"] is False
+        assert spec.annotations["openWorldHint"] is True
         assert spec.annotations["destructiveHint"] is False
         assert spec.structured_output is True
 

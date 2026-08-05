@@ -175,11 +175,9 @@ def register_kubernetes_tools(
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> dict[str, Any]:
-        guard = await resolve_tool_guard("k8s_connection_health")
-        if isinstance(guard, str):
-            return _structured_guard_error(guard)
-        if isinstance(guard, ResolvedIntegrationContext) and guard.source == "shared_dev":
-            cluster_id = cluster_id or guard.resource_id
+        # Connection diagnostics must remain callable when the agent is stale or offline;
+        # the bearer-scoped cluster lookup is itself the authorization boundary.
+        guard = None
         client = PlatformAPIAgentCommandsClient(settings)
         return _with_integration_context(
             await _k8s_connection_health_payload(
@@ -203,7 +201,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_cluster_overview")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         if isinstance(guard, ResolvedIntegrationContext) and guard.source == "shared_dev":
             cluster_id = cluster_id or guard.resource_id
         client = PlatformAPIAgentCommandsClient(settings)
@@ -257,7 +255,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_namespace_overview")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         if isinstance(guard, ResolvedIntegrationContext) and guard.source == "shared_dev":
             cluster_id = cluster_id or guard.resource_id
         if not namespace:
@@ -341,11 +339,8 @@ def register_kubernetes_tools(
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> dict[str, Any]:
-        guard = await resolve_tool_guard("k8s_agent_status")
-        if isinstance(guard, str):
-            return _structured_guard_error(guard)
-        if isinstance(guard, ResolvedIntegrationContext) and guard.source == "shared_dev":
-            cluster_id = cluster_id or guard.resource_id
+        # Lifecycle status is useful precisely when an integration is not connected.
+        guard = None
         _ = timeout_seconds
         client = PlatformAPIAgentCommandsClient(settings)
         return _with_integration_context(
@@ -369,7 +364,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_namespaces")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         raw = await _send_k8s_agent_command(
             current_bearer_token=current_bearer_token,
             settings=settings,
@@ -382,7 +377,27 @@ def register_kubernetes_tools(
             integration_context=guard if isinstance(guard, ResolvedIntegrationContext) else None,
         )
         payload = json.loads(raw)
-        return payload if isinstance(payload, dict) else {"status": "failed", "error": raw}
+        data = payload.get("data") if isinstance(payload, dict) else None
+        namespaces_raw = (data.get("namespaces") if isinstance(data, dict) else None) or []
+        namespaces = sorted(
+            (item for item in namespaces_raw if isinstance(item, dict)),
+            key=lambda item: str(item.get("name") or ""),
+        )
+        capped = namespaces[:200]
+        return _with_integration_context(
+            {
+                "status": payload.get("status", "unknown"),
+                "data": {
+                    "namespaces": capped,
+                    "count": len(capped),
+                    "total": len(namespaces),
+                    "truncated": len(namespaces) > len(capped),
+                },
+                "error": payload.get("error"),
+            },
+            guard if isinstance(guard, ResolvedIntegrationContext) else None,
+            settings,
+        )
 
     @ctx.mcp.tool(**ctx.metadata("k8s_list_pods"))
     async def k8s_list_pods(
@@ -398,7 +413,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_pods")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         raw = await _send_k8s_agent_command(
             current_bearer_token=current_bearer_token,
             settings=settings,
@@ -454,7 +469,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_get_pod")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         if not namespace:
             raise ValueError(_MISSING_NAMESPACE_MESSAGE)
         if detail_level not in {"summary", "standard", "debug"}:
@@ -561,7 +576,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_get_pod_logs")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         if not namespace:
             return {"status": "failed", "error": _MISSING_NAMESPACE_MESSAGE}
         if level is not None and level.lower().strip() not in {
@@ -639,7 +654,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_events")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         raw = await _send_k8s_agent_command(
             current_bearer_token=current_bearer_token,
             settings=settings,
@@ -692,7 +707,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_deployments")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         raw = await _send_k8s_agent_command(
             current_bearer_token=current_bearer_token,
             settings=settings,
@@ -734,7 +749,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_services")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         raw = await _send_k8s_agent_command(
             current_bearer_token=current_bearer_token,
             settings=settings,
@@ -777,7 +792,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_get_rollout_status")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         if not namespace:
             return {"status": "failed", "error": _MISSING_NAMESPACE_MESSAGE}
         if deployment and workload and deployment != workload:
@@ -816,7 +831,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_show_unhealthy_pods")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         result = await _fetch_pods_for_analysis(
             current_bearer_token=current_bearer_token,
             settings=settings,
@@ -901,7 +916,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_analyze_workload")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         if not namespace:
             return {"status": "failed", "error": _MISSING_NAMESPACE_MESSAGE}
         if not workload:
@@ -1007,6 +1022,7 @@ def register_kubernetes_tools(
                 settings,
             )
         logs_data = None
+        logs_error: Any = None
         log_analysis = _analyze_workload_logs(None, exclude_loggers=exclude_loggers)
         if selected_pod:
             logs = await _send_k8s_agent_command(
@@ -1027,6 +1043,12 @@ def register_kubernetes_tools(
                 else None,
             )
             logs_payload = json.loads(logs)
+            logs_error = (
+                logs_payload.get("error")
+                if isinstance(logs_payload, dict)
+                and str(logs_payload.get("status") or "").lower() not in {"succeeded", "success"}
+                else None
+            )
             logs_compact = _compact_log_payload(
                 logs_payload, level=None, contains=None, exclude=None, compact=True
             )
@@ -1092,7 +1114,7 @@ def register_kubernetes_tools(
         summary_state = "healthy" if health == "healthy" else health
         summary = f"{workload} is {summary_state}"
         report: dict[str, Any] = {
-            "status": "success",
+            "status": "partial" if logs_error else "success",
             "summary": summary,
             "health": health,
             "severity": severity,
@@ -1118,6 +1140,8 @@ def register_kubernetes_tools(
             },
             "error": None,
         }
+        if logs_error:
+            report["errors"] = {"logs": logs_error}
         # Consult memory only when the workload looks unhealthy (bad rollout or bad pods).
         if include_memory_context and (unhealthy_related or rollout_inner.get("complete") is False):
             ctx = await memory.consult_memory(
@@ -1144,7 +1168,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_describe_pod")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         if not namespace:
             return {"status": "failed", "error": _MISSING_NAMESPACE_MESSAGE}
 
@@ -1191,7 +1215,7 @@ def register_kubernetes_tools(
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_debug_pod")
         if isinstance(guard, str):
-            return {"status": "failed", "error": guard}
+            return _structured_guard_error(guard)
         if not namespace:
             return {"status": "failed", "error": _MISSING_NAMESPACE_MESSAGE}
 
@@ -1238,6 +1262,12 @@ def register_kubernetes_tools(
         diagnosis = describe["data"]["diagnosis"]
 
         logs_payload = json.loads(logs_raw_str)
+        logs_error = (
+            logs_payload.get("error")
+            if isinstance(logs_payload, dict)
+            and str(logs_payload.get("status") or "").lower() not in {"succeeded", "success"}
+            else None
+        )
         logs_data = _compact_log_payload(
             logs_payload, level=None, contains=None, exclude=None, compact=True
         )
@@ -1362,7 +1392,7 @@ def register_kubernetes_tools(
             evidence["node"] = pod_meta.get("node")
 
         report: dict[str, Any] = {
-            "status": "success",
+            "status": "partial" if logs_error else "success",
             "summary": describe["summary"],
             "findings": findings,
             "observations": observations,
@@ -1370,6 +1400,8 @@ def register_kubernetes_tools(
             "next_actions": next_actions,
             "evidence": evidence,
         }
+        if logs_error:
+            report["errors"] = {"logs": logs_error}
         if include_memory_context:
             ctx = await memory.consult_pod_memory(describe, pod=pod, namespace=namespace)
             if ctx:

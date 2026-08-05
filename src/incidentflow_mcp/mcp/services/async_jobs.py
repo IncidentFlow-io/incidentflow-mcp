@@ -28,6 +28,26 @@ def resolve_execution_mode(settings: Settings, requested_mode: str) -> str:
     return mode
 
 
+def resolve_incident_summary_mode(settings: Settings, requested_mode: str) -> str:
+    """Keep the synthetic incident catalog behind an explicit demo/test boundary."""
+    if settings.environment.strip().lower() not in {"development", "dev", "test", "demo"}:
+        raise ValueError(
+            "incident_summary is unavailable outside explicit demo/test mode because its "
+            "built-in catalog contains synthetic incidents; no production runner currently "
+            "implements the documented result contract"
+        )
+
+    mode = resolve_execution_mode(settings, requested_mode)
+    if mode == "async":
+        raise ValueError(
+            "incident_summary async mode is unavailable because no runner currently "
+            "implements the documented incident-summary result contract; use "
+            "execution_mode=sync for the built-in demo catalog. Use "
+            "external_status_check for GitHub or AWS provider status."
+        )
+    return mode
+
+
 def resolve_external_status_mode(requested_mode: str) -> str:
     mode = requested_mode.lower().strip()
     if mode not in VALID_EXECUTION_MODES:
@@ -50,10 +70,12 @@ def resolve_correlation_mode(requested_mode: str) -> str:
 
 def normalize_correlation_alerts(
     alerts: list[Alert] | list[dict[str, Any]] | None,
-    alerts_json: str | None,
+    alerts_json: str | list[Alert] | list[dict[str, Any]] | None,
 ) -> list[Alert]:
     payload: Any = alerts
-    if payload is None and alerts_json:
+    if payload is None and isinstance(alerts_json, list):
+        payload = alerts_json
+    elif payload is None and alerts_json:
         try:
             payload = json.loads(alerts_json)
         except json.JSONDecodeError as exc:
@@ -490,6 +512,7 @@ async def execute_external_status_check(
     wait_for_result: bool = True,
     days_back: int = 30,
     response_mode: str = "compact",
+    persist_to_oms: bool = False,
     token_workspace_id: str | None = None,
     current_token_workspace_id: Callable[[], str | None] | None = None,
 ) -> dict[str, Any]:
@@ -531,7 +554,9 @@ async def execute_external_status_check(
                 "providers": selected_providers,
                 "external_status_only": True,
                 "days_back": days_back,
-                "persist_to_oms": settings.mcp_oms_persist_enabled,
+                # Persistence is caller-controlled. A deployment setting may deny a true
+                # request downstream, but it must never turn an explicit false into a write.
+                "persist_to_oms": persist_to_oms,
             },
             "artifact_refs": [],
             "evidence_refs": [],
@@ -550,7 +575,14 @@ async def execute_external_status_check(
             job_id=job_id,
             status=submitted.get("status", "queued"),
             poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
-            extra={"providers": selected_providers},
+            extra={
+                "providers": selected_providers,
+                "persistence": {
+                    "requested": persist_to_oms,
+                    "effective": None,
+                    "stored": False,
+                },
+            },
         )
 
     job = await poll_until_done(

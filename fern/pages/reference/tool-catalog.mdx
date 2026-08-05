@@ -13,13 +13,31 @@ Availability labels used here:
   customer capability until its linked QA gate passes.
 - **Not public** — excluded from the accepted public release.
 
+## Platform and discovery tools
+
+| Tool | Availability | Permissions and effects |
+| --- | --- | --- |
+| `incidentflow_capabilities` | Available | Lists the canonical runtime capabilities and their integration requirements. It does not connect or modify integrations. |
+| `mcp_version` | Available | Returns the MCP build and contract version for candidate identification. |
+| `incidentflow_auth_status` | Available | Describes the current request authentication context without returning bearer credentials. |
+| `incidentflow_integrations_status` | Available | Reports workspace integration readiness; secret values are never returned. |
+
+## Knowledge tools
+
+| Tool | Availability | Permissions and effects |
+| --- | --- | --- |
+| `public_knowledge_search` | Available | Searches the public IncidentFlow documentation corpus. Public text is still treated as untrusted input. |
+| `private_knowledge_search` | Conditional | Requires an authenticated workspace and the private knowledge service. Results remain workspace-scoped. |
+| `knowledge_get` | Conditional | Reads one workspace-scoped knowledge document by an exact supported identifier. |
+| `knowledge_upsert` | Conditional | Creates or replaces one workspace-scoped knowledge document; dry-run validation is available. |
+
 ## Core incident tools
 
 | Tool | Availability | Permissions and effects |
 | --- | --- | --- |
-| `incident_summary` | Available | `sync` reads the built-in demo catalog. `auto` resolves to `sync` only when async tools are disabled; explicit `async`, or `auto` with async tools enabled, fails clearly because no incident-summary runner is released. |
-| `correlate_alerts` | Available | Computes from caller-supplied alerts. Read-only, local, and idempotent when used with `sync`/`auto`. |
-| `external_status_check` | Conditional | Requires the platform job runner. Reads public provider-status data, but creates an IncidentFlow job and may persist its result. It is not a customer GitHub integration. |
+| `incident_summary` | Not public | Reads only the built-in synthetic demo catalog in explicit demo/test environments. No released production runner implements this result contract. |
+| `correlate_alerts` | Available | Computes from caller-supplied alerts. Read-only, local, and idempotent when used with sync or auto mode. |
+| `external_status_check` | Conditional | Requires the platform job runner. Reads public provider-status data, creates an IncidentFlow job, and persists to OMS only when the caller explicitly opts in. It is not a customer GitHub integration. |
 
 ## Slack incident tools
 
@@ -58,15 +76,36 @@ create, update, delete, restart, scale, or patch operation is exposed.
 | `k8s_describe_pod` | Conditional | Combine pod state, containers, events, and diagnostics. |
 | `k8s_debug_pod` | Conditional | Build a read-only investigation from pod details, logs, events, and rollout state. |
 
-## Not in the accepted public release
+## Grafana and Prometheus tools
 
-The following entries remain visible in source-level contract work so they can be tested and
-reviewed, but they are not documented as usable customer capabilities.
+All Grafana tools require a connected workspace integration, a least-privilege service account,
+and an approved datasource or dashboard allow-list. Queries are bounded and server-validated.
 
-| Capability | Tools | Status |
+| Tool | Availability | Purpose |
 | --- | --- | --- |
-| Grafana | `grafana_list_dashboards`, `grafana_get_dashboard`, `grafana_extract_panel_queries`, `grafana_metrics_query`, `grafana_metrics_query_range`, `analyze_dashboard_health`, `analyze_dns_dashboard` | Not public. Onboarding must prove a least-privilege service account and a real allowed datasource query before release. |
-| Incident memory | `memory_search_similar_incidents`, `memory_get_service_context`, `memory_upsert_incident_summary`, `memory_find_runbook` | Release-blocked. The checked-out platform does not yet provide the verified public backend contract required by these tools. |
+| `grafana_list_dashboards` | Conditional | List dashboards visible through the configured service account and allow-list. |
+| `grafana_get_dashboard` | Conditional | Read one approved dashboard and normalized panel metadata. |
+| `grafana_extract_panel_queries` | Conditional | Extract bounded query definitions from an approved dashboard without executing them. |
+| `grafana_metrics_query` | Conditional | Execute one bounded instant Prometheus query through the approved datasource. |
+| `grafana_metrics_query_range` | Conditional | Execute one bounded range query with enforced time and sample limits. |
+| `analyze_dashboard_health` | Conditional | Summarize dashboard health from approved panels and bounded query evidence. |
+| `grafana_get_panel_view` | Conditional | Return one normalized panel view for UI rendering without exposing integration credentials. |
+
+## Argo CD tools
+
+All Argo CD tools require a connected workspace integration with read-only permissions. Tokens
+are retained by the platform boundary and are never included in tool output.
+
+| Tool | Availability | Purpose |
+| --- | --- | --- |
+| `argocd_connection_health` | Conditional | Check connectivity, authentication, RBAC, and visible application count. |
+| `argocd_list_applications` | Conditional | List visible applications with bounded filters. |
+| `argocd_get_application` | Conditional | Read normalized application health, sync state, sources, and recent history. |
+| `argocd_get_application_resources` | Conditional | Read bounded resource-tree metadata without Secret manifests. |
+| `argocd_get_sync_history` | Conditional | Read recent deployment and sync history for one application. |
+| `argocd_get_last_operation` | Conditional | Read the latest operation phase, timing, message, and resource results. |
+| `argocd_find_recent_deployments` | Conditional | Find bounded recent deployments across visible applications. |
+| `argocd_analyze_application` | Conditional | Build a compact health and sync analysis from read-only Argo CD evidence. |
 
 IncidentFlow does not currently expose customer integrations for GitHub, PagerDuty, Jira,
 Datadog, or CloudWatch through this catalog.

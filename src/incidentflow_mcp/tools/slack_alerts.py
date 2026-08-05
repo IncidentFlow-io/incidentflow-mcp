@@ -19,6 +19,21 @@ from incidentflow_mcp.slack.thread_analyzer import (
 ThreadMode = Literal["none", "metadata", "full"]
 
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+_BEARER_SECRET_RE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
+_SLACK_TOKEN_RE = re.compile(r"(?i)\bxox[baprs]-[a-z0-9-]+")
+_KEY_VALUE_SECRET_RE = re.compile(
+    r"(?i)\b(token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+"
+)
+
+
+def _redact_untrusted_text(value: str) -> str:
+    """Remove common credential forms from Slack-controlled text."""
+    redacted = _BEARER_SECRET_RE.sub("Bearer [REDACTED]", value)
+    redacted = _SLACK_TOKEN_RE.sub("[REDACTED]", redacted)
+    return _KEY_VALUE_SECRET_RE.sub(
+        lambda match: f"{match.group(1)}=[REDACTED]",
+        redacted,
+    )
 
 
 def _redact_ips(text: str) -> str:

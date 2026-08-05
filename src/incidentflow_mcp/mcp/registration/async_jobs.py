@@ -17,8 +17,8 @@ from incidentflow_mcp.mcp.services.async_jobs import (
     normalize_polled_incident_summary_job,
     poll_until_done,
     resolve_correlation_mode,
-    resolve_execution_mode,
     resolve_external_status_mode,
+    resolve_incident_summary_mode,
     resolve_job_workspace_id,
 )
 from incidentflow_mcp.mcp.services.memory_context import MemoryContextService
@@ -75,30 +75,22 @@ def register_async_tools(
         if not incident_id.strip():
             raise ValueError("incident_id is required unless check_id is provided")
 
-        mode = resolve_execution_mode(settings, execution_mode)
+        mode = resolve_incident_summary_mode(settings, execution_mode)
         input_data = IncidentSummaryInput(
             incident_id=incident_id,
             include_timeline=include_timeline,
             include_affected_services=include_affected_services,
         )
 
+        if mode == "sync":
+            result: IncidentSummaryOutput = _incident_summary_impl(input_data)
+            return result.model_dump(mode="json")
+
         resolved_workspace_id = resolve_job_workspace_id(
             workspace_id,
             token_workspace_id=current_token_workspace_id(),
             default_workspace_id=settings.mcp_default_workspace_id,
         )
-        if mode == "sync":
-            result: IncidentSummaryOutput = _incident_summary_impl(input_data)
-            data = result.model_dump(mode="json")
-            query = f"{result.title} {result.summary}".strip()
-            service = result.affected_services[0] if result.affected_services else None
-            memory_payload = await memory.consult_memory(
-                query=query, service=service, workspace_id=workspace_id
-            )
-            if memory_payload:
-                data["memory_context"] = memory_payload
-            return data
-
         client = PlatformAPIJobsClient(settings)
         submitted = await client.submit_job(
             {
@@ -137,7 +129,7 @@ def register_async_tools(
             ),
         ] = None,
         alerts_json: Annotated[
-            str | None,
+            str | list[Alert] | None,
             Field(
                 default=None,
                 description=(
@@ -160,19 +152,10 @@ def register_async_tools(
         resolve_correlation_mode(execution_mode)
         result: CorrelateAlertsOutput = _correlate_alerts_impl(input_data)
 
-        data = result.model_dump(mode="json")
-        # Consult memory using the alert names + dominant service as the signature.
-        if normalized_alerts:
-            names = [a.name for a in normalized_alerts if a.name]
-            services = [a.service for a in normalized_alerts if a.service]
-            dominant_service = max(set(services), key=services.count) if services else None
-            query = " ".join(dict.fromkeys(names)) or "alert correlation"
-            memory_payload = await memory.consult_memory(
-                query=query, service=dominant_service, workspace_id=workspace_id
-            )
-            if memory_payload:
-                data["memory_context"] = memory_payload
-        return data
+        # Correlation is deterministic and side-effect free. Memory enrichment is not part
+        # of this public contract and must not introduce an implicit platform dependency.
+        _ = memory, workspace_id
+        return result.model_dump(mode="json")
 
     @mcp.tool(**ctx.metadata("external_status_check"))
     async def external_status_check(
@@ -183,6 +166,7 @@ def register_async_tools(
         wait_for_result: bool = True,
         days_back: int = 30,
         response_mode: str = "compact",
+        persist_to_oms: bool = False,
     ) -> dict[str, Any]:
         mode = resolve_external_status_mode(execution_mode)
         if mode != "async":
@@ -198,5 +182,6 @@ def register_async_tools(
             wait_for_result=wait_for_result,
             days_back=days_back,
             response_mode=response_mode,
+            persist_to_oms=persist_to_oms,
             current_token_workspace_id=current_token_workspace_id,
         )

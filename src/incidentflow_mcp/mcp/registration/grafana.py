@@ -24,8 +24,13 @@ def register_grafana_tools(
     current_token_workspace_id: TokenWorkspaceResolver,
 ) -> None:
     def _grafana_client(workspace_id: str | None) -> PlatformGrafanaClient:
-        _ = workspace_id
-        resolved_workspace_id = resolve_workspace_id(current_token_workspace_id())
+        token_workspace_id = current_token_workspace_id()
+        if workspace_id and token_workspace_id and workspace_id != token_workspace_id:
+            raise ValueError(
+                "workspace_scope_mismatch: explicit workspace_id does not match "
+                "token workspace scope"
+            )
+        resolved_workspace_id = resolve_workspace_id(token_workspace_id)
         return PlatformGrafanaClient(ctx.settings, workspace_id=resolved_workspace_id)
 
     @ctx.mcp.tool(**ctx.metadata("grafana_list_dashboards"))

@@ -292,8 +292,16 @@ async def _k8s_agent_status_payload(
             "checked_at": _checked_at(),
             "error": "No Kubernetes cluster matched the requested selector.",
         }
+    agent_status = str(cluster.get("agent_status") or "").lower()
+    lifecycle_status = (
+        "connected"
+        if cluster.get("connected") is True
+        else "stale"
+        if agent_status == "stale"
+        else "offline"
+    )
     return {
-        "status": "connected" if cluster.get("connected") is True else "offline",
+        "status": lifecycle_status,
         "cluster_id": cluster.get("cluster_id"),
         "cluster_name": cluster.get("name"),
         "environment": cluster.get("environment"),
@@ -411,7 +419,13 @@ async def _k8s_connection_health_payload(
     )
     status.update(
         {
-            "status": "connected" if _command_ok(namespaces_response) else "degraded",
+            "status": (
+                "degraded"
+                if any(value is False for value in permissions.values())
+                else "connected"
+                if _command_ok(namespaces_response)
+                else "degraded"
+            ),
             "latency_ms": latency_ms,
             "latency_breakdown": {
                 "agent_lookup_ms": agent_lookup_ms,

@@ -25,7 +25,9 @@ def structured_tool_exception(exc: Exception, *, code: str = "TOOL_ERROR") -> di
     }
     if isinstance(exc, ValidationError):
         error["code"] = "VALIDATION_ERROR"
-        error["details"] = exc.errors()
+        # Validation input may contain Pydantic model instances; omit it so the stable
+        # structured error envelope is always JSON serializable.
+        error["details"] = exc.errors(include_input=False)
     if isinstance(exc, httpx.HTTPStatusError):
         error["code"] = f"HTTP_{exc.response.status_code}"
         error["http_status"] = exc.response.status_code

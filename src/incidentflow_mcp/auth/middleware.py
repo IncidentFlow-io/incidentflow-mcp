@@ -239,6 +239,9 @@ async def _attempt_oauth_validation(
 
     if result.ok:
         claims = result.claims or {}
+        revocation_check = await introspect_oauth_access_token(token=token)
+        if revocation_check is not None and revocation_check.status_code != 200:
+            return revocation_check
         _record_auth_success(
             client_id=claims.get("client_id") or "oauth_client",
             auth_method="oauth",

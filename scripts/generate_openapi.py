@@ -57,6 +57,24 @@ _CONDITIONAL_TOOLS = {
     "k8s_analyze_workload",
     "k8s_describe_pod",
     "k8s_debug_pod",
+    "grafana_list_dashboards",
+    "grafana_get_dashboard",
+    "grafana_extract_panel_queries",
+    "grafana_metrics_query",
+    "grafana_metrics_query_range",
+    "analyze_dashboard_health",
+    "grafana_get_panel_view",
+    "argocd_connection_health",
+    "argocd_list_applications",
+    "argocd_get_application",
+    "argocd_get_application_resources",
+    "argocd_get_sync_history",
+    "argocd_get_last_operation",
+    "argocd_find_recent_deployments",
+    "argocd_analyze_application",
+    "private_knowledge_search",
+    "knowledge_get",
+    "knowledge_upsert",
 }
 
 
@@ -614,7 +632,15 @@ def _annotate_existing_paths(spec: dict[str, Any]) -> None:
         "/readyz",
         "/.well-known/oauth-protected-resource",
         "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/openid-configuration",
+        "/.well-known/jwks.json",
         "/.well-known/{challenge_path}",
+        "/authorize",
+        "/token",
+        "/register",
+        "/oauth/register",
+        "/revoke",
     }
     ops_tags = {
         "/install.sh": "ops",
@@ -636,8 +662,16 @@ def _annotate_existing_paths(spec: dict[str, Any]) -> None:
                     f"{method}_{path.strip('/').replace('/', '_').replace('.', '_')}"
                 )
 
+            operation.setdefault(
+                "description",
+                operation.get("summary") or f"{method.upper()} {path} endpoint.",
+            )
+            operation.setdefault("tags", [ops_tags.get(path, "ops")])
+
             if path in public_paths:
                 operation["security"] = []
+            else:
+                operation.setdefault("security", [{"bearerAuth": []}])
 
             if path == "/metrics":
                 operation["security"] = [{"bearerAuth": []}]

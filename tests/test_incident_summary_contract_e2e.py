@@ -52,6 +52,13 @@ def _call_tool(client: TestClient, *, mode: str) -> dict[str, Any]:
     return json.loads(data_line)
 
 
+def _explicit_tool_error(response: dict[str, Any]) -> str:
+    result = response["result"]
+    structured = result.get("structuredContent") or {}
+    assert result.get("isError") is True or structured.get("ok") is False
+    return result["content"][0]["text"]
+
+
 def test_every_enabled_mode_returns_the_same_documented_summary_shape(
     unauth_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -95,8 +102,7 @@ def test_unavailable_async_mode_fails_explicitly_before_job_submission(
     with unauth_client as client:
         response = _call_tool(client, mode="async")
 
-    assert response["result"]["isError"] is True
-    error_text = response["result"]["content"][0]["text"]
+    error_text = _explicit_tool_error(response)
     assert "no runner currently implements" in error_text
     assert "external_status_check" in error_text
     assert "job_id" not in error_text
@@ -128,8 +134,7 @@ def test_production_auto_fails_explicitly_when_it_would_select_unavailable_async
     with TestClient(create_app(), raise_server_exceptions=False) as client:
         response = _call_tool(client, mode="auto")
 
-    assert response["result"]["isError"] is True
-    error_text = response["result"]["content"][0]["text"]
+    error_text = _explicit_tool_error(response)
     assert "outside explicit demo/test mode" in error_text
     assert "synthetic incidents" in error_text
     assert "job_id" not in error_text
@@ -154,8 +159,7 @@ def test_production_modes_cannot_return_synthetic_demo_data(
     with TestClient(create_app(), raise_server_exceptions=False) as client:
         response = _call_tool(client, mode=mode)
 
-    assert response["result"]["isError"] is True
-    error_text = response["result"]["content"][0]["text"]
+    error_text = _explicit_tool_error(response)
     assert "outside explicit demo/test mode" in error_text
     assert "synthetic incidents" in error_text
     assert "job_id" not in error_text

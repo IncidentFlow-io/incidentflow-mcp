@@ -1293,6 +1293,7 @@ def _log_lines_from_payload(payload: dict[str, Any]) -> list[str]:
 
 def _redact_sensitive_text(value: str) -> str:
     redacted = re.sub(r"(redis://)([^:@\s]+:)?([^@\s]+)@", r"\1***@", value)
+    redacted = re.sub(r"(?i)\bbearer\s+[^\s,;]+", "Bearer ***", redacted)
     redacted = re.sub(
         r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)=([^\s,;]+)",
         r"\1=***",

@@ -129,6 +129,22 @@ class JuniperCartPlatformGateway:
         if path == "/api/v1/tokens/introspect":
             return self._response(request, 401, {"detail": "not_managed"})
 
+        if path == "/internal/integrations/status/workspace":
+            workspace_id = request.url.params.get("workspace_id")
+            return self._response(
+                request,
+                200,
+                {
+                    "kubernetes": {"clusters": []},
+                    "grafana": {"connected": False, "datasources": []},
+                    "slack": {
+                        "connected": workspace_id == PRODUCTION_WORKSPACE,
+                        "workspace_name": "JuniperCart QA",
+                    },
+                    "argocd": {"connected": False, "applications": []},
+                },
+            )
+
         if path == "/api/v1/ai/jobs" and request.method == "POST":
             return self._submit_job(request)
         if path.startswith("/api/v1/ai/jobs/") and request.method == "GET":
@@ -310,7 +326,11 @@ class JuniperCartPlatformGateway:
         return [
             request
             for request in self.requests
-            if request["path"] != "/api/v1/tokens/introspect"
+            if request["path"]
+            not in {
+                "/api/v1/tokens/introspect",
+                "/internal/integrations/status/workspace",
+            }
         ]
 
 
@@ -359,6 +379,18 @@ class JuniperCartMCP:
         text = rpc_response["result"]["content"][0]["text"]
         value = json.loads(text)
         assert isinstance(value, dict)
+        return value
+
+    def error_payload(self, rpc_response: dict[str, Any]) -> dict[str, Any]:
+        text = rpc_response["result"]["content"][0]["text"]
+        if rpc_response["result"].get("isError") is True:
+            return {"status": "failed", "message": text}
+        value = json.loads(text)
+        assert isinstance(value, dict)
+        assert rpc_response["result"].get("isError") is True or (
+            value.get("ok") is False
+            or value.get("status") in {"failed", "error", "not_connected"}
+        )
         return value
 
     def assert_tool_telemetry(self, tool_name: str) -> None:
@@ -453,13 +485,13 @@ def test_e2e_002_correlate_structured_legacy_timezone_and_tenant_neutrality(
             service="inventory-api",
             fired_at="2026-08-02T10:00:00Z",
             severity="critical",
-            labels={"scenario": "JC-DNS-001"},
+            labels={"scenario": "JC-DNS-001", "workload": "inventory-api"},
         ),
         _alert(
             "CheckoutHighLatency",
             service="checkout-api",
             fired_at="2026-08-02T12:04:00+02:00",
-            labels={"scenario": "JC-DNS-001"},
+            labels={"scenario": "JC-DNS-001", "workload": "inventory-api"},
         ),
         _alert(
             "UnrelatedSandboxSignal",
@@ -539,7 +571,7 @@ def test_e2e_002_correlate_500_boundary_and_invalid_inputs_are_safe(
             arguments,
             request_id=request_id,
         )
-        assert rpc["result"]["isError"] is True
+        junipercart_mcp.error_payload(rpc)
         assert INTERNAL_KEY not in response.text
         assert junipercart_mcp.production_token not in response.text
 
@@ -625,7 +657,7 @@ def test_e2e_003_external_status_rejects_provider_tenant_mismatch_and_timeout(
             arguments,
             request_id=request_id,
         )
-        assert rpc["result"]["isError"] is True
+        junipercart_mcp.error_payload(rpc)
         assert INTERNAL_KEY not in response.text
         assert junipercart_mcp.production_token not in response.text
 
@@ -716,7 +748,7 @@ def test_e2e_004_slack_list_modes_bounds_allowlist_and_secret_redaction(
             token=token,
             request_id=request_id,
         )
-        assert rpc["result"]["isError"] is True
+        junipercart_mcp.error_payload(rpc)
         assert INTERNAL_KEY not in response.text
         assert SLACK_SECRET_CANARY not in response.text
 
@@ -790,7 +822,7 @@ def test_e2e_005_slack_thread_bounds_denials_permalink_and_read_audit(
             "qa-e2e-005-tenant",
             {"channel_id": INCIDENT_CHANNEL, "message_ts": THREAD_TS},
             junipercart_mcp.sandbox_token,
-            "slack_workspace_forbidden",
+            "INTEGRATION_NOT_CONNECTED",
         ),
     ):
         response, denied_rpc = junipercart_mcp.call(

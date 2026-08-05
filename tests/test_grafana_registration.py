@@ -25,7 +25,7 @@ def test_registry_declares_grafana_tools() -> None:
         assert spec.description
         assert spec.input_schema["type"] == "object"
         assert spec.annotations["readOnlyHint"] is True
-        assert spec.annotations["openWorldHint"] is False
+        assert spec.annotations["openWorldHint"] is True
 
 
 def test_required_inputs_declared() -> None:

@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from incidentflow_mcp.mcp.context import ToolRegistrationContext
 from incidentflow_mcp.mcp.errors import structured_guard_error
-from incidentflow_mcp.mcp.services.memory_context import MemoryContextService, spawn_background_task
+from incidentflow_mcp.mcp.services.memory_context import MemoryContextService
 from incidentflow_mcp.platform_api.slack_client import PlatformSlackAPIError, PlatformSlackClient
 from incidentflow_mcp.tools.slack_alerts import (
     fetch_slack_alert_thread,
@@ -183,14 +183,6 @@ def register_slack_tools(
         except PlatformSlackAPIError as exc:
             return structured_guard_error(platform_slack_error_json(exc))
 
-        spawn_background_task(
-            memory.auto_upsert_thread_summary(
-                workspace_id=token_workspace_id,
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                result=result,
-                alert_context=alert_context,
-            )
-        )
-
+        # Summarization is read-only. Persistence requires an explicit knowledge_upsert call.
+        _ = memory
         return result

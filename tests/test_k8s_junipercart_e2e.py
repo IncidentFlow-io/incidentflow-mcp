@@ -13,7 +13,6 @@ from typing import Any
 
 import pytest
 from mcp.server.fastmcp import FastMCP
-from mcp.server.fastmcp.exceptions import ToolError
 
 from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.config import Settings
@@ -454,7 +453,11 @@ def junipercart_mcp(
     )
     monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
     monkeypatch.setattr(
-        "incidentflow_mcp.mcp.server.PlatformAPIAgentCommandsClient",
+        "incidentflow_mcp.mcp.registration.kubernetes.PlatformAPIAgentCommandsClient",
+        lambda _settings: backend,
+    )
+    monkeypatch.setattr(
+        "incidentflow_mcp.integrations.PlatformAPIAgentCommandsClient",
         lambda _settings: backend,
     )
     mcp = create_mcp_server()
@@ -615,8 +618,10 @@ async def test_e2e_011_agent_status_selection_and_lifecycle(
 
     backend.state = "online"
     backend.ambiguous = True
-    with pytest.raises(ToolError, match="Multiple Kubernetes clusters"):
-        await mcp.call_tool("k8s_agent_status", {})
+    ambiguous = await mcp.call_tool("k8s_agent_status", {})
+    assert isinstance(ambiguous, dict)
+    assert ambiguous["status"] == "failed"
+    assert "Multiple Kubernetes clusters" in ambiguous["error"]["message"]
 
 
 @pytest.mark.asyncio
@@ -636,8 +641,8 @@ async def test_e2e_012_namespaces_are_sorted_bounded_and_tenant_scoped(
 
     backend.state = "offline"
     offline = await _call(mcp, "k8s_list_namespaces", cluster_id=PROD_CLUSTER)
-    assert offline["status"] == "failed"
-    assert offline["error"]["code"] == "agent_offline"
+    assert offline["status"] == "not_connected"
+    assert offline["code"] == "INTEGRATION_NOT_CONNECTED"
 
     backend.state = "online"
     _authenticate(SANDBOX_TOKEN)
@@ -786,7 +791,7 @@ async def test_e2e_017_018_deployments_and_services_keep_exact_read_models(
         namespace=PROD_NAMESPACE,
         cluster_id=PROD_CLUSTER,
     )
-    assert offline["error"]["code"] == "agent_offline"
+    assert offline["code"] == "INTEGRATION_NOT_CONNECTED"
     _assert_read_only(backend)
 
 
@@ -832,15 +837,15 @@ async def test_e2e_019_missing_and_conflicting_rollout_selectors_are_explicit(
         deployment="missing-api",
     )
     assert missing["error"]["code"] == "not_found"
-    with pytest.raises(ToolError, match="both provided but differ"):
-        await mcp.call_tool(
-            "k8s_get_rollout_status",
-            {
-                "namespace": PROD_NAMESPACE,
-                "deployment": "checkout-api",
-                "workload": "inventory-api",
-            },
-        )
+    conflicting = await _call(
+        mcp,
+        "k8s_get_rollout_status",
+        namespace=PROD_NAMESPACE,
+        deployment="checkout-api",
+        workload="inventory-api",
+    )
+    assert conflicting["status"] == "failed"
+    assert "both provided but differ" in conflicting["error"]
 
 
 @pytest.mark.asyncio
@@ -880,12 +885,13 @@ async def test_e2e_021_workload_analysis_references_evidence_and_degrades_partia
         namespace=PROD_NAMESPACE,
         workload="checkout-api",
         tail_lines=4,
+        include_raw_logs=True,
     )
     assert result["status"] == "success"
     assert result["data"]["rollout_status"]["rollout"]["deployment"] == "checkout-api"
     assert result["data"]["pods_total"] == 2
     assert result["data"]["selected_pod"] == "checkout-api-7f9c6d7d8b-crash"
-    assert result["data"]["logs"]["returned_line_count"] <= 4
+    assert result["data"]["raw_logs"]["returned_line_count"] <= 4
     assert "jc-secret-value" not in json.dumps(result)
 
     backend.failures["k8s.get_pod_logs"] = _error("timeout", "Synthetic log timeout")

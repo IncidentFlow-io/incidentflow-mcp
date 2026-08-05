@@ -336,6 +336,27 @@ class JuniperCartGrafanaGateway:
         if path == "/api/v1/tokens/introspect":
             return self._response(request, 401, {"detail": "not_managed"})
 
+        if path == "/internal/integrations/status/workspace":
+            workspace_id = str(request.url.params.get("workspace_id") or "")
+            # Model a credential revoked between discovery and the actual operation so the
+            # downstream fail-closed path is exercised as well as the integration guard.
+            connected = workspace_id in self._allowed
+            return self._response(
+                request,
+                200,
+                {
+                    "kubernetes": {"clusters": []},
+                    "grafana": {
+                        "connected": connected,
+                        "datasources": (
+                            [{"uid": PROMETHEUS_DATASOURCE}] if connected else []
+                        ),
+                    },
+                    "slack": {"connected": False},
+                    "argocd": {"connected": False, "applications": []},
+                },
+            )
+
         body = _json_body(request)
         self._record(request, body)
         assert request.headers.get("x-internal-api-key") == INTERNAL_KEY
@@ -680,6 +701,7 @@ class JuniperCartGrafanaGateway:
             "panels": panels,
             "summary_hints": [
                 "JC-DNS-001 evidence: DNS errors coincide with elevated checkout p95 latency",
+                "Inventory DNS response codes show NXDOMAIN and SERVFAIL above baseline",
                 *(
                     ["1 of 3 panel queries failed; other evidence remains available"]
                     if partial
@@ -707,7 +729,10 @@ class JuniperCartGrafanaGateway:
                     "anomalies": [],
                 }
             ],
-            "summary_hints": ["All API panels are within the synthetic baseline"],
+            "summary_hints": [
+                "All API panels are within the synthetic baseline",
+                "No DNS-focused panels detected by expression markers",
+            ],
         }
 
     def grafana_requests(self) -> list[dict[str, Any]]:
@@ -772,7 +797,14 @@ class JuniperCartGrafanaMCP:
         rpc_response: dict[str, Any],
         expected: str,
     ) -> None:
-        assert rpc_response["result"]["isError"] is True
+        payload = json.loads(rpc_response["result"]["content"][0]["text"])
+        assert rpc_response["result"].get("isError") is True or (
+            isinstance(payload, dict)
+            and (
+                payload.get("ok") is False
+                or payload.get("status") in {"failed", "error", "not_connected"}
+            )
+        )
         assert expected in response.text
         assert INTERNAL_KEY not in response.text
         assert EXTERNAL_SECRET_CANARY not in response.text
@@ -1173,7 +1205,7 @@ def test_e2e_030_jc_dns_001_hints_and_neutral_non_dns_dashboard(
 ) -> None:
     junipercart_grafana_mcp.gateway.analysis_mode = "dns_failure"
     _, dns_rpc = junipercart_grafana_mcp.call(
-        "analyze_dns_dashboard",
+        "analyze_dashboard_health",
         {
             "dashboard_uid": DNS_DASHBOARD_UID,
             "start": "2026-08-02T09:55:00Z",
@@ -1191,7 +1223,7 @@ def test_e2e_030_jc_dns_001_hints_and_neutral_non_dns_dashboard(
     assert "Inventory DNS response codes" in hints
 
     _, api_rpc = junipercart_grafana_mcp.call(
-        "analyze_dns_dashboard",
+        "analyze_dashboard_health",
         {"dashboard_uid": API_DASHBOARD_UID},
         request_id="qa-e2e-030-neutral-api",
     )
@@ -1208,4 +1240,4 @@ def test_e2e_030_jc_dns_001_hints_and_neutral_non_dns_dashboard(
         event["workspace_id"] == PRODUCTION_WORKSPACE
         for event in junipercart_grafana_mcp.gateway.audit
     )
-    junipercart_grafana_mcp.assert_tool_telemetry("analyze_dns_dashboard")
+    junipercart_grafana_mcp.assert_tool_telemetry("analyze_dashboard_health")

@@ -20,6 +20,7 @@ from incidentflow_mcp.mcp.services.async_jobs import (
     normalize_polled_incident_summary_job,
     resolve_correlation_mode,
     resolve_execution_mode,
+    resolve_incident_summary_mode,
     resolve_job_workspace_id,
 )
 from incidentflow_mcp.mcp.services.kubernetes_analysis import (
@@ -146,12 +147,12 @@ def test_incident_summary_modes_disable_unimplemented_async_contract() -> None:
         mcp_async_tools_enabled=None,
     )
 
-    assert _resolve_incident_summary_mode(development, "auto") == "sync"
-    assert _resolve_incident_summary_mode(development, "sync") == "sync"
+    assert resolve_incident_summary_mode(development, "auto") == "sync"
+    assert resolve_incident_summary_mode(development, "sync") == "sync"
     with pytest.raises(ValueError, match="no runner currently implements"):
-        _resolve_incident_summary_mode(development, "async")
+        resolve_incident_summary_mode(development, "async")
     with pytest.raises(ValueError, match="outside explicit demo/test mode"):
-        _resolve_incident_summary_mode(production, "auto")
+        resolve_incident_summary_mode(production, "auto")
 
 
 def test_correlate_alerts_auto_stays_sync_and_async_is_rejected() -> None:
@@ -1756,7 +1757,7 @@ async def test_external_status_check_forwards_explicit_oms_opt_in() -> None:
     )
     fake_client = FakeClient()
 
-    output = await _execute_external_status_check(
+    output = await execute_external_status_check(
         settings=settings,
         client=fake_client,
         providers=["github"],
@@ -1768,7 +1769,7 @@ async def test_external_status_check_forwards_explicit_oms_opt_in() -> None:
 
     assert fake_client.payload is not None
     assert fake_client.payload["payload"]["persist_to_oms"] is True
-    assert json.loads(output)["persistence"] == {
+    assert _payload(output)["persistence"] == {
         "requested": True,
         "effective": None,
         "stored": False,

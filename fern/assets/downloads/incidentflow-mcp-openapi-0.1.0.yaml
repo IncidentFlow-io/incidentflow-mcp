@@ -126,10 +126,10 @@ paths:
                 - admin
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: Discover the authorization server, canonical MCP resource, and supported scopes.
       security: []
       x-incidentflow-availability: candidate
       x-incidentflow-human-review: pending
-      description: Discover the authorization server, canonical MCP resource, and supported scopes.
   /.well-known/oauth-protected-resource/mcp:
     get:
       tags:
@@ -153,10 +153,154 @@ paths:
                 - admin
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: Discover the authorization server, canonical MCP resource, and supported scopes.
       security: []
       x-incidentflow-availability: candidate
       x-incidentflow-human-review: pending
-      description: Discover the authorization server, canonical MCP resource, and supported scopes.
+  /.well-known/oauth-authorization-server:
+    get:
+      tags:
+      - ops
+      summary: OAuth authorization server metadata
+      operationId: oauth_authorization_server_metadata__well_known_oauth_authorization_server_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      description: OAuth authorization server metadata
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /.well-known/openid-configuration:
+    get:
+      tags:
+      - ops
+      summary: OpenID Connect discovery metadata
+      operationId: openid_configuration__well_known_openid_configuration_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      description: OpenID Connect discovery metadata
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /.well-known/jwks.json:
+    get:
+      tags:
+      - ops
+      summary: OAuth JWKS redirect
+      operationId: oauth_jwks__well_known_jwks_json_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      description: OAuth JWKS redirect
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /oauth/register:
+    post:
+      tags:
+      - ops
+      summary: OAuth dynamic client registration bridge
+      operationId: oauth_register_oauth_register_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      description: OAuth dynamic client registration bridge
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /register:
+    post:
+      tags:
+      - ops
+      summary: OAuth dynamic client registration bridge
+      operationId: oauth_register_register_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      description: OAuth dynamic client registration bridge
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /authorize:
+    get:
+      tags:
+      - ops
+      summary: OAuth authorization redirect
+      operationId: oauth_authorize_authorize_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      description: OAuth authorization redirect
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /token:
+    post:
+      tags:
+      - ops
+      summary: OAuth token endpoint bridge
+      operationId: oauth_token_token_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      description: OAuth token endpoint bridge
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /revoke:
+    post:
+      tags:
+      - ops
+      summary: OAuth token revocation bridge
+      operationId: oauth_revoke_revoke_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      description: OAuth token revocation bridge
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /.well-known/{challenge_path}:
     get:
       tags:
@@ -236,8 +380,6 @@ paths:
       operationId: mcpOptions
       summary: MCP CORS preflight
       description: OPTIONS support for MCP endpoint (kept for CORS preflight compatibility).
-      x-incidentflow-availability: candidate
-      x-incidentflow-human-review: pending
       security:
       - bearerAuth: []
       responses:
@@ -253,15 +395,15 @@ paths:
           $ref: '#/components/responses/ServiceUnavailableError'
         '500':
           $ref: '#/components/responses/InternalServerError'
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
     post:
       tags:
       - mcp
       operationId: mcpPost
       summary: MCP JSON-RPC endpoint
       description: Primary MCP endpoint. Accepts JSON-RPC requests such as `initialize`, `tools/list`,
-        and `tools/call`. Use a bearer credential with mcp:read and mcp:tools:run for a tool-using client.
-        Some responses may stream over SSE depending on client transport/session flow. Default transport
-        and tool limits are deployment policy; honor 429 response headers.
+        and `tools/call`. Some responses may stream over SSE depending on client transport/session flow.
       x-incidentflow-availability: candidate
       x-incidentflow-human-review: pending
       security:
@@ -314,16 +456,7 @@ paths:
                   params:
                     name: correlate_alerts
                     arguments:
-                      alerts:
-                      - alert_id: juniper-qa-001
-                        name: CheckoutLatencyHigh
-                        service: checkout-api
-                        severity: high
-                        status: firing
-                        fired_at: '2026-08-02T09:00:00Z'
-                        labels:
-                          environment: qa
-                          tenant: junipercart
+                      alerts_json: '[{"alert_id":"a1","name":"HighMemoryUsage","service":"api-gateway","severity":"critical","status":"firing","fired_at":"2024-01-15T10:00:00Z","labels":{"env":"prod"}}]'
                       window_minutes: 30
                       min_cluster_size: 1
                       execution_mode: sync
@@ -431,6 +564,7 @@ components:
       - critical
       - high
       - medium
+      - warning
       - low
       - info
       title: Severity
@@ -616,6 +750,20 @@ components:
           minimum: 0.0
           title: Confidence
           type: number
+        evidence:
+          items:
+            type: string
+          title: Evidence
+          type: array
+        confidence_level:
+          default: possible
+          title: Confidence Level
+          type: string
+        missing_evidence:
+          items:
+            type: string
+          title: Missing Evidence
+          type: array
         human_context:
           anyOf:
           - additionalProperties: true
@@ -662,12 +810,202 @@ components:
       - summary
       title: CorrelateAlertsOutput
       type: object
+    incidentflow_capabilitiesArguments:
+      type: object
+      properties:
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact omits long descriptions; full includes full metadata.
+        category:
+          type: string
+          description: Optional category id filter, e.g. kubernetes, grafana_prometheus, slack_incidents,
+            or knowledge.
+      required: []
+      title: incidentflow_capabilitiesArguments
+      x-incidentflow-title: List IncidentFlow Capabilities
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
+    mcp_versionArguments:
+      type: object
+      properties: {}
+      required: []
+      title: mcp_versionArguments
+      x-incidentflow-title: Show MCP Server Version
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
+    incidentflow_auth_statusArguments:
+      type: object
+      properties: {}
+      additionalProperties: false
+      title: incidentflow_auth_statusArguments
+      x-incidentflow-title: Show IncidentFlow Auth Status
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
+    incidentflow_integrations_statusArguments:
+      type: object
+      properties: {}
+      additionalProperties: false
+      title: incidentflow_integrations_statusArguments
+      x-incidentflow-title: Show IncidentFlow Integrations Status
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
+    public_knowledge_searchArguments:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Natural language public knowledge query.
+        document_type:
+          type: string
+          enum:
+          - documentation
+          - integration_guide
+          - tool_reference
+          - runbook
+          - troubleshooting
+          - best_practice
+          - security_documentation
+          - faq
+          - api_reference
+          description: Optional public document type filter.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact returns excerpts only; full includes complete content.
+        limit:
+          type: integer
+          default: 8
+          minimum: 1
+          maximum: 20
+      required:
+      - query
+      title: public_knowledge_searchArguments
+      x-incidentflow-title: Search Public Knowledge
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
+    private_knowledge_searchArguments:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Natural language private query.
+        document_type:
+          type: string
+          enum:
+          - incident
+          - rca
+          - postmortem
+          - runbook
+          - knowledge
+          - service_context
+          - deployment_note
+          description: Optional workspace document type filter.
+        service:
+          type: string
+          description: Optional service filter.
+        environment:
+          type: string
+          description: Optional workspace environment filter.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact returns excerpts only; full includes complete content.
+        limit:
+          type: integer
+          default: 8
+          minimum: 1
+          maximum: 20
+      required:
+      - query
+      title: private_knowledge_searchArguments
+      x-incidentflow-title: Search Private Knowledge
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
+    knowledge_getArguments:
+      type: object
+      properties:
+        id:
+          type: string
+          description: UI UUID, entry id, point id, exact title, or stable document id.
+        id_type:
+          type: string
+          enum:
+          - auto
+          - entry_id
+          - ui_id
+          - knowledge_id
+          - document_id
+          - point_id
+          - title
+          default: auto
+          description: Identifier type. auto tries deterministic exact lookups.
+        document_type:
+          type: string
+          enum:
+          - incident
+          - rca
+          - postmortem
+          - runbook
+          - knowledge
+          description: Optional type hint for stable document ids or title matches.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: full
+          description: compact omits document body; full includes complete content.
+      required:
+      - id
+      title: knowledge_getArguments
+      x-incidentflow-title: Get Knowledge Document
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     incident_summaryArguments:
       type: object
       properties:
         incident_id:
           type: string
-          description: Unique incident identifier (e.g. INC-001)
+          description: Unique incident identifier (e.g. INC-001). Required unless check_id is provided
+            to poll an existing async job.
         include_timeline:
           type: boolean
           default: true
@@ -683,14 +1021,23 @@ components:
           - sync
           - async
           default: auto
-          description: Execution strategy for explicit demo/test environments. sync reads the built-in
-            demo catalog. auto does the same only where async tools are disabled; otherwise auto and explicit
-            async fail until a matching incident-summary runner exists. All modes fail in production.
+          description: Execution strategy. sync runs the read-only correlator inline and returns the summary
+            immediately; async dispatches a runner job and returns a job_id to poll via check_id; auto
+            picks async when async tools are enabled, else sync.
+        wait_for_result:
+          type: boolean
+          default: true
+          description: 'When polling with check_id: if true (default), polls until the job completes;
+            if false, returns the current job status immediately.'
+        check_id:
+          type: string
+          description: Existing async job_id to poll. When provided, MCP fetches this job's result instead
+            of creating a new summary (incident_id not required).
         workspace_id:
           type: string
-          description: Reserved for future async orchestration. Ignored for sync summaries.
-      required:
-      - incident_id
+          description: Workspace scope for async orchestration. Optional when the token has workspace
+            scope or MCP_DEFAULT_WORKSPACE_ID is configured.
+      required: []
       title: incident_summaryArguments
       x-incidentflow-title: Summarize Incident
       x-incidentflow-availability: not-public
@@ -722,6 +1069,7 @@ components:
                 - critical
                 - high
                 - medium
+                - warning
                 - low
                 - info
               status:
@@ -757,9 +1105,63 @@ components:
           description: Alert objects to correlate. Each alert requires alert_id, name, service, severity,
             status, and fired_at.
         alerts_json:
-          type: string
-          description: Legacy JSON string containing the same array accepted by alerts. Prefer alerts
-            for new calls.
+          oneOf:
+          - type: string
+          - type: array
+            items:
+              type: object
+              properties:
+                alert_id:
+                  type: string
+                  description: Stable alert identifier.
+                name:
+                  type: string
+                  description: Alert name, for example InstanceDown.
+                service:
+                  type: string
+                  description: Affected service name.
+                severity:
+                  type: string
+                  enum:
+                  - critical
+                  - high
+                  - medium
+                  - warning
+                  - low
+                  - info
+                status:
+                  type: string
+                  enum:
+                  - firing
+                  - resolved
+                  - pending
+                fired_at:
+                  type: string
+                  format: date-time
+                  description: Time the alert fired, as an ISO 8601 timestamp.
+                labels:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Optional alert labels such as env, namespace, pod, or deployment.
+                slack:
+                  type: object
+                  description: Optional Slack message metadata for the alert.
+                thread:
+                  type: object
+                  description: Optional Slack thread metadata for the alert.
+              required:
+              - alert_id
+              - name
+              - service
+              - severity
+              - status
+              - fired_at
+            minItems: 1
+            maxItems: 500
+          description: Legacy JSON string containing the same array accepted by alerts. Some MCP clients
+            decode that string into an array before dispatch; both forms are accepted. Prefer alerts for
+            new calls.
         window_minutes:
           type: integer
           default: 60
@@ -890,6 +1292,11 @@ components:
           type: boolean
           default: false
           description: Include Slack channel join/leave and other system messages.
+        deduplicate:
+          type: boolean
+          default: true
+          description: Group repeated notifications for the same alert fingerprint and return first_seen,
+            last_seen, and occurrences.
         workspace_id:
           type: string
           description: Workspace scope for platform Slack mode. Optional when INCIDENTFLOW_WORKSPACE_ID
@@ -916,6 +1323,11 @@ components:
           type: boolean
           default: true
           description: Include parsed root alert details in the response.
+        include_raw:
+          type: boolean
+          default: false
+          description: 'Include unfiltered raw Slack message text in the root alert. Default false returns
+            a compact response: IPs are redacted and commands are extracted into extracted_commands instead.'
         max_replies:
           type: integer
           default: 50
@@ -1006,6 +1418,7 @@ components:
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_connection_healthArguments
       x-incidentflow-title: Check Kubernetes Connection
       x-incidentflow-availability: conditional
@@ -1032,6 +1445,7 @@ components:
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_cluster_overviewArguments
       x-incidentflow-title: Inspect Kubernetes Cluster Health
       x-incidentflow-availability: conditional
@@ -1061,6 +1475,7 @@ components:
           maximum: 60
       required:
       - namespace
+      additionalProperties: false
       title: k8s_namespace_overviewArguments
       x-incidentflow-title: Inspect Kubernetes Namespace
       x-incidentflow-availability: conditional
@@ -1087,6 +1502,7 @@ components:
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_rbac_checkArguments
       x-incidentflow-title: Check Kubernetes Read-Only Permissions
       x-incidentflow-availability: conditional
@@ -1113,6 +1529,7 @@ components:
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_agent_statusArguments
       x-incidentflow-title: Check Kubernetes Agent Status
       x-incidentflow-availability: conditional
@@ -1139,6 +1556,7 @@ components:
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_list_namespacesArguments
       x-incidentflow-title: List Kubernetes Namespaces
       x-incidentflow-availability: conditional
@@ -1185,6 +1603,7 @@ components:
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_list_podsArguments
       x-incidentflow-title: Show Pod Health Status
       x-incidentflow-availability: conditional
@@ -1238,6 +1657,7 @@ components:
       required:
       - namespace
       - pod
+      additionalProperties: false
       title: k8s_get_podArguments
       x-incidentflow-title: Inspect Pod Status
       x-incidentflow-availability: conditional
@@ -1271,6 +1691,15 @@ components:
           maximum: 1000
         level:
           type: string
+          enum:
+          - trace
+          - debug
+          - info
+          - warn
+          - warning
+          - error
+          - critical
+          - fatal
           description: Optional case-insensitive level filter.
         contains:
           type: string
@@ -1297,6 +1726,7 @@ components:
       required:
       - namespace
       - pod
+      additionalProperties: false
       title: k8s_get_pod_logsArguments
       x-incidentflow-title: Read Application Logs
       x-incidentflow-availability: conditional
@@ -1334,6 +1764,7 @@ components:
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_list_eventsArguments
       x-incidentflow-title: List Kubernetes Events
       x-incidentflow-availability: conditional
@@ -1356,12 +1787,19 @@ components:
           description: Internal/debug override. Usually omit this.
         namespace:
           type: string
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Maximum number of deployments to return.
         timeout_seconds:
           type: integer
           default: 30
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_list_deploymentsArguments
       x-incidentflow-title: List Kubernetes Deployments
       x-incidentflow-availability: conditional
@@ -1384,12 +1822,19 @@ components:
           description: Internal/debug override. Usually omit this.
         namespace:
           type: string
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Maximum number of services to return.
         timeout_seconds:
           type: integer
           default: 30
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_list_servicesArguments
       x-incidentflow-title: List Kubernetes Services
       x-incidentflow-availability: conditional
@@ -1425,6 +1870,7 @@ components:
           maximum: 60
       required:
       - namespace
+      additionalProperties: false
       title: k8s_get_rollout_statusArguments
       x-incidentflow-title: Check Deployment Rollout
       x-incidentflow-availability: conditional
@@ -1447,12 +1893,18 @@ components:
           description: Internal/debug override. Usually omit this.
         namespace:
           type: string
+        include_memory_context:
+          type: boolean
+          default: false
+          description: Attach semantic memory/runbook context. Off by default for this status/list tool
+            to keep routine output focused.
         timeout_seconds:
           type: integer
           default: 30
           minimum: 1
           maximum: 60
       required: []
+      additionalProperties: false
       title: k8s_show_unhealthy_podsArguments
       x-incidentflow-title: Find Unhealthy Kubernetes Pods
       x-incidentflow-availability: conditional
@@ -1484,6 +1936,22 @@ components:
           default: 100
           minimum: 1
           maximum: 1000
+        include_memory_context:
+          type: boolean
+          default: true
+          description: Attach relevant runbook/RCA/postmortem context when the workload looks unhealthy.
+            Enabled by default for investigation workflows.
+        include_raw_logs:
+          type: boolean
+          default: false
+          description: Include compact raw log lines under data.raw_logs. Off by default; the tool normally
+            returns log_analysis only.
+        exclude_loggers:
+          type: array
+          items:
+            type: string
+          description: Additional logger or substring patterns to classify as internal_debug and hide
+            from top application patterns, for example httpcore.*.
         timeout_seconds:
           type: integer
           default: 30
@@ -1492,6 +1960,7 @@ components:
       required:
       - namespace
       - workload
+      additionalProperties: false
       title: k8s_analyze_workloadArguments
       x-incidentflow-title: Analyze Kubernetes Workload
       x-incidentflow-availability: conditional
@@ -1516,6 +1985,16 @@ components:
           type: string
         pod:
           type: string
+        include_details:
+          type: boolean
+          default: false
+          description: Include lower-level pod details such as node, pod IP, probes, and resource requests/limits.
+            Off by default for compact output.
+        include_memory_context:
+          type: boolean
+          default: false
+          description: Attach relevant runbook/RCA/postmortem context when current pod issues are detected.
+            Off by default for compact inspect calls.
         timeout_seconds:
           type: integer
           default: 30
@@ -1524,6 +2003,7 @@ components:
       required:
       - namespace
       - pod
+      additionalProperties: false
       title: k8s_describe_podArguments
       x-incidentflow-title: Describe Pod
       x-incidentflow-availability: conditional
@@ -1557,8 +2037,13 @@ components:
         include_evidence_details:
           type: boolean
           default: false
-          description: Include sampled log lines, container states, events, and node details in the evidence
-            section.
+          description: Include bounded highlighted log lines, events, container states, and node evidence
+            in the consolidated report.
+        include_memory_context:
+          type: boolean
+          default: true
+          description: Attach relevant runbook/RCA/postmortem context when current pod issues are detected.
+            Enabled by default for debug workflows.
         timeout_seconds:
           type: integer
           default: 30
@@ -1567,6 +2052,7 @@ components:
       required:
       - namespace
       - pod
+      additionalProperties: false
       title: k8s_debug_podArguments
       x-incidentflow-title: Debug Pod
       x-incidentflow-availability: conditional
@@ -1585,7 +2071,7 @@ components:
       required: []
       title: grafana_list_dashboardsArguments
       x-incidentflow-title: List Grafana Dashboards
-      x-incidentflow-availability: not-public
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
         destructiveHint: false
@@ -1596,15 +2082,28 @@ components:
       properties:
         dashboard_uid:
           type: string
-          description: Grafana dashboard uid.
+          description: Grafana dashboard UID, URL slug, or exact allow-listed title.
         workspace_id:
           type: string
           description: Optional workspace scope.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims dashboard panels; full returns API payload.
+        panel_limit:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+          description: Maximum panels returned in compact mode.
       required:
       - dashboard_uid
       title: grafana_get_dashboardArguments
       x-incidentflow-title: Get Grafana Dashboard
-      x-incidentflow-availability: not-public
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
         destructiveHint: false
@@ -1615,7 +2114,7 @@ components:
       properties:
         dashboard_uid:
           type: string
-          description: Grafana dashboard uid.
+          description: Grafana dashboard UID, URL slug, or exact allow-listed title.
         workspace_id:
           type: string
           description: Optional workspace scope.
@@ -1623,7 +2122,7 @@ components:
       - dashboard_uid
       title: grafana_extract_panel_queriesArguments
       x-incidentflow-title: Extract Grafana Panel Queries
-      x-incidentflow-availability: not-public
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
         destructiveHint: false
@@ -1644,12 +2143,31 @@ components:
         workspace_id:
           type: string
           description: Optional workspace scope.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims series/samples; full returns API payload.
+        max_series:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+          description: Maximum metric series in compact mode.
+        max_points:
+          type: integer
+          default: 120
+          minimum: 1
+          maximum: 1000
+          description: Maximum samples per series in compact mode.
       required:
       - datasource_uid
       - query
       title: grafana_metrics_queryArguments
       x-incidentflow-title: Query Grafana Metrics
-      x-incidentflow-availability: not-public
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
         destructiveHint: false
@@ -1676,6 +2194,25 @@ components:
         workspace_id:
           type: string
           description: Optional workspace scope.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims series/samples; full returns API payload.
+        max_series:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+          description: Maximum metric series in compact mode.
+        max_points:
+          type: integer
+          default: 120
+          minimum: 1
+          maximum: 1000
+          description: Maximum samples per series in compact mode.
       required:
       - datasource_uid
       - query
@@ -1684,7 +2221,7 @@ components:
       - step
       title: grafana_metrics_query_rangeArguments
       x-incidentflow-title: Query Grafana Metrics Range
-      x-incidentflow-availability: not-public
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
         destructiveHint: false
@@ -1695,7 +2232,7 @@ components:
       properties:
         dashboard_uid:
           type: string
-          description: Grafana dashboard uid.
+          description: Grafana dashboard UID, URL slug, or exact allow-listed title.
         start:
           type: string
           default: now-6h
@@ -1710,124 +2247,336 @@ components:
         workspace_id:
           type: string
           description: Optional workspace scope.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims panel series; full returns API payload.
+        panel_limit:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 50
+          description: Maximum panels returned in compact mode.
+        max_series:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+          description: Maximum series per panel in compact mode.
+        max_points:
+          type: integer
+          default: 120
+          minimum: 1
+          maximum: 1000
+          description: Maximum samples per series in compact mode.
       required:
       - dashboard_uid
       title: analyze_dashboard_healthArguments
-      x-incidentflow-title: Analyze Grafana Dashboard Health
-      x-incidentflow-availability: not-public
+      x-incidentflow-title: Analyze Dashboard Health
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
         destructiveHint: false
         idempotentHint: true
         openWorldHint: true
-    analyze_dns_dashboardArguments:
+    grafana_get_panel_viewArguments:
       type: object
       properties:
         dashboard_uid:
           type: string
-          description: Grafana dashboard uid.
+          description: Grafana dashboard UID, URL slug, or exact allow-listed title.
+        panel_id:
+          type: integer
+          minimum: 1
+          description: Grafana panel id.
         start:
           type: string
-          default: now-6h
-          description: Window start (default now-6h).
+          default: now-1h
+          description: Window start (default now-1h).
         end:
           type: string
           default: now
           description: Window end (default now).
-        step:
-          type: string
-          description: Optional step; server picks a default.
+        variables:
+          type: object
+          additionalProperties:
+            anyOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Grafana dashboard variables to apply.
+        max_points:
+          type: integer
+          default: 300
+          minimum: 1
+          maximum: 500
+          description: Maximum points per rendered series.
         workspace_id:
           type: string
           description: Optional workspace scope.
       required:
       - dashboard_uid
-      title: analyze_dns_dashboardArguments
-      x-incidentflow-title: Analyze Grafana DNS Dashboard
-      x-incidentflow-availability: not-public
+      - panel_id
+      title: grafana_get_panel_viewArguments
+      x-incidentflow-title: Get Grafana Panel View
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
         destructiveHint: false
         idempotentHint: true
         openWorldHint: true
-    memory_search_similar_incidentsArguments:
+    argocd_connection_healthArguments:
       type: object
       properties:
-        query:
+        integration_id:
           type: string
-          description: Free-text description of the current incident or alert, e.g. 'readiness probe failed
-            after deployment istio-proxy backoff'.
-        service:
-          type: string
-          description: Optional service name to narrow the search scope.
-        limit:
-          type: integer
-          default: 5
-          minimum: 1
-          maximum: 20
-          description: Maximum number of similar incidents to return.
-        workspace_id:
-          type: string
-          description: Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is configured.
-      required:
-      - query
-      title: memory_search_similar_incidentsArguments
-      x-incidentflow-title: Search Similar Past Incidents
-      x-incidentflow-availability: not-public
+          description: Optional Argo CD integration id. Omit when only one is connected.
+      required: []
+      title: argocd_connection_healthArguments
+      x-incidentflow-title: Check Argo CD Connection
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
-        openWorldHint: false
+        openWorldHint: true
         destructiveHint: false
         idempotentHint: true
-    memory_get_service_contextArguments:
+    argocd_list_applicationsArguments:
       type: object
       properties:
-        service:
+        integration_id:
           type: string
-          description: Service name to retrieve memory context for.
-        query:
+          description: Optional integration id.
+        search:
           type: string
-          description: Optional free-text context to refine results, e.g. 'OOM probe failure'.
+          description: Case-insensitive app search text.
+        project:
+          type: string
+          description: Argo CD project filter.
+        namespace:
+          type: string
+          description: Destination namespace filter.
+        destination_cluster:
+          type: string
+          description: Destination cluster name or server filter.
+        health_status:
+          type: string
+          description: Health status filter.
+        sync_status:
+          type: string
+          description: Sync status filter.
         limit:
           type: integer
-          default: 5
+          default: 50
           minimum: 1
-          maximum: 20
-        workspace_id:
-          type: string
-          description: Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.
-      required:
-      - service
-      title: memory_get_service_contextArguments
-      x-incidentflow-title: Get Service Incident History
-      x-incidentflow-availability: not-public
+          maximum: 200
+      required: []
+      title: argocd_list_applicationsArguments
+      x-incidentflow-title: List Argo CD Applications
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: true
-        openWorldHint: false
+        openWorldHint: true
         destructiveHint: false
         idempotentHint: true
-    memory_upsert_incident_summaryArguments:
+    argocd_get_applicationArguments:
       type: object
       properties:
-        incident_id:
+        name:
           type: string
-          description: Incident identifier, e.g. INC-001.
-        source:
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+        response_mode:
           type: string
           enum:
-          - incident_summary
-          - slack_thread
+          - compact
+          - full
+          default: compact
+          description: compact trims large nested lists; full returns API payload.
+        history_limit:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 20
+          description: Maximum history entries in compact mode.
+      required:
+      - name
+      title: argocd_get_applicationArguments
+      x-incidentflow-title: Get Argo CD Application
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
+    argocd_get_application_resourcesArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Maximum resources returned in compact mode.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims large resource trees; full returns API payload.
+      required:
+      - name
+      title: argocd_get_application_resourcesArguments
+      x-incidentflow-title: Get Argo CD Application Resources
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
+    argocd_get_sync_historyArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+        limit:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      required:
+      - name
+      title: argocd_get_sync_historyArguments
+      x-incidentflow-title: Get Argo CD Sync History
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
+    argocd_get_last_operationArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+      required:
+      - name
+      title: argocd_get_last_operationArguments
+      x-incidentflow-title: Get Argo CD Last Operation
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
+    argocd_find_recent_deploymentsArguments:
+      type: object
+      properties:
+        integration_id:
+          type: string
+          description: Optional integration id.
+        project:
+          type: string
+          description: Argo CD project filter.
+        namespace:
+          type: string
+          description: Destination namespace filter.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+      required: []
+      title: argocd_find_recent_deploymentsArguments
+      x-incidentflow-title: Find Recent Argo CD Deployments
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
+    argocd_analyze_applicationArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims large nested lists; full returns API payload.
+        history_limit:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 20
+          description: Maximum history entries in compact mode.
+      required:
+      - name
+      title: argocd_analyze_applicationArguments
+      x-incidentflow-title: Analyze Argo CD Application
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
+    knowledge_upsertArguments:
+      type: object
+      properties:
+        document_type:
+          type: string
+          enum:
+          - knowledge
+          - incident
           - rca
+          - postmortem
           - runbook
-          - alert_pattern
-          description: Type of document being stored.
+          description: Kind of private knowledge document to save.
+        title:
+          type: string
         text:
           type: string
-          description: Free-text summary to embed. Should be concise and factual, e.g. the RCA or resolution
-            steps.
+          description: Markdown or plain text body to store.
+        id:
+          type: string
+          description: Stable document id. Required for incidents; generated from title for other document
+            types when omitted.
         service:
           type: string
-          description: Affected service name.
+          description: Optional service name.
+        cluster:
+          type: string
+          description: Optional cluster name.
+        namespace:
+          type: string
+          description: Optional namespace.
         severity:
           type: string
           enum:
@@ -1838,61 +2587,28 @@ components:
           - info
         status:
           type: string
-          enum:
-          - open
-          - investigating
-          - mitigating
-          - resolved
-        cluster:
-          type: string
-          description: Kubernetes cluster name.
-        namespace:
-          type: string
-          description: Kubernetes namespace.
+          description: Optional status, e.g. active, draft, open, or resolved.
         started_at:
           type: string
           format: date-time
-          description: Incident start time as ISO 8601.
-        workspace_id:
-          type: string
-          description: Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.
+        tags:
+          type: array
+          items:
+            type: string
+          description: Keyword tags for filtering, e.g. ['kubernetes', 'startupProbe'].
+        dry_run:
+          type: boolean
+          default: false
+          description: If true, validate and return what would be stored without writing.
       required:
-      - incident_id
-      - source
+      - document_type
+      - title
       - text
-      title: memory_upsert_incident_summaryArguments
-      x-incidentflow-title: Save Incident Summary to Memory
-      x-incidentflow-availability: not-public
+      title: knowledge_upsertArguments
+      x-incidentflow-title: Save Knowledge Document
+      x-incidentflow-availability: conditional
       x-mcp-behavior:
         readOnlyHint: false
-        openWorldHint: false
-        destructiveHint: true
-        idempotentHint: false
-    memory_find_runbookArguments:
-      type: object
-      properties:
-        query:
-          type: string
-          description: Describe the problem to find matching runbooks for, e.g. 'istio sidecar startup
-            delay causes readiness probe failure'.
-        service:
-          type: string
-          description: Optional service name to filter runbooks.
-        limit:
-          type: integer
-          default: 3
-          minimum: 1
-          maximum: 10
-        workspace_id:
-          type: string
-          description: Workspace scope. Optional when INCIDENTFLOW_WORKSPACE_ID is set.
-      required:
-      - query
-      title: memory_find_runbookArguments
-      x-incidentflow-title: Find Runbook from Memory
-      x-incidentflow-availability: not-public
-      x-mcp-behavior:
-        readOnlyHint: true
         openWorldHint: false
         destructiveHint: false
         idempotentHint: true
@@ -1943,9 +2659,86 @@ components:
           name:
             type: string
             enum:
-            - analyze_dns_dashboard
+            - argocd_analyze_application
           arguments:
-            $ref: '#/components/schemas/analyze_dns_dashboardArguments'
+            $ref: '#/components/schemas/argocd_analyze_applicationArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_connection_health
+          arguments:
+            $ref: '#/components/schemas/argocd_connection_healthArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_find_recent_deployments
+          arguments:
+            $ref: '#/components/schemas/argocd_find_recent_deploymentsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_get_application
+          arguments:
+            $ref: '#/components/schemas/argocd_get_applicationArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_get_application_resources
+          arguments:
+            $ref: '#/components/schemas/argocd_get_application_resourcesArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_get_last_operation
+          arguments:
+            $ref: '#/components/schemas/argocd_get_last_operationArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_get_sync_history
+          arguments:
+            $ref: '#/components/schemas/argocd_get_sync_historyArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_list_applications
+          arguments:
+            $ref: '#/components/schemas/argocd_list_applicationsArguments'
       - type: object
         required:
         - name
@@ -1990,6 +2783,17 @@ components:
             - grafana_get_dashboard
           arguments:
             $ref: '#/components/schemas/grafana_get_dashboardArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - grafana_get_panel_view
+          arguments:
+            $ref: '#/components/schemas/grafana_get_panel_viewArguments'
       - type: object
         required:
         - name
@@ -2045,6 +2849,39 @@ components:
             - incident_thread_summary
           arguments:
             $ref: '#/components/schemas/incident_thread_summaryArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - incidentflow_auth_status
+          arguments:
+            $ref: '#/components/schemas/incidentflow_auth_statusArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - incidentflow_capabilities
+          arguments:
+            $ref: '#/components/schemas/incidentflow_capabilitiesArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - incidentflow_integrations_status
+          arguments:
+            $ref: '#/components/schemas/incidentflow_integrations_statusArguments'
       - type: object
         required:
         - name
@@ -2240,9 +3077,9 @@ components:
           name:
             type: string
             enum:
-            - memory_find_runbook
+            - knowledge_get
           arguments:
-            $ref: '#/components/schemas/memory_find_runbookArguments'
+            $ref: '#/components/schemas/knowledge_getArguments'
       - type: object
         required:
         - name
@@ -2251,9 +3088,9 @@ components:
           name:
             type: string
             enum:
-            - memory_get_service_context
+            - knowledge_upsert
           arguments:
-            $ref: '#/components/schemas/memory_get_service_contextArguments'
+            $ref: '#/components/schemas/knowledge_upsertArguments'
       - type: object
         required:
         - name
@@ -2262,9 +3099,9 @@ components:
           name:
             type: string
             enum:
-            - memory_search_similar_incidents
+            - mcp_version
           arguments:
-            $ref: '#/components/schemas/memory_search_similar_incidentsArguments'
+            $ref: '#/components/schemas/mcp_versionArguments'
       - type: object
         required:
         - name
@@ -2273,9 +3110,20 @@ components:
           name:
             type: string
             enum:
-            - memory_upsert_incident_summary
+            - private_knowledge_search
           arguments:
-            $ref: '#/components/schemas/memory_upsert_incident_summaryArguments'
+            $ref: '#/components/schemas/private_knowledge_searchArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - public_knowledge_search
+          arguments:
+            $ref: '#/components/schemas/public_knowledge_searchArguments'
       - type: object
         required:
         - name
@@ -2595,9 +3443,7 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
-      description: Bearer token auth. Production clients should use IncidentFlow OAuth or a workspace-scoped
-        managed token and request mcp:read plus mcp:tools:run. Send credentials only in the Authorization
-        header.
+      description: Bearer token auth. In development with no auth provider configured, /mcp may run unprotected.
 servers:
 - url: https://mcp.incidentflow.io
   description: IncidentFlow MCP production origin
