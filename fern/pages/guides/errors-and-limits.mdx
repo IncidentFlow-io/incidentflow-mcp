@@ -72,4 +72,3 @@ repeating a large call; do not emulate pagination by issuing unbounded parallel 
 - Do not retry `401`, `403`, or validation errors without changing the credential or request.
 - Preserve the JSON-RPC request `id` for response correlation, and send a stable `X-Request-ID` for
   operational tracing when the client supports custom headers.
-
