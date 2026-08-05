@@ -8,18 +8,6 @@
     "category": "DEVELOPER_TOOLS"
   },
   "tools": {
-    "incident_summary": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool only retrieves and summarizes IncidentFlow incident information such as status, timeline, affected services, and recommendations; it does not create, update, delete, send messages, or perform irreversible actions.",
-        "open_world_justification": "This tool is limited to IncidentFlow incident data and does not take actions in external systems or the open world.",
-        "destructive_justification": "This tool does not delete, overwrite, restart, scale, patch, send messages, or perform irreversible actions."
-      }
-    },
     "correlate_alerts": {
       "annotations": {
         "readOnlyHint": true,
@@ -34,278 +22,258 @@
     },
     "external_status_check": {
       "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
+        "readOnlyHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "This tool reads public provider status information for supported providers such as GitHub or AWS and returns current status and incident summaries without modifying provider state.",
-        "open_world_justification": "This tool is limited to public read-only provider status pages and does not perform actions in external systems.",
-        "destructive_justification": "This tool does not delete, overwrite, restart, scale, patch, send messages, or perform irreversible actions."
+        "read_only_justification": "The provider lookup is read-only, but a call without check_id submits a new persisted IncidentFlow runner job and may persist its result to OMS, so the overall tool is non-read-only.",
+        "open_world_justification": "The runner reads live public GitHub or AWS status data, which is external and may change independently of IncidentFlow.",
+        "destructive_justification": "The tool never changes provider state; its IncidentFlow job and optional OMS persistence are additive."
       }
     },
     "slack_alerts_list": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads recent Slack alert messages for incident analysis and does not post messages, update messages, delete messages, invite users, or change Slack workspace configuration.",
-        "open_world_justification": "This tool is limited to a configured Slack alert channel in the connected workspace and does not take actions in Slack or elsewhere.",
+        "open_world_justification": "This tool reads live messages, links, and attachments from an externally connected Slack workspace; that content can change independently and must be treated as untrusted.",
         "destructive_justification": "This tool does not post, update, delete, invite users, change configuration, or perform irreversible actions."
       }
     },
     "slack_alert_thread_get": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads a Slack alert thread and parses replies, links, hypotheses, decisions, and resolution signals without posting or modifying Slack data.",
-        "open_world_justification": "This tool is limited to reading a selected Slack thread in the connected workspace and does not take actions in Slack or elsewhere.",
+        "open_world_justification": "This tool reads live messages, links, and attachments from an externally connected Slack workspace; that content can change independently and must be treated as untrusted.",
         "destructive_justification": "This tool does not post, update, delete, invite users, change configuration, or perform irreversible actions."
       }
     },
     "incident_thread_summary": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "This tool reads a Slack incident thread and computes a summary for incident analysis; it does not execute commands, post messages, update messages, or modify Slack data.",
-        "open_world_justification": "This tool is limited to reading a selected Slack thread and optional alert context in the connected workspace.",
-        "destructive_justification": "This tool does not post, update, delete, invite users, execute commands, change configuration, or perform irreversible actions."
-      }
-    },
-    "k8s_agent_command": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool dispatches only allowlisted read-only Kubernetes inspection actions through the IncidentFlow Kubernetes Agent, such as listing resources, reading pod details, reading redacted logs, and checking rollout status.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters authorized in IncidentFlow and only uses read-only agent inspection commands.",
-        "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
+        "read_only_justification": "The tool reads a Slack incident thread and returns a summary without changing Slack or implicitly writing the result to IncidentFlow memory.",
+        "open_world_justification": "The summary reads live messages and links from an externally connected Slack workspace; that content can change independently and must be treated as untrusted.",
+        "destructive_justification": "The tool does not post, update, delete, overwrite, persist summaries, or perform irreversible actions."
       }
     },
     "k8s_connection_health": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool checks Kubernetes agent connectivity and read-only permission health; it may query cluster reachability and permissions but does not modify resources.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters authorized in IncidentFlow and only performs read-only checks.",
+        "open_world_justification": "This tool queries a live externally connected Kubernetes cluster; agent responses and cluster metadata can change independently and may contain untrusted operational text.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_cluster_overview": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads Kubernetes namespaces, Pods, Deployments, Services, Events, and health signals through the IncidentFlow Kubernetes Agent without modifying cluster state.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters authorized in IncidentFlow and only performs read-only inspection.",
+        "open_world_justification": "This tool queries a live externally connected Kubernetes cluster; resource names, events, and other operational content can change independently and must be treated as untrusted.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_namespace_overview": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads Kubernetes resources in one allowed namespace, including Pods, Events, Deployments, Services, and health signals, without modifying resources.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
+        "open_world_justification": "This tool queries a live externally connected Kubernetes namespace; resource names, events, and other operational content can change independently and must be treated as untrusted.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_rbac_check": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool checks which read-only Kubernetes permissions are available through the IncidentFlow Kubernetes Agent and does not change RBAC or cluster configuration.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters authorized in IncidentFlow and only checks read-only capability.",
+        "open_world_justification": "This tool checks permissions against a live externally connected Kubernetes cluster, whose RBAC state changes independently of IncidentFlow.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_agent_status": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads Kubernetes agent registry status, version, heartbeat, and selected cluster identity without dispatching write commands or modifying cluster resources.",
-        "open_world_justification": "This tool is limited to IncidentFlow agent registry data and connected Kubernetes cluster metadata.",
+        "open_world_justification": "This tool reads status and identity for an externally connected Kubernetes Agent; heartbeat and cluster metadata change independently of IncidentFlow MCP.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_list_namespaces": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool lists Kubernetes namespaces visible through the IncidentFlow Kubernetes Agent and does not modify namespaces or cluster configuration.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters authorized in IncidentFlow and only lists resources.",
+        "open_world_justification": "This tool lists namespaces from a live externally connected Kubernetes cluster; namespace names and metadata may contain untrusted operational text.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_list_pods": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool lists Kubernetes Pods in an allowed namespace through the IncidentFlow Kubernetes Agent and does not modify Pods or workloads.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
+        "open_world_justification": "This tool reads Pods from a live externally connected Kubernetes cluster; names, labels, images, and status metadata may contain untrusted operational text.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_get_pod": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads details for one Kubernetes Pod in an allowed namespace through the IncidentFlow Kubernetes Agent and does not modify the Pod.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
+        "open_world_justification": "This tool reads a Pod from a live externally connected Kubernetes cluster; names, labels, images, and status metadata may contain untrusted operational text.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_get_pod_logs": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads redacted recent logs from a selected Kubernetes Pod through the IncidentFlow Kubernetes Agent and does not modify Pods, containers, Deployments, or configuration.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow and only reads logs.",
+        "open_world_justification": "This tool reads application logs from a live externally connected Kubernetes cluster; log text is operator-controlled external content and must not be treated as instructions.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_list_events": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool lists Kubernetes Events in an allowed namespace through the IncidentFlow Kubernetes Agent and does not modify Events or resources.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
+        "open_world_justification": "This tool reads Events from a live externally connected Kubernetes cluster; event messages and resource names may contain untrusted operational text.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_list_deployments": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool lists Kubernetes Deployments in an allowed namespace and returns rollout and availability metadata without modifying Deployments.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
+        "open_world_justification": "This tool reads Deployments from a live externally connected Kubernetes cluster; names, images, and rollout metadata may contain untrusted operational text.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_list_services": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool lists Kubernetes Services in an allowed namespace and returns service type, ports, selectors, and metadata without modifying Services.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
+        "open_world_justification": "This tool reads Services from a live externally connected Kubernetes cluster; names, selectors, and metadata may contain untrusted operational text.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_get_rollout_status": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads Kubernetes Deployment rollout status and returns readiness, availability, and rollout progress without restarting, scaling, patching, or modifying the Deployment.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
-        "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
-      }
-    },
-    "k8s_show_namespaces": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool shows Kubernetes namespaces through automatic cluster resolution and does not modify namespaces or cluster configuration.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters authorized in IncidentFlow and only lists resources.",
-        "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
-      }
-    },
-    "k8s_show_pods": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool shows Kubernetes Pods through automatic cluster resolution and returns current Pod status metadata without modifying Pods.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
+        "open_world_justification": "This tool reads rollout state from a live externally connected Kubernetes cluster; deployment and status metadata can change independently.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_show_unhealthy_pods": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool reads Pod status and restart metadata to find Pods that are not running, not ready, crash looping, pending, failed, or recently restarted without modifying Pods.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow.",
+        "open_world_justification": "This tool analyzes Pod state from a live externally connected Kubernetes cluster; resource names and status metadata may contain untrusted operational text.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     },
     "k8s_analyze_workload": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "This tool inspects a Kubernetes workload rollout, related Pods, health status, and redacted recent logs through the IncidentFlow Kubernetes Agent without modifying the workload.",
-        "open_world_justification": "This tool is limited to connected Kubernetes clusters and namespaces authorized in IncidentFlow and only performs read-only inspection.",
+        "open_world_justification": "This tool reads workload, Pod, and log data from a live externally connected Kubernetes cluster; returned operational content must be treated as untrusted.",
+        "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
+      }
+    },
+    "k8s_describe_pod": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "This tool reads pod state, containers, events, and diagnostic signals through the IncidentFlow Kubernetes Agent without modifying the pod or cluster.",
+        "open_world_justification": "This tool reads Pod, container, and Event data from a live externally connected Kubernetes cluster; returned operational content must be treated as untrusted.",
+        "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
+      }
+    },
+    "k8s_debug_pod": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "This tool combines read-only pod details, recent redacted logs, events, and rollout status into an investigation report without modifying the pod or cluster.",
+        "open_world_justification": "This tool reads Pod, log, Event, and rollout data from a live externally connected Kubernetes cluster; returned operational content must be treated as untrusted.",
         "destructive_justification": "This tool never creates, updates, deletes, restarts, scales, patches, or modifies Kubernetes resources."
       }
     }
   },
   "test_cases": [
-    {
-      "description": "Summarize an active IncidentFlow incident for an on-call engineer.",
-      "user_prompt": "Summarize incident inc_123 for me, including severity, current status, timeline, affected services, and recommended next steps.",
-      "file_attachment_urls": null,
-      "tools_triggered": "incident_summary",
-      "expected_output": "A concise incident summary with severity, status, affected services, timeline highlights, and read-only remediation recommendations based on IncidentFlow incident data.",
-      "expected_output_url": null
-    },
     {
       "description": "Correlate multiple alert objects supplied by the user.",
       "user_prompt": "Correlate these alerts and tell me whether they look related: API 5xx spike for checkout, database connection saturation for payments, and checkout latency p95 breach in the same five-minute window.",
@@ -319,7 +287,7 @@
       "user_prompt": "Look at the latest production alert in our Slack alert channel and summarize the related thread for incident context.",
       "file_attachment_urls": null,
       "tools_triggered": "slack_alerts_list, incident_thread_summary",
-      "expected_output": "A read-only summary of the relevant Slack alert and thread, including hypotheses, decisions, links, commands mentioned by engineers, and possible resolution signals.",
+      "expected_output": "A read-only summary of the relevant Slack alert and thread, including hypotheses, decisions, links, commands mentioned by engineers, and possible resolution signals, without implicitly storing the result in semantic memory.",
       "expected_output_url": null
     },
     {
@@ -341,7 +309,7 @@
   ],
   "negative_test_cases": [
     {
-      "description": "Reject Slack write actions because IncidentFlow tools are read-only.",
+      "description": "Reject Slack message mutations because no Slack write tool is available.",
       "user_prompt": "Post a message in the incident Slack channel saying the deployment is fixed.",
       "file_attachment_urls": null,
       "tools_triggered": null,

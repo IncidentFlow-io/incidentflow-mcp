@@ -1,0 +1,46 @@
+# API changelog
+
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
+This changelog covers the public IncidentFlow MCP contract and documentation. Internal service
+changes belong in internal release notes.
+
+## Unreleased
+
+### Release blockers
+
+- `incident_summary` supports only its read-only synchronous path; a production async runner is not
+  part of this contract.
+- Grafana remains outside the public release until least-privilege onboarding and a real datasource
+  query pass human acceptance.
+- Memory tools remain blocked until their platform backend, workspace isolation, retry behavior,
+  and overwrite semantics are verified end to end.
+- OAuth revocation requires coordinated staging acceptance with online introspection enabled.
+
+## 0.1.0 candidate — 2026-08-02
+
+### Added
+
+- Grouped Fern navigation for onboarding, authentication, errors/limits, tools, generated HTTP
+  operations, versions, client guidance, and changelog.
+- Versioned downloadable OpenAPI YAML.
+- Explicit availability labels and source-permission requirements for the MCP catalog.
+- Safe placeholder examples for initialization, discovery, and local alert correlation.
+
+### Corrected
+
+- Removed claims for unavailable customer integrations and separated public provider-status lookup
+  from a customer GitHub integration.
+- Marked Grafana and memory behavior as unavailable instead of presenting source presence as a
+  released feature.
+- Documented IncidentFlow writes and overwrite risk for non-read-only tools.
+
+### Security
+
+- Documented header-only bearer authentication, least-privilege scopes, revocation behavior,
+  external-content trust boundaries, and bounded retry rules.
+
+### Human acceptance
+
+Pending. This candidate must not be marked stable or published as human-approved until a reviewer
+checks the rendered navigation, search results, examples, downloads, links, and availability labels.

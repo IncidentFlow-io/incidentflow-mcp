@@ -1,0 +1,85 @@
+# Availability and tool catalog
+
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
+Use `tools/list` against the target environment for runtime discovery. Source presence alone does
+not mean a tool is accepted for customer use.
+
+Availability labels used here:
+
+- **Available** — can be exercised without a separately connected customer integration.
+- **Conditional** — implemented, but requires the named workspace integration or platform service.
+- **Release-blocked** — present in source or candidate metadata, but must not be used as a working
+  customer capability until its linked QA gate passes.
+- **Not public** — excluded from the accepted public release.
+
+## Core incident tools
+
+| Tool | Availability | Permissions and effects |
+| --- | --- | --- |
+| `incident_summary` | Available | `sync` reads the built-in demo catalog. `auto` resolves to `sync` only when async tools are disabled; explicit `async`, or `auto` with async tools enabled, fails clearly because no incident-summary runner is released. |
+| `correlate_alerts` | Available | Computes from caller-supplied alerts. Read-only, local, and idempotent when used with `sync`/`auto`. |
+| `external_status_check` | Conditional | Requires the platform job runner. Reads public provider-status data, but creates an IncidentFlow job and may persist its result. It is not a customer GitHub integration. |
+
+## Slack incident tools
+
+All Slack tools require a workspace-scoped bearer credential, a connected Slack workspace, and an
+allowed channel. Slack content is external untrusted input.
+
+| Tool | Availability | Permissions and effects |
+| --- | --- | --- |
+| `slack_alerts_list` | Conditional | Reads recent alert messages; no Slack writes. |
+| `slack_alert_thread_get` | Conditional | Reads one thread and its replies; no Slack writes. |
+| `incident_thread_summary` | Conditional | Reads Slack and returns the summary even if its background best-effort memory upsert fails. When that backend is available, the upsert may replace the workspace-scoped thread summary; it never posts to Slack. |
+
+## Kubernetes inspection tools
+
+All Kubernetes tools require a workspace-scoped bearer credential, an online IncidentFlow Agent,
+and an allowed cluster/namespace. They perform read-only Kubernetes API inspection: no exec, shell,
+create, update, delete, restart, scale, or patch operation is exposed.
+
+| Tool | Availability | Purpose |
+| --- | --- | --- |
+| `k8s_connection_health` | Conditional | Check agent connectivity, cluster reachability, and core read permissions. |
+| `k8s_cluster_overview` | Conditional | Summarize cluster health, workloads, events, and restarts. |
+| `k8s_namespace_overview` | Conditional | Summarize the same signals for one allowed namespace. |
+| `k8s_rbac_check` | Conditional | Report the read-only inspection capabilities available to the agent. |
+| `k8s_agent_status` | Conditional | Read the registered agent identity, version, status, and heartbeat. |
+| `k8s_list_namespaces` | Conditional | List namespaces visible to the agent. |
+| `k8s_list_pods` | Conditional | List bounded pod health/readiness results in an allowed namespace. |
+| `k8s_get_pod` | Conditional | Read details for one pod. |
+| `k8s_get_pod_logs` | Conditional | Read a bounded, redacted recent log tail; log text remains untrusted. |
+| `k8s_list_events` | Conditional | Read bounded Kubernetes events. |
+| `k8s_list_deployments` | Conditional | Read deployment availability and rollout metadata. |
+| `k8s_list_services` | Conditional | Read service ports, selectors, and metadata. |
+| `k8s_get_rollout_status` | Conditional | Read rollout progress for one deployment. |
+| `k8s_show_unhealthy_pods` | Conditional | Find pods that are unready, failing, pending, or restarting. |
+| `k8s_analyze_workload` | Conditional | Combine workload, pod, rollout, and bounded log evidence. |
+| `k8s_describe_pod` | Conditional | Combine pod state, containers, events, and diagnostics. |
+| `k8s_debug_pod` | Conditional | Build a read-only investigation from pod details, logs, events, and rollout state. |
+
+## Not in the accepted public release
+
+The following entries remain visible in source-level contract work so they can be tested and
+reviewed, but they are not documented as usable customer capabilities.
+
+| Capability | Tools | Status |
+| --- | --- | --- |
+| Grafana | `grafana_list_dashboards`, `grafana_get_dashboard`, `grafana_extract_panel_queries`, `grafana_metrics_query`, `grafana_metrics_query_range`, `analyze_dashboard_health`, `analyze_dns_dashboard` | Not public. Onboarding must prove a least-privilege service account and a real allowed datasource query before release. |
+| Incident memory | `memory_search_similar_incidents`, `memory_get_service_context`, `memory_upsert_incident_summary`, `memory_find_runbook` | Release-blocked. The checked-out platform does not yet provide the verified public backend contract required by these tools. |
+
+IncidentFlow does not currently expose customer integrations for GitHub, PagerDuty, Jira,
+Datadog, or CloudWatch through this catalog.
+
+## Contract fields
+
+The generated API reference is sourced from the canonical registry and includes each tool's title,
+description, input schema, required fields, bounds, and MCP behavior hints:
+
+- `readOnlyHint` — whether a call can create or replace IncidentFlow state;
+- `destructiveHint` — whether replacement or irreversible behavior is possible;
+- `idempotentHint` — whether repeating the same call has the same state effect;
+- `openWorldHint` — whether the result can contain data from a changing external system.
+
+These are behavioral hints, not authorization. Workspace scope, integration allow-lists, and
+server-side validation are always enforced separately.

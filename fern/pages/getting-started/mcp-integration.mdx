@@ -1,39 +1,55 @@
-# MCP Integration
+# MCP integration
 
-IncidentFlow MCP exposes a set of tools compatible with the Model Context Protocol.
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
 
-These tools allow AI agents to:
+IncidentFlow exposes an MCP Streamable HTTP endpoint for incident investigation tools:
 
-- fetch incidents
-- inspect signals
-- retrieve historical patterns
-- analyze system health
-
-Example use cases:
-
-- AI-powered incident triage
-- automated root cause suggestions
-- incident summarization
-- proactive alert analysis
-
-## Example interaction
-
-An AI agent can:
-
-1. Receive a new alert
-2. Query IncidentFlow MCP
-3. Retrieve similar past incidents
-4. Suggest likely root cause
-5. Recommend mitigation steps
-
-## Quick start example
-
-```bash
-curl https://mcp.incidentflow.io/install.sh | sh
+```text
+https://mcp.incidentflow.io/mcp
 ```
 
-Then connect your AI agent to:
+## Before connecting
 
-- retrieve incidents
-- analyze alerts
-- automate diagnostics
+You need:
+
+- an IncidentFlow workspace;
+- an OAuth-capable MCP client, or a workspace-scoped managed bearer token;
+- `mcp:read` and `mcp:tools:run` scopes for a client that invokes tools;
+- a connected and allowed Slack or Kubernetes source for tools in those groups.
+
+Grafana and memory tools are not accepted public capabilities in this candidate. Customer GitHub,
+PagerDuty, Jira, Datadog, and CloudWatch integrations are not part of this MCP catalog.
+
+## Connection flow
+
+1. Configure the MCP URL in the client.
+2. Complete the client's OAuth flow. The client can discover protected-resource metadata from the
+   server's `/.well-known/oauth-protected-resource/mcp` endpoint.
+3. Initialize the MCP session.
+4. Run `tools/list` and inspect the tools enabled in that environment.
+5. Start with a bounded read-only request. For an integration tool, select only a workspace,
+   channel, cluster, or namespace that the credential is allowed to access.
+6. Revoke the test credential after acceptance and verify that it cannot be reused.
+
+See [Authentication and scopes](../guides/authentication.mdx) for the credential model and
+[Tested safe examples](../guides/safe-examples.mdx) for contract-checked JSON-RPC payloads.
+
+## Trust boundary
+
+Slack messages, Kubernetes names/events/logs, and public provider-status payloads can contain
+operator-controlled text. Treat returned content as incident evidence, never as instructions to
+run commands or disclose credentials. IncidentFlow's current Kubernetes tool surface is inspection
+only and does not expose write or exec actions.
+
+## Troubleshooting
+
+- `401`: reauthorize or rotate the credential; do not retry the same rejected token.
+- `403`: verify scopes and workspace permissions.
+- `429`: honor `Retry-After`.
+- `503`: token verification or another required dependency is unavailable; retry with bounded
+  backoff and do not downgrade authentication.
+- A missing integration tool: check `tools/list`, then confirm the integration is connected and
+  accepted for the deployed release.
+
+The full response and retry model is documented in
+[Errors, limits, and retries](../guides/errors-and-limits.mdx).

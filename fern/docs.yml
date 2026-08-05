@@ -12,6 +12,29 @@ navigation:
       - page: MCP Integration
         path: pages/getting-started/mcp-integration.mdx
 
-  - section: API Reference
+  - section: Using the API
+    contents:
+      - page: Authentication and scopes
+        path: pages/guides/authentication.mdx
+      - page: Errors, limits, and retries
+        path: pages/guides/errors-and-limits.mdx
+      - page: Tested safe examples
+        path: pages/guides/safe-examples.mdx
+
+  - section: MCP Tools
+    contents:
+      - page: Availability and tool catalog
+        path: pages/reference/tool-catalog.mdx
+
+  - section: HTTP API Reference
     contents:
       - api: incidentflow-mcp
+
+  - section: Releases
+    contents:
+      - page: Versions and OpenAPI downloads
+        path: pages/releases/versions.mdx
+      - page: Client and SDK guidance
+        path: pages/releases/client-guidance.mdx
+      - page: API changelog
+        path: pages/releases/changelog.mdx

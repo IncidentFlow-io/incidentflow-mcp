@@ -1,0 +1,427 @@
+{
+  "schema_version": 1,
+  "repository": "IncidentFlow-io/incidentflow-mcp",
+  "maintained_roots": [
+    "fern/pages",
+    "docs"
+  ],
+  "public_roots": [
+    "fern/pages",
+    "fern/assets/downloads",
+    "openapi"
+  ],
+  "internal_roots": [
+    "docs"
+  ],
+  "internal_content_markers": [
+    "<!-- incidentflow:internal-only -->"
+  ],
+  "public_build_allowlist": [
+    "fern/pages/getting-started/what-is-incidentflow-mcp.mdx",
+    "fern/pages/getting-started/how-it-works.mdx",
+    "fern/pages/getting-started/mcp-integration.mdx",
+    "fern/pages/guides/authentication.mdx",
+    "fern/pages/guides/errors-and-limits.mdx",
+    "fern/pages/guides/safe-examples.mdx",
+    "fern/pages/reference/tool-catalog.mdx",
+    "fern/pages/releases/versions.mdx",
+    "fern/pages/releases/client-guidance.mdx",
+    "fern/pages/releases/changelog.mdx",
+    "fern/assets/downloads/incidentflow-mcp-openapi-0.1.0.yaml",
+    "openapi/openapi.yaml"
+  ],
+  "navigation_files": [
+    "fern/docs.yml"
+  ],
+  "documents": [
+    {
+      "doc_id": "IF-INTERNAL-DOC-GOVERNANCE-MCP",
+      "path": "docs/documentation-governance.md",
+      "visibility": "internal",
+      "published": false,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "draft",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "scripts/docs_governance.py",
+        ".github/workflows/docs*.yml",
+        ".github/CODEOWNERS"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:d6f7fad7edeca825ddb7854c463a7c552909cd48d490b8832f37564b9ab5a3df",
+      "content_digest": "sha256:da1453f5a9b07049c096139954ee64faec9c510b0ab85c458d5f7fa16ef8650a",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T20:02:52.020365Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-10-31T17:30:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-AUTHENTICATION",
+      "path": "fern/pages/guides/authentication.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/auth/*.py",
+        "src/incidentflow_mcp/app.py",
+        "src/incidentflow_mcp/http/routes/mcp_proxy.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:85e178a31880ee0bce21ff42a806ca543b797275ea8e3d4d05ebf63701e785a4",
+      "content_digest": "sha256:6eecf6206c27de129a70c081b5bfc9db6fbdb3351412d9e76cb6c37d9cdd671a",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:45:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-ERRORS-LIMITS",
+      "path": "fern/pages/guides/errors-and-limits.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/http/exception_handlers.py",
+        "src/incidentflow_mcp/auth/middleware.py",
+        "src/incidentflow_mcp/rate_limit/*.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:cb501e0206c24419f4fd420d0477135c04091a2248f7f01a91833f5baeca5ba7",
+      "content_digest": "sha256:03895bd4964066aa621a72c1ece3e1c1b8bf345c567cdec0796bb7da2593623d",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:45:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-SAFE-EXAMPLES",
+      "path": "fern/pages/guides/safe-examples.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/mcp/server.py",
+        "src/incidentflow_mcp/tools/registry.py",
+        "tests/test_public_docs.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:cdbe26ab8f471be2bfc92e25e664dcb38fbab99456a042d5e1db27afb4814631",
+      "content_digest": "sha256:e9ebe83c8b52332a2ab8a2569ec679d02e49e0399ad7165d6db70a956f526642",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T20:02:07.752090Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:45:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-TOOL-CATALOG",
+      "path": "fern/pages/reference/tool-catalog.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/tools/registry.py",
+        "chatgpt-app-submission.json",
+        "tests/test_tool_metadata.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:6b7880e6b2ead3a0f83d086188b54966287cfbd78d564bec745b21f39b83fde9",
+      "content_digest": "sha256:28488a772f62cb01a6dd098de9bb6286c36e0df541f20877ae75a2308c681815",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:45:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-VERSIONS",
+      "path": "fern/pages/releases/versions.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "pyproject.toml",
+        "openapi/openapi.yaml",
+        "scripts/generate_openapi.py",
+        "tests/test_public_docs.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:0bf6b3f20489e4b3fc4153f9b723ea1e09541ef806975c48d6e43714ccd4b0a8",
+      "content_digest": "sha256:4484bb34295054fe79b85b4c7a94b229511d7634b2fcbe0dd487c07e9b313e82",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T20:02:07.752090Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:45:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-CLIENT-GUIDANCE",
+      "path": "fern/pages/releases/client-guidance.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/mcp/server.py",
+        "src/incidentflow_mcp/auth/*.py",
+        "src/incidentflow_mcp/http/routes/mcp_proxy.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:73bcb00e0021d0481c469bf5324f3f3b2f03671a7f9c9466a3296ab64c29fe28",
+      "content_digest": "sha256:ba045b66bf7f2c13d59d91b986740b45cfa1440340e89c9618d68dc9052b8d06",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:45:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-CHANGELOG",
+      "path": "fern/pages/releases/changelog.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "pyproject.toml",
+        "openapi/openapi.yaml",
+        "src/incidentflow_mcp/tools/registry.py",
+        "chatgpt-app-submission.json"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:6cd7afff1fda41d1773635d3d06dddf2a836881f858a97896a8514e3d76a5424",
+      "content_digest": "sha256:3c0805584c8482560ee750064205811ca92314a515c8fb8cbc5d35a0c9fcf515",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:45:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-OPENAPI-DOWNLOAD-0-1-0",
+      "path": "fern/assets/downloads/incidentflow-mcp-openapi-0.1.0.yaml",
+      "visibility": "public",
+      "published": true,
+      "generated": true,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "openapi/openapi.yaml",
+        "scripts/generate_openapi.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:6e3f4a38b4d40f073a984f71abdf8a3b88c58505cb2451498e117be1ffa0da07",
+      "content_digest": "sha256:c58eb164c52d9978e1a2fe6ddd57710f0ed0f97647ca160ad4178fdb6aa2f3f6",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:45:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-OVERVIEW",
+      "path": "fern/pages/getting-started/what-is-incidentflow-mcp.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/tools/registry.py",
+        "chatgpt-app-submission.json"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:59855f332d21734182ac100912f934e04b46495b1f408ce58909a78ff76b45fb",
+      "content_digest": "sha256:29ab84057b7ee75fbd372c7387638138abd645583496a8a08f608bb316c0ed42",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:30:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-HOW-IT-WORKS",
+      "path": "fern/pages/getting-started/how-it-works.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/mcp/server.py",
+        "src/incidentflow_mcp/auth/*.py",
+        "src/incidentflow_mcp/rate_limit/*.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:d479a593985446bccb2b2ee1ddaf7e811d30426b8da6a5789859c3641b89aaf9",
+      "content_digest": "sha256:3ca1354b207c4a7184f05b4d1f5a7d4e635daac8e325ab71f09687bad43a6f7e",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:30:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-INTEGRATION",
+      "path": "fern/pages/getting-started/mcp-integration.mdx",
+      "visibility": "public",
+      "published": true,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/tools/registry.py",
+        "src/incidentflow_mcp/mcp/server.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:acaa35e0bb0c9bb48057c27eab7cb25b665c429a30438063022f1084d93b8ee1",
+      "content_digest": "sha256:8295c25d0f1f9fe5d7f1333dc7b7357a45a5eec9f23013978969616e4dcbff8b",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:30:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-PUBLIC-MCP-OPENAPI",
+      "path": "openapi/openapi.yaml",
+      "visibility": "public",
+      "published": true,
+      "generated": true,
+      "version": "0.1.0",
+      "status": "automated-update",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/**/*.py",
+        "scripts/generate_openapi.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:d572ed885b3b82b9fcff2f84775940305845d0c293a07b68592b5d63e596011d",
+      "content_digest": "sha256:3392f5847c71b734b5872096491e2a46eb97142a03e55c1f8338c933c1471145",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-08-16T17:30:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    },
+    {
+      "doc_id": "IF-INTERNAL-MCP-OBSERVABILITY",
+      "path": "docs/observability.md",
+      "visibility": "internal",
+      "published": false,
+      "generated": false,
+      "version": "0.1.0",
+      "status": "draft",
+      "owners": [
+        "@NickChebo"
+      ],
+      "source_paths": [
+        "src/incidentflow_mcp/observability/*.py",
+        "src/incidentflow_mcp/rate_limit/metrics.py"
+      ],
+      "source_ref": "8d85452b30be2d38310067d38810adf8dfeef8db",
+      "source_digest": "sha256:d9752aa6032ea0d685caa3f5335ea01a6d73a3986d01b860d1f660dc5b66a25a",
+      "content_digest": "sha256:7bec5dc7d9797c9d8c8066fe32f97fb780db28e9e37d48f434cec4150a56ef37",
+      "approved_content_digest": null,
+      "last_code_sync_at": "2026-08-02T19:59:02.096738Z",
+      "last_human_reviewed_at": null,
+      "last_human_reviewer": null,
+      "review_due_at": "2026-10-31T17:30:00Z",
+      "approved_version": null,
+      "approved_source_ref": null,
+      "approved_source_digest": null
+    }
+  ]
+}

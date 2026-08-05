@@ -1,12 +1,16 @@
 # How it works
 
-1. Signals are ingested from external systems:
-   - Prometheus alerts
-   - CloudWatch alarms
-   - Slack incidents
-   - Logs and metrics
-2. Signals are normalized into a common format.
-3. A correlation engine groups signals into incidents.
-4. Events are stored in an event store.
-5. A retrieval layer allows querying past incidents.
-6. MCP interface exposes this data to AI systems.
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
+1. An authenticated AI client discovers the MCP tools enabled for its workspace and release.
+2. The client supplies an incident identifier, alert payload, or an approved Slack/Kubernetes
+   selector to a read-only investigation tool.
+3. IncidentFlow validates identity, workspace scope, input limits, and integration allow-lists.
+4. The selected tool reads IncidentFlow data or an explicitly connected source and returns a
+   bounded structured result.
+5. Tools that create an IncidentFlow job or replace stored state declare those effects in their
+   descriptions and MCP behavior hints. They are not represented as read-only.
+
+Provider availability is release-specific. A public provider-status lookup is not a customer
+account integration, and draft/disabled providers are not part of the public contract. Incident
+memory and Grafana are release-blocked in this candidate.

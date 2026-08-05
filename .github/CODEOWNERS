@@ -1,0 +1,10 @@
+# Documentation contracts require a human owner. GitHub branch protection must
+# require Code Owner review for this file to become an enforceable merge gate.
+/fern/pages/ @NickChebo
+/fern/assets/downloads/ @NickChebo
+/openapi/ @NickChebo
+/docs/ @NickChebo
+/scripts/docs_governance.py @NickChebo
+/.github/workflows/docs.yml @NickChebo
+/.github/workflows/docs-drift.yml @NickChebo
+/.github/CODEOWNERS @NickChebo

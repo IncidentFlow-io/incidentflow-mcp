@@ -1,17 +1,23 @@
 # What is IncidentFlow MCP
 
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
 > **TL;DR**  
 > IncidentFlow MCP is an MCP-compatible incident intelligence platform for AI-powered SRE workflows.
 
-IncidentFlow MCP is an MCP-compatible service designed to make operational data (alerts, incidents, metrics, logs) accessible to AI systems in a structured and actionable way.
+IncidentFlow MCP is an MCP-compatible service designed to make incident context accessible to AI systems in a structured and actionable way.
 
-It acts as a bridge between:
+The current tool surface connects AI agents to:
 
-- Observability systems (Prometheus, CloudWatch, Grafana, etc.)
-- Incident management tools (PagerDuty, Slack, Jira)
-- AI agents (via MCP protocol)
+- IncidentFlow incident summaries and alert correlation
+- approved Slack incident channels and threads
+- connected Kubernetes clusters through the read-only agent
+- public provider-status pages through `external_status_check`
 
-Instead of raw alerts, IncidentFlow provides:
+`external_status_check` does not connect a customer's GitHub account or repositories. IncidentFlow
+does not currently advertise a customer GitHub integration.
+
+Instead of unbounded raw data, IncidentFlow provides:
 
 - normalized signals
 - correlated events
@@ -43,8 +49,11 @@ IncidentFlow MCP exposes operational intelligence via MCP so that AI agents can:
 
 ## Key capabilities
 
-- Event ingestion (alerts, logs, metrics)
-- Correlation engine (group related signals)
-- Incident graph (relationships between events)
-- Retrieval layer (historical knowledge)
+- Incident summaries and alert correlation
+- Read-only Slack and Kubernetes investigation
+- Public provider-status lookup
 - MCP interface for AI agents
+
+Incident memory and Grafana entries exist in source-level contract work but are not accepted public
+capabilities. Check the [tool catalog](../reference/tool-catalog.mdx) and the deployed `tools/list`
+result before relying on a capability.
