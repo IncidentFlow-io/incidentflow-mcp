@@ -3,6 +3,7 @@ Unit tests for the incident_summary tool.
 """
 
 import pytest
+from pydantic import ValidationError
 
 from incidentflow_mcp.tools.incident_summary import incident_summary
 from incidentflow_mcp.tools.schemas import IncidentSummaryInput, Severity
@@ -69,9 +70,9 @@ class TestIncidentSummaryUnknownId:
 
 class TestIncidentSummaryInputValidation:
     def test_empty_incident_id_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             IncidentSummaryInput(incident_id="")
 
     def test_too_long_incident_id_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             IncidentSummaryInput(incident_id="X" * 129)

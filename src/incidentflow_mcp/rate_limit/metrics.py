@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from threading import Lock
-from typing import Protocol
+from typing import ClassVar, Protocol
 
 
 class CounterLike(Protocol):
@@ -12,8 +12,8 @@ class CounterLike(Protocol):
 
 
 class _FallbackCounter:
-    _values: defaultdict[str, float] = defaultdict(float)
-    _lock = Lock()
+    _values: ClassVar[defaultdict[str, float]] = defaultdict(float)
+    _lock: ClassVar[Lock] = Lock()
 
     def __init__(self, name: str) -> None:
         self._name = name

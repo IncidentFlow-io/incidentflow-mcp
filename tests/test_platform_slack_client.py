@@ -2,10 +2,10 @@ import httpx
 import pytest
 
 from incidentflow_mcp.config import Settings
-from incidentflow_mcp.mcp.server import (
-    _platform_slack_error_json,
-    _resolve_slack_tool_access,
-    _workspace_context_required_error,
+from incidentflow_mcp.mcp.services.slack_access import (
+    platform_slack_error_json,
+    resolve_slack_tool_access,
+    workspace_context_required_error,
 )
 from incidentflow_mcp.platform_api.slack_client import PlatformSlackAPIError, PlatformSlackClient
 
@@ -50,7 +50,7 @@ def test_platform_slack_client_uses_scoped_internal_caller_headers() -> None:
 
 
 def test_mcp_platform_slack_error_json_preserves_code() -> None:
-    payload = _platform_slack_error_json(
+    payload = platform_slack_error_json(
         PlatformSlackAPIError(
             "slack_bot_not_in_channel",
             "Invite the IncidentFlow bot to this Slack channel.",
@@ -62,7 +62,7 @@ def test_mcp_platform_slack_error_json_preserves_code() -> None:
 
 
 def test_workspace_context_required_error_is_structured() -> None:
-    payload = _workspace_context_required_error()
+    payload = workspace_context_required_error()
 
     assert "mcp_workspace_context_required" in payload
     assert "Authorize the MCP client through IncidentFlow OAuth" in payload
@@ -78,7 +78,7 @@ def test_production_slack_access_requires_platform_mode() -> None:
     )
 
     with pytest.raises(ValueError, match="slack_platform_mode_required"):
-        _resolve_slack_tool_access(
+        resolve_slack_tool_access(
             settings,
             workspace_id=None,
             token_workspace_id="workspace-1",
@@ -94,7 +94,7 @@ def test_production_slack_access_uses_platform_client_even_with_legacy_token() -
         slack_bot_token="xoxb-legacy",
     )
 
-    token, platform_client = _resolve_slack_tool_access(
+    token, platform_client = resolve_slack_tool_access(
         settings,
         workspace_id=None,
         token_workspace_id="workspace-1",

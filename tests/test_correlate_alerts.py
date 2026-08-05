@@ -2,9 +2,10 @@
 Unit tests for the correlate_alerts tool.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts
 from incidentflow_mcp.tools.schemas import (
@@ -14,12 +15,11 @@ from incidentflow_mcp.tools.schemas import (
     Severity,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC)
 
 
 def _alert(
@@ -60,6 +60,20 @@ class TestCorrelateAlertsBasic:
         )
         assert len(result.clusters) == 1
         assert result.clusters[0].alert_ids == ["a1", "a2", "a3"]
+
+    def test_synthetic_alerts_do_not_claim_human_thread_context(self) -> None:
+        alerts = [
+            _alert("a1", "payments", labels={"namespace": "prod", "cluster": "main"}),
+            _alert("a2", "payments", labels={"namespace": "prod", "cluster": "main"}),
+        ]
+        result = correlate_alerts(
+            CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
+        )
+
+        cluster = result.clusters[0]
+        assert "shared human/thread context" not in cluster.evidence
+        assert "human thread context" not in cluster.evidence
+        assert cluster.human_context is None
 
     def test_alerts_in_separate_services_not_clustered(self) -> None:
         alerts = [
@@ -111,15 +125,27 @@ class TestCorrelateAlertsTimeWindow:
 
 
 class TestCorrelateAlertsLabelAffinity:
-    def test_shared_label_correlates_across_services(self) -> None:
+    def test_shared_workload_label_correlates_across_services(self) -> None:
         alerts = [
-            _alert("a1", "service-x", labels={"env": "prod"}),
-            _alert("a2", "service-y", labels={"env": "prod"}),
+            _alert("a1", "service-x", labels={"workload": "checkout"}),
+            _alert("a2", "service-y", labels={"workload": "checkout"}),
         ]
         result = correlate_alerts(
             CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
         )
         assert len(result.clusters) == 1
+        assert "same workload" in result.clusters[0].evidence
+
+    def test_same_environment_only_does_not_correlate_across_services(self) -> None:
+        alerts = [
+            _alert("a1", "checkout-api", labels={"env": "prod"}),
+            _alert("a2", "payments-db", labels={"env": "prod"}),
+        ]
+        result = correlate_alerts(
+            CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
+        )
+        assert result.clusters == []
+        assert set(result.uncorrelated_alert_ids) == {"a1", "a2"}
 
 
 class TestCorrelateAlertsMinClusterSize:
@@ -153,6 +179,29 @@ class TestCorrelateAlertsSeverity:
         )
         assert result.clusters[0].dominant_severity == Severity.CRITICAL
 
+    def test_warning_severity_is_accepted(self) -> None:
+        alerts = [
+            _alert("a1", "payments", severity=Severity.WARNING),
+            _alert("a2", "payments", severity=Severity.INFO),
+        ]
+        result = correlate_alerts(
+            CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
+        )
+        assert result.clusters[0].dominant_severity == Severity.WARNING
+
+    def test_cross_service_possible_cluster_does_not_claim_root_cause(self) -> None:
+        alerts = [
+            _alert("a1", "checkout-api", labels={"workload": "checkout"}),
+            _alert("a2", "auth-gateway", labels={"workload": "checkout"}),
+        ]
+        result = correlate_alerts(
+            CorrelateAlertsInput(alerts=alerts, window_minutes=60, min_cluster_size=2)
+        )
+        cluster = result.clusters[0]
+        assert cluster.confidence_level in {"possible", "probable"}
+        assert "missing dependency evidence" in cluster.likely_root_cause
+        assert cluster.missing_evidence
+
 
 class TestCorrelateAlertsResolvedAlerts:
     def test_resolved_alerts_go_to_uncorrelated(self) -> None:
@@ -169,14 +218,14 @@ class TestCorrelateAlertsResolvedAlerts:
 class TestCorrelateAlertsInputValidation:
     def test_no_firing_alerts_raises(self) -> None:
         alerts = [_alert("a1", "svc", status=AlertStatus.RESOLVED)]
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CorrelateAlertsInput(alerts=alerts)
 
     def test_empty_alerts_raises(self) -> None:
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CorrelateAlertsInput(alerts=[])
 
     def test_negative_window_raises(self) -> None:
         alerts = [_alert("a1", "svc")]
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             CorrelateAlertsInput(alerts=alerts, window_minutes=-1)

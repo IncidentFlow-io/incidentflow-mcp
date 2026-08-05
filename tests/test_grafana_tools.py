@@ -5,12 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from incidentflow_mcp.tools.grafana import (
-    _dns_summary_hints,
-    _join_limited,
     analyze_dashboard_health,
-    analyze_dns_dashboard,
     grafana_extract_panel_queries,
     grafana_get_dashboard,
+    grafana_get_panel_view,
     grafana_list_dashboards,
     grafana_metrics_query,
     grafana_metrics_query_range,
@@ -74,6 +72,31 @@ class FakeClient:
         )
         return self._payloads.get("analyze", {})
 
+    async def get_panel_view(
+        self,
+        *,
+        dashboard_uid: str,
+        panel_id: int,
+        start: str = "now-1h",
+        end: str = "now",
+        variables: dict[str, str | list[str]] | None = None,
+        max_points: int = 300,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "get_panel_view",
+                {
+                    "dashboard_uid": dashboard_uid,
+                    "panel_id": panel_id,
+                    "start": start,
+                    "end": end,
+                    "variables": variables or {},
+                    "max_points": max_points,
+                },
+            )
+        )
+        return self._payloads.get("get_panel_view", {})
+
 
 class TestListDashboards:
     async def test_maps_items_and_counts(self) -> None:
@@ -107,6 +130,51 @@ class TestGetDashboard:
         assert dumped["schemaVersion"] == 39
         assert client.calls == [("get_dashboard", {"dashboard_uid": "dns"})]
 
+    async def test_compact_mode_trims_dashboard_panels(self) -> None:
+        client = FakeClient(
+            get_dashboard={
+                "uid": "dns",
+                "title": "DNS",
+                "dashboard": {
+                    "uid": "dns",
+                    "title": "DNS",
+                    "panels": [
+                        {"id": 1, "title": "A", "type": "timeseries", "gridPos": {"x": 0}},
+                        {"id": 2, "title": "B", "type": "stat", "gridPos": {"x": 1}},
+                    ],
+                },
+            }
+        )
+
+        out = await grafana_get_dashboard(client, dashboard_uid="dns", panel_limit=1)
+        payload = out.model_dump()
+
+        assert payload["truncated"] is True
+        assert payload["dashboard"]["panels_returned"] == 1
+        assert payload["dashboard"]["panels_total"] == 2
+        assert payload["dashboard"]["panels"][0] == {"id": 1, "title": "A", "type": "timeseries"}
+        assert "Dashboard panels trimmed to 1." in payload["warnings"]
+
+    async def test_compact_mode_populates_top_level_metadata_from_nested_dashboard(self) -> None:
+        client = FakeClient(
+            get_dashboard={
+                "uid": "",
+                "title": "",
+                "dashboard": {
+                    "uid": "incidentflow-platform-api",
+                    "title": "IncidentFlow Platform API",
+                    "folder": "IncidentFlow",
+                    "panels": [],
+                },
+            }
+        )
+
+        out = await grafana_get_dashboard(client, dashboard_uid="incidentflow-platform-api")
+
+        assert out.uid == "incidentflow-platform-api"
+        assert out.title == "IncidentFlow Platform API"
+        assert out.folder == "IncidentFlow"
+
 
 class TestExtractQueries:
     async def test_maps_queries(self) -> None:
@@ -139,6 +207,44 @@ class TestMetricsQuery:
         assert out.series[0].samples[0].value == 1.0
         assert client.calls[0][1]["time"] == "123"
 
+    async def test_instant_query_compact_mode_trims_series_and_samples(self) -> None:
+        client = FakeClient(
+            query={
+                "datasource_uid": "ds1",
+                "query": "up",
+                "result_type": "vector",
+                "series": [
+                    {
+                        "metric": {"job": "a"},
+                        "samples": [
+                            {"timestamp": 1.0, "value": 1.0},
+                            {"timestamp": 2.0, "value": 2.0},
+                        ],
+                    },
+                    {
+                        "metric": {"job": "b"},
+                        "samples": [{"timestamp": 1.0, "value": 1.0}],
+                    },
+                ],
+            }
+        )
+
+        out = await grafana_metrics_query(
+            client,
+            datasource_uid="ds1",
+            query="up",
+            max_series=1,
+            max_points=1,
+        )
+        payload = out.model_dump()
+
+        assert payload["truncated"] is True
+        assert payload["series_returned"] == 1
+        assert payload["series_total"] == 2
+        assert len(payload["series"]) == 1
+        assert payload["series"][0]["samples"][0]["timestamp"] == 2.0
+        assert payload["series"][0]["samples_truncated"] is True
+
     async def test_range_query_passthrough(self) -> None:
         client = FakeClient(
             query_range={
@@ -158,6 +264,47 @@ class TestMetricsQuery:
         )
         assert out.result_type == "matrix"
         assert client.calls[0][1]["step"] == "60s"
+
+    async def test_range_query_compact_mode_trims_series_and_samples(self) -> None:
+        client = FakeClient(
+            query_range={
+                "datasource_uid": "ds1",
+                "query": "up",
+                "result_type": "matrix",
+                "series": [
+                    {
+                        "metric": {"job": "a"},
+                        "samples": [
+                            {"timestamp": 1.0, "value": 1.0},
+                            {"timestamp": 2.0, "value": 2.0},
+                        ],
+                    },
+                    {
+                        "metric": {"job": "b"},
+                        "samples": [{"timestamp": 1.0, "value": 1.0}],
+                    },
+                ],
+            }
+        )
+
+        out = await grafana_metrics_query_range(
+            client,
+            datasource_uid="ds1",
+            query="up",
+            start="now-6h",
+            end="now",
+            step="60s",
+            max_series=1,
+            max_points=1,
+        )
+        payload = out.model_dump()
+
+        assert payload["truncated"] is True
+        assert payload["series_returned"] == 1
+        assert payload["series_total"] == 2
+        assert len(payload["series"]) == 1
+        assert payload["series"][0]["samples"][0]["timestamp"] == 2.0
+        assert payload["series"][0]["samples_truncated"] is True
 
 
 class TestAnalyze:
@@ -207,95 +354,118 @@ class TestAnalyze:
         # Tools serialize via model_dump_json in the server layer.
         assert '"dashboard_uid":"dns"' in out.model_dump_json()
 
-
-class TestAnalyzeDnsDashboard:
-    async def test_adds_dns_panel_and_error_hints(self) -> None:
+    async def test_analyze_compact_mode_trims_panels_series_and_samples(self) -> None:
         client = FakeClient(
             analyze={
                 "dashboard_uid": "dns",
-                "dashboard_title": "DNS",
-                "time_range": "now-6h..now",
                 "panels": [
                     {
-                        "panel_title": "DNS Errors",
-                        "expr": "sum by (rcode) (rate(coredns_dns_responses_total[5m]))",
+                        "panel_title": "A",
                         "series": [
                             {
-                                "metric": {"rcode": "SERVFAIL"},
-                                "samples": [{"timestamp": 1.0, "value": 2.0}],
+                                "metric": {"job": "a"},
+                                "samples": [
+                                    {"timestamp": 1.0, "value": 1.0},
+                                    {"timestamp": 2.0, "value": 2.0},
+                                ],
                             },
                             {
-                                "metric": {"rcode": "NOERROR"},
-                                "samples": [{"timestamp": 1.0, "value": 10.0}],
+                                "metric": {"job": "b"},
+                                "samples": [{"timestamp": 1.0, "value": 1.0}],
                             },
                         ],
                     },
-                    {
-                        "panel_title": "Other",
-                        "expr": "up",
-                        "series": [
-                            {
-                                "metric": {"rcode": "NXDOMAIN"},
-                                "samples": [{"timestamp": 1.0, "value": 0.0}],
-                            }
-                        ],
-                    },
+                    {"panel_title": "B", "series": []},
                 ],
-                "summary_hints": ["2 panel queries analyzed"],
             }
         )
 
-        out = await analyze_dns_dashboard(client, dashboard_uid="dns")
+        out = await analyze_dashboard_health(
+            client,
+            dashboard_uid="dns",
+            panel_limit=1,
+            max_series=1,
+            max_points=1,
+        )
+        payload = out.model_dump()
 
-        assert out.summary_hints == [
-            "2 panel queries analyzed",
-            "DNS-focused panels detected: DNS Errors",
-            "DNS error response samples above zero: SERVFAIL (DNS Errors)",
-        ]
-        assert client.calls == [
-            (
-                "analyze",
-                {"dashboard_uid": "dns", "start": "now-6h", "end": "now", "step": None},
-            )
+        assert payload["truncated"] is True
+        assert payload["panels_returned"] == 1
+        assert payload["panels_total"] == 2
+        assert payload["panels"][0]["series_returned"] == 1
+        assert payload["panels"][0]["series_total"] == 2
+        assert payload["panels"][0]["series"][0]["samples_truncated"] is True
+        assert payload["summary_hints"] == [
+            "1 panel queries analyzed",
+            "0 rejected by guardrails",
+            "0 failed to query",
+            "0 with anomalies flagged",
         ]
 
-    async def test_reports_no_dns_panels(self) -> None:
-        out = await analyze_dns_dashboard(
-            FakeClient(
-                analyze={
-                    "dashboard_uid": "api",
-                    "panels": [{"panel_title": "API", "expr": "up", "series": []}],
-                    "summary_hints": [],
-                }
-            ),
-            dashboard_uid="api",
-            start="now-1h",
-            step="30s",
+
+class TestPanelView:
+    async def test_panel_view_maps_and_forwards(self) -> None:
+        client = FakeClient(
+            get_panel_view={
+                "version": "1",
+                "panel": {"id": 7, "title": "Request rate", "type": "timeseries"},
+                "dashboard": {"uid": "platform", "title": "Platform"},
+                "source": {"type": "grafana", "datasourceUid": "prom"},
+                "visualization": {
+                    "type": "line",
+                    "stacked": False,
+                    "showLegend": True,
+                    "showTooltip": True,
+                },
+                "timeRange": {"from": 1000, "to": 2000},
+                "variables": {"service": "platform-api"},
+                "series": [{"key": "series_0", "name": "api"}],
+                "data": [{"timestamp": 1000, "series_0": 1.0}],
+                "annotations": [],
+                "links": {"grafana": "https://grafana.test/d/platform/platform?viewPanel=7"},
+                "warnings": [],
+            }
         )
 
-        assert out.summary_hints == ["No DNS-focused panels detected by expression markers"]
+        out = await grafana_get_panel_view(
+            client,
+            dashboard_uid="platform",
+            panel_id=7,
+            start="now-1h",
+            end="now",
+            variables={"service": "platform-api"},
+            max_points=200,
+        )
 
+        assert out.panel["title"] == "Request rate"
+        assert out.source["datasourceUid"] == "prom"
+        assert out.data[0].model_extra == {"series_0": 1.0}
+        assert client.calls[0][0] == "get_panel_view"
+        assert client.calls[0][1]["max_points"] == 200
 
-class TestDnsSummaryHelpers:
-    async def test_join_limited_deduplicates_and_limits(self) -> None:
-        assert _join_limited(["a", "b", "a", "c", "d", "e", "f", "g"], limit=5) == "a, b, c, d, e, +2 more"
+    async def test_panel_view_adds_top_level_cardinality_metadata(self) -> None:
+        client = FakeClient(
+            get_panel_view={
+                "version": "1",
+                "panel": {"id": 7, "title": "Request rate", "type": "timeseries"},
+                "dashboard": {"uid": "platform", "title": "Platform"},
+                "source": {"type": "grafana", "datasourceUid": "prom"},
+                "visualization": {"type": "line"},
+                "timeRange": {"from": 1000, "to": 2000},
+                "variables": {},
+                "series": [{"key": "series_0", "name": "api"}, {"key": "series_1", "name": "web"}],
+                "data": [{"timestamp": 1000, "series_0": 1.0, "series_1": 2.0}],
+                "annotations": [],
+                "links": {"grafana": "https://grafana.test/d/platform/platform?viewPanel=7"},
+                "warnings": [],
+            }
+        )
 
-    async def test_dns_summary_hints_includes_limited_dns_panels(self) -> None:
-        payload = {
-            "dashboard_uid": "dns",
-            "dashboard_title": "DNS",
-            "panels": [
-                {"panel_title": f"DNS panel {i}", "expr": "coredns_dns_requests_total"}
-                for i in range(1, 8)
-            ],
-            "summary_hints": [],
-        }
-        out = await analyze_dns_dashboard(FakeClient(analyze=payload), dashboard_uid="dns")
+        out = await grafana_get_panel_view(client, dashboard_uid="platform", panel_id=7)
+        payload = out.model_dump()
 
-        assert out.summary_hints == [
-            "DNS-focused panels detected: DNS panel 1, DNS panel 2, DNS panel 3, DNS panel 4, DNS panel 5, +2 more"
-        ]
-
-    async def test_dns_summary_includes_no_dns_panel_warning(self) -> None:
-        hints = _dns_summary_hints([])
-        assert hints == ["No DNS-focused panels detected by expression markers"]
+        assert payload["series_returned"] == 2
+        assert payload["series_total"] == 2
+        assert payload["samples_returned"] == 1
+        assert payload["samples_total"] == 1
+        assert payload["truncated"] is False

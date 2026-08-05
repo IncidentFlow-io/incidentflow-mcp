@@ -180,17 +180,12 @@ def _build_mcp_post_request_examples() -> dict[str, Any]:
                 "params": {
                     "name": "correlate_alerts",
                     "arguments": {
-                        "alerts": [
-                            {
-                                "alert_id": "juniper-qa-001",
-                                "name": "CheckoutLatencyHigh",
-                                "service": "checkout-api",
-                                "severity": "high",
-                                "status": "firing",
-                                "fired_at": "2026-08-02T09:00:00Z",
-                                "labels": {"environment": "qa", "tenant": "junipercart"},
-                            }
-                        ],
+                        "alerts_json": (
+                            '[{"alert_id":"a1","name":"HighMemoryUsage",'
+                            '"service":"api-gateway","severity":"critical",'
+                            '"status":"firing","fired_at":"2024-01-15T10:00:00Z",'
+                            '"labels":{"env":"prod"}}]'
+                        ),
                         "window_minutes": 30,
                         "min_cluster_size": 1,
                         "execution_mode": "sync",
@@ -429,9 +424,8 @@ def _add_components(spec: dict[str, Any]) -> None:
             "type": "http",
             "scheme": "bearer",
             "description": (
-                "Bearer token auth. Production clients should use IncidentFlow OAuth or a "
-                "workspace-scoped managed token and request mcp:read plus mcp:tools:run. "
-                "Send credentials only in the Authorization header."
+                "Bearer token auth. In development with no auth provider configured, "
+                "/mcp may run unprotected."
             ),
         }
     }
@@ -500,8 +494,8 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
             "summary": "MCP Streamable HTTP handshake",
             "description": (
                 "MCP Streamable HTTP endpoint (custom ASGI proxy route). "
-                "GET is supported by transport and may be used by MCP clients for "
-                "handshake/session semantics."
+                "GET is supported by transport and may be used by MCP clients "
+                "for handshake/session semantics."
             ),
             "x-incidentflow-availability": "candidate",
             "x-incidentflow-human-review": "pending",
@@ -533,8 +527,6 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
             "description": (
                 "OPTIONS support for MCP endpoint (kept for CORS preflight compatibility)."
             ),
-            "x-incidentflow-availability": "candidate",
-            "x-incidentflow-human-review": "pending",
             "security": [{"bearerAuth": []}],
             "responses": {
                 "200": {
@@ -552,12 +544,9 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
             "operationId": "mcpPost",
             "summary": "MCP JSON-RPC endpoint",
             "description": (
-                "Primary MCP endpoint. Accepts JSON-RPC requests such as `initialize`, "
-                "`tools/list`, and `tools/call`. "
-                "Use a bearer credential with mcp:read and mcp:tools:run for a tool-using client. "
-                "Some responses may stream over SSE depending on client transport/session flow. "
-                "Default transport and tool limits are deployment policy; honor 429 response "
-                "headers."
+                "Primary MCP endpoint. Accepts JSON-RPC requests such as "
+                "`initialize`, `tools/list`, and `tools/call`. "
+                "Some responses may stream over SSE depending on client transport/session flow."
             ),
             "x-incidentflow-availability": "candidate",
             "x-incidentflow-human-review": "pending",
@@ -643,11 +632,9 @@ def _annotate_existing_paths(spec: dict[str, Any]) -> None:
                 continue
 
             if "operationId" not in operation or not operation["operationId"]:
-                normalized_path = path.strip("/").replace("/", "_").replace(".", "_")
-                operation["operationId"] = f"{method}_{normalized_path}"
-
-            if path in ops_tags:
-                operation["tags"] = [ops_tags[path]]
+                operation["operationId"] = (
+                    f"{method}_{path.strip('/').replace('/', '_').replace('.', '_')}"
+                )
 
             if path in public_paths:
                 operation["security"] = []

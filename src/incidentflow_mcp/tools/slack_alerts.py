@@ -12,24 +12,18 @@ from incidentflow_mcp.slack.thread_analyzer import (
     ThreadReplyAnalysis,
     analyze_replies,
     analyze_reply,
+    extract_commands,
     summarize_thread_for_sre,
 )
 
 ThreadMode = Literal["none", "metadata", "full"]
 
-_BEARER_SECRET_RE = re.compile(r"(?i)\bbearer\s+[^\s,;]+")
-_SLACK_TOKEN_RE = re.compile(r"(?i)\bxox[baprs]-[a-z0-9-]+")
-_KEY_VALUE_SECRET_RE = re.compile(
-    r"(?i)\b(token|password|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+"
-)
+_IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
-def _redact_untrusted_text(value: str) -> str:
-    """Remove credential-shaped values before Slack content enters tool output or analysis."""
-
-    redacted = _BEARER_SECRET_RE.sub("Bearer [REDACTED]", value)
-    redacted = _SLACK_TOKEN_RE.sub("[REDACTED]", redacted)
-    return _KEY_VALUE_SECRET_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", redacted)
+def _redact_ips(text: str) -> str:
+    """Mask IPv4 addresses so compact responses do not leak pod/node IPs."""
+    return _IPV4_RE.sub("[redacted-ip]", text)
 
 
 class SlackAlertContext(BaseModel):
@@ -69,9 +63,20 @@ class SlackAlertMessage(BaseModel):
     namespace: str | None = None
     pod: str | None = None
     severity: str | None = None
+    fingerprint: str | None = None
+    first_seen: str | None = None
+    last_seen: str | None = None
+    occurrences: int = 1
+    deduplicated: bool = False
+    monitoring_job: str | None = None
+    workload: str | None = None
+    business_service: str | None = None
     labels: dict[str, str] = Field(default_factory=dict)
     summary: str
     raw_text: str | None = None
+    # Commands (kubectl/helm/curl/...) extracted from the message regardless of
+    # raw_text inclusion, so raw mode adds evidence without removing next steps.
+    extracted_commands: list[str] = Field(default_factory=list)
     slack: SlackAlertContext | None = None
     thread: SlackThreadContext | None = None
 
@@ -81,6 +86,8 @@ class SlackAlertsOutput(BaseModel):
     channel_name: str | None = None
     requested_limit: int
     returned: int
+    parsed: int = 0
+    deduplicated: bool = True
     alerts: list[SlackAlertMessage] = Field(default_factory=list)
 
 
@@ -203,6 +210,62 @@ def _message_participants(message: dict[str, Any]) -> list[str]:
     return [str(user)] if user else []
 
 
+def _alert_datetime(alert: SlackAlertMessage) -> str | None:
+    return alert.datetime_utc or alert.fired_at
+
+
+def _alert_fingerprint(alert: SlackAlertMessage) -> str:
+    parts = [
+        alert.name or alert.alert_name or "unknown-alert",
+        alert.cluster or "",
+        alert.namespace or "",
+        alert.workload or alert.pod or "",
+        alert.monitoring_job or "",
+    ]
+    if not any(parts[1:]):
+        parts.append(alert.summary[:80])
+    return "|".join(str(part).strip().lower() for part in parts if str(part).strip())
+
+
+def _merge_duplicate_alerts(alerts: list[SlackAlertMessage]) -> list[SlackAlertMessage]:
+    merged: dict[str, SlackAlertMessage] = {}
+    order: list[str] = []
+    for alert in alerts:
+        fingerprint = alert.fingerprint or _alert_fingerprint(alert)
+        alert.fingerprint = fingerprint
+        seen_at = _alert_datetime(alert)
+        if fingerprint not in merged:
+            alert.first_seen = seen_at
+            alert.last_seen = seen_at
+            merged[fingerprint] = alert
+            order.append(fingerprint)
+            continue
+
+        current = merged[fingerprint]
+        current.occurrences += 1
+        current.deduplicated = True
+        current.alert_count = (
+            max(
+                value
+                for value in [current.alert_count or 0, alert.alert_count or 0]
+                if value is not None
+            )
+            or None
+        )
+        if seen_at:
+            current.first_seen = min(
+                value for value in [current.first_seen, seen_at] if value is not None
+            )
+            current.last_seen = max(
+                value for value in [current.last_seen, seen_at] if value is not None
+            )
+        if alert.status == "firing" or current.status is None:
+            current.status = alert.status
+        elif alert.status == "resolved" and current.status != "firing":
+            current.status = alert.status
+    return [merged[fingerprint] for fingerprint in order]
+
+
 async def _reply_username(
     *,
     client: SlackClient,
@@ -296,11 +359,21 @@ def _parse_alert_message(
         parts = display_name.split()
         if len(parts) >= 2:
             service = _clean_field(parts[1])
+    monitoring_job = (
+        service
+        if service and re.search(r"\b(kubernetes|prometheus|scrape|pods)\b", service)
+        else None
+    )
     cluster = _clean_field(_first_match([r"Cluster:\s*([^,\n]+)", r"\bcluster:\s*([^\n]+)"], text))
     namespace = _clean_field(
         _first_match([r"Namespace:\s*([^,\n]+)", r"\bnamespace:\s*([^\n]+)"], text)
     )
     pod = _clean_field(_first_match([r"^Pod:\s*(.+)$", r"\bpod:\s*([^\n]+)"], text))
+    workload = _clean_field(
+        _first_match(
+            [r"^Workload:\s*(.+)$", r"\bdeployment:\s*([^\n]+)", r"\bworkload:\s*([^\n]+)"], text
+        )
+    )
     severity = _infer_severity(text)
     labels = {
         key: value
@@ -312,7 +385,13 @@ def _parse_alert_message(
         if value
     }
 
-    return SlackAlertMessage(
+    # Compact mode (default): drop raw_text and redact IPs so the response stays
+    # small and safe for LLM safety layers. Commands stay available in all modes.
+    extracted_commands = extract_commands(text)
+    if not include_raw:
+        summary = _redact_ips(summary)
+
+    alert = SlackAlertMessage(
         alert_id=f"slack-{ts}" if ts else None,
         name=alert_name,
         display_name=display_name,
@@ -331,9 +410,13 @@ def _parse_alert_message(
         namespace=namespace,
         pod=pod,
         severity=severity,
+        monitoring_job=monitoring_job,
+        workload=workload,
+        business_service=None if monitoring_job == service else service,
         labels=labels,
         summary=summary,
         raw_text=text if include_raw else None,
+        extracted_commands=extracted_commands,
         slack=SlackAlertContext(
             channel_id=channel_id,
             channel_name=channel_name,
@@ -343,6 +426,10 @@ def _parse_alert_message(
             thread_permalink=thread_permalink or permalink,
         ),
     )
+    alert.fingerprint = _alert_fingerprint(alert)
+    alert.first_seen = datetime_utc
+    alert.last_seen = datetime_utc
+    return alert
 
 
 async def fetch_slack_alerts(
@@ -355,6 +442,7 @@ async def fetch_slack_alerts(
     thread_mode: ThreadMode = "none",
     max_thread_replies: int = 20,
     include_system_messages: bool = False,
+    deduplicate: bool = True,
     client: Any | None = None,
 ) -> SlackAlertsOutput:
     if client is None:
@@ -404,11 +492,17 @@ async def fetch_slack_alerts(
 
         alerts.append(parsed)
 
+    parsed_count = len(alerts)
+    if deduplicate:
+        alerts = _merge_duplicate_alerts(alerts)
+
     return SlackAlertsOutput(
         channel_id=channel_id,
         channel_name=channel_name,
         requested_limit=limit,
         returned=len(alerts),
+        parsed=parsed_count,
+        deduplicated=deduplicate,
         alerts=alerts,
     )
 
@@ -419,6 +513,7 @@ async def fetch_slack_alert_thread(
     channel_id: str,
     message_ts: str,
     include_root: bool = True,
+    include_raw: bool = False,
     max_replies: int = 50,
     client: Any | None = None,
 ) -> SlackAlertThreadOutput:
@@ -443,7 +538,7 @@ async def fetch_slack_alert_thread(
             channel_id=channel_id,
             channel_name=None,
             permalink=root_permalink,
-            include_raw=include_root,
+            include_raw=include_raw,
             thread_permalink=root_permalink,
         )
         if root_message is not None and include_root

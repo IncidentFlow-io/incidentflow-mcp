@@ -19,13 +19,39 @@ COPY uv.lock* ./
 RUN uv sync --frozen --no-install-project --no-dev
 
 # ---------------------------------------------------------------------------
+# ChatGPT Apps SDK widget bundle
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS widget
+
+WORKDIR /widget
+
+COPY apps/chatgpt-widgets/package.json apps/chatgpt-widgets/package-lock.json ./
+RUN npm ci
+
+COPY apps/chatgpt-widgets/ ./
+RUN npm run build
+
+# ---------------------------------------------------------------------------
 # Runtime image
 # ---------------------------------------------------------------------------
 FROM base AS runtime
 
+ARG MCP_BUILD_SERVICE=incidentflow-mcp
+ARG MCP_BUILD_VERSION=0.1.0
+ARG MCP_BUILD_TAG=
+ARG MCP_BUILD_COMMIT=
+ARG MCP_BUILD_BUILT_AT=
+ARG MCP_BUILD_ENVIRONMENT=development
+
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    MCP_BUILD_SERVICE="${MCP_BUILD_SERVICE}" \
+    MCP_BUILD_VERSION="${MCP_BUILD_VERSION}" \
+    MCP_BUILD_TAG="${MCP_BUILD_TAG}" \
+    MCP_BUILD_COMMIT="${MCP_BUILD_COMMIT}" \
+    MCP_BUILD_BUILT_AT="${MCP_BUILD_BUILT_AT}" \
+    MCP_BUILD_ENVIRONMENT="${MCP_BUILD_ENVIRONMENT}"
 
 WORKDIR /app
 
@@ -34,6 +60,7 @@ COPY --from=deps /app/.venv /app/.venv
 
 # Copy application source
 COPY src/ ./src/
+COPY --from=widget /widget/dist/index.html ./src/incidentflow_mcp/assets/grafana-panel-widget/index.html
 COPY pyproject.toml ./
 COPY uv.lock* ./
 COPY README.md ./

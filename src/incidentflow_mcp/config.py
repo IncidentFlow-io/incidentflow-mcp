@@ -23,11 +23,20 @@ class Settings(BaseSettings):
     host: str = Field(default="0.0.0.0", description="Bind host")
     port: int = Field(default=8000, description="Bind port")
     log_level: str = Field(default="info", description="Logging level")
+    log_format: str = Field(
+        default="text",
+        description="Log format: text or json.",
+    )
     library_log_level: str = Field(
         default="warning",
         description="Default log level for noisy third-party libraries.",
     )
     environment: str = Field(default="development", description="Environment name")
+    incidentflow_env: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("INCIDENTFLOW_ENV"),
+        description="IncidentFlow runtime lane. Overrides ENVIRONMENT for user-facing status.",
+    )
     allow_unprotected_in_production: bool = Field(
         default=False,
         description=(
@@ -128,6 +137,24 @@ class Settings(BaseSettings):
             "when tool input omits workspace_id."
         ),
     )
+    shared_dev_kubernetes_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("SHARED_DEV_KUBERNETES_ENABLED"),
+        description="Enable shared development Kubernetes fallback outside production.",
+    )
+    shared_dev_kubernetes_agent_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "SHARED_DEV_KUBERNETES_AGENT_ID",
+            "SHARED_DEV_KUBERNETES_CLUSTER_ID",
+        ),
+        description="Shared development Kubernetes cluster/agent id used by platform-api.",
+    )
+    shared_dev_kubernetes_cluster_name: str = Field(
+        default="incidentflow-dev",
+        validation_alias=AliasChoices("SHARED_DEV_KUBERNETES_CLUSTER_NAME"),
+        description="Display name for the shared development Kubernetes cluster.",
+    )
 
     # When True, tokens must carry all required scopes for the endpoint they
     # access; requests missing a scope get 403.  Defaults to True in
@@ -147,6 +174,23 @@ class Settings(BaseSettings):
             return self.enforce_scopes
         return self.environment == "production"
 
+    def runtime_environment(self) -> str:
+        raw = (self.incidentflow_env or self.environment or "development").strip().lower()
+        aliases = {
+            "development": "dev",
+            "local": "dev",
+            "test": "dev",
+            "prod": "production",
+        }
+        return aliases.get(raw, raw)
+
+    def shared_dev_kubernetes_allowed(self) -> bool:
+        return (
+            self.runtime_environment() == "dev"
+            and self.shared_dev_kubernetes_enabled
+            and bool(self.shared_dev_kubernetes_agent_id)
+        )
+
     def managed_token_introspection_enabled(self) -> bool:
         """Return True when remote managed-token introspection is configured."""
         return bool(self.platform_api_base_url)
@@ -161,6 +205,66 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     mcp_server_name: str = Field(default="incidentflow-mcp", description="MCP server name")
     mcp_server_version: str = Field(default="0.1.0", description="MCP server version")
+    mcp_build_service: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_SERVICE", "BUILD_SERVICE"),
+        description="Service name embedded at image build time.",
+    )
+    mcp_build_version: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_VERSION", "BUILD_VERSION"),
+        description="Release version or image tag embedded at image build time.",
+    )
+    mcp_build_tag: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_TAG", "BUILD_TAG"),
+        description="Git release tag embedded at image build time.",
+    )
+    mcp_build_commit: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_COMMIT", "BUILD_COMMIT"),
+        description="Short git commit SHA embedded at image build time.",
+    )
+    mcp_build_built_at: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_BUILT_AT", "BUILD_BUILT_AT"),
+        description="UTC image build timestamp embedded at image build time.",
+    )
+    mcp_build_environment: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_BUILD_ENVIRONMENT", "BUILD_ENVIRONMENT"),
+        description="Release lane embedded at image build time, for example dev or prod.",
+    )
+    mcp_image_ref: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_REF", "IMAGE_REF"),
+        description="Container image reference deployed for this server.",
+    )
+    mcp_image_digest: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_DIGEST", "IMAGE_DIGEST"),
+        description="Container image digest deployed for this server.",
+    )
+    mcp_image_signed: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNED", "IMAGE_SIGNED"),
+        description="Whether CI signed the deployed container image.",
+    )
+    mcp_image_signature_verified: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_VERIFIED", "IMAGE_SIGNATURE_VERIFIED"),
+        description="Whether CI verified the deployed container image signature.",
+    )
+    mcp_image_signature_issuer: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_ISSUER", "IMAGE_SIGNATURE_ISSUER"),
+        description="OIDC issuer used for the deployed container image signature.",
+    )
+    mcp_image_signature_identity: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_IMAGE_SIGNATURE_IDENTITY", "IMAGE_SIGNATURE_IDENTITY"),
+        description="OIDC identity used for the deployed container image signature.",
+    )
     mcp_canonical_resource: str = Field(
         default="https://mcp.incidentflow.io/mcp",
         description="Canonical OAuth resource identifier for this MCP server",
@@ -187,6 +291,13 @@ class Settings(BaseSettings):
             "explicit persist_to_oms=true argument and is never enabled by this default."
         ),
     )
+    mcp_memory_consult_enabled: bool = Field(
+        default=True,
+        description=(
+            "When true, diagnostic tools consult semantic memory (runbooks/RCAs/similar "
+            "incidents) and attach a memory_context block to their response."
+        ),
+    )
     openai_domain_verification_path: str | None = Field(
         default=None,
         description=(
@@ -196,6 +307,10 @@ class Settings(BaseSettings):
     openai_domain_verification_token: SecretStr | None = Field(
         default=None,
         description="Optional OpenAI Apps domain verification token returned as plain text.",
+    )
+    grafana_public_base_url: str = Field(
+        default="https://grafana.incidentflow.io",
+        description="Public Grafana origin used by Apps SDK widget redirect CSP.",
     )
     slack_bot_token: SecretStr | None = Field(
         default=None,
@@ -234,6 +349,16 @@ class Settings(BaseSettings):
     observability_otlp_endpoint: str = Field(
         default="otel-collector.observability.svc.cluster.local:4317",
         description="gRPC OTLP endpoint for trace export.",
+    )
+    http_slow_request_threshold_ms: int = Field(
+        default=1000,
+        ge=1,
+        description="Emit a warning when an HTTP request is slower than this threshold.",
+    )
+    mcp_slow_tool_threshold_ms: int = Field(
+        default=3000,
+        ge=1,
+        description="Emit a warning when an MCP tool call is slower than this threshold.",
     )
     service_version: str = Field(
         default="0.0.0",

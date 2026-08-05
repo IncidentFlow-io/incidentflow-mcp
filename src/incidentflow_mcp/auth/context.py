@@ -8,10 +8,15 @@ from typing import TypedDict
 
 class AuthContext(TypedDict):
     authenticated: bool
+    auth_method: str | None
     bearer_token: str | None
     client_id: str | None
     workspace_id: str | None
+    workspace_name: str | None
+    workspace_slug: str | None
+    workspace_role: str | None
     user_id: str | None
+    email: str | None
     plan: str | None
 
 

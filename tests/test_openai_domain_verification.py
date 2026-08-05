@@ -45,4 +45,4 @@ def test_openai_domain_verification_does_not_shadow_oauth_metadata(
     response = auth_client.get("/.well-known/oauth-protected-resource")
 
     assert response.status_code == 200
-    assert response.json()["scopes_supported"] == ["mcp:read", "mcp:tools:run", "admin"]
+    assert response.json()["scopes_supported"] == ["mcp:read", "mcp:tools:run"]

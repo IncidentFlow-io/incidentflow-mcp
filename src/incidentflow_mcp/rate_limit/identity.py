@@ -48,9 +48,13 @@ class IdentityResolver:
         return ResolvedIdentity(
             authenticated=bool(auth_ctx.get("authenticated", False)),
             ip_address=_client_ip(request),
-            workspace_id=_normalize_value(auth_ctx.get("workspace_id") or request.headers.get("x-workspace-id")),
+            workspace_id=_normalize_value(
+                auth_ctx.get("workspace_id") or request.headers.get("x-workspace-id")
+            ),
             user_id=_normalize_value(auth_ctx.get("user_id") or request.headers.get("x-user-id")),
-            client_id=_normalize_value(auth_ctx.get("client_id") or request.headers.get("x-client-id")),
+            client_id=_normalize_value(
+                auth_ctx.get("client_id") or request.headers.get("x-client-id")
+            ),
             plan=self._resolve_plan(auth_ctx, request),
         )
 

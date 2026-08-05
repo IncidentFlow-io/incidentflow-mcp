@@ -8,6 +8,162 @@ The IncidentFlow MCP server is open-source under the MIT License.
 
 IncidentFlow Cloud platform and hosted services are proprietary.
 
+## Connect hosted MCP clients
+
+Use these steps when the MCP server is already deployed behind HTTPS, for
+example:
+
+- Development: `https://mcp-dev.incidentflow.io/mcp`
+- Production: `https://mcp.incidentflow.io/mcp`
+
+The hosted server uses OAuth 2.1 with PKCE. Clients should register the MCP
+server as a Streamable HTTP MCP server, run the OAuth login flow, and then call
+tools with the issued access token.
+
+Default MCP scopes:
+
+- `mcp:read` — connect to the MCP resource and read MCP resources/metadata.
+- `mcp:tools:run` — execute MCP tools.
+
+Do not request `admin` for normal hosted MCP clients. `openid`, `email`, and
+`profile` are only for explicit OpenID Connect identity flows; MCP tool access
+does not require them.
+
+### Quick HTTP checks
+
+Check that the MCP endpoint is protected and advertises OAuth metadata:
+
+```bash
+curl -i https://mcp-dev.incidentflow.io/mcp
+```
+
+Expected unauthenticated response:
+
+```http
+HTTP/2 401
+www-authenticate: Bearer resource_metadata="https://mcp-dev.incidentflow.io/.well-known/oauth-protected-resource"
+```
+
+Check authorization server metadata:
+
+```bash
+curl -sS https://mcp-dev.incidentflow.io/.well-known/oauth-authorization-server | jq
+```
+
+Expected fields include:
+
+```json
+{
+  "issuer": "https://mcp-dev.incidentflow.io",
+  "authorization_endpoint": "https://mcp-dev.incidentflow.io/authorize",
+  "token_endpoint": "https://mcp-dev.incidentflow.io/token",
+  "registration_endpoint": "https://mcp-dev.incidentflow.io/register",
+  "response_types_supported": ["code"],
+  "grant_types_supported": ["authorization_code", "refresh_token"],
+  "token_endpoint_auth_methods_supported": ["none"],
+  "code_challenge_methods_supported": ["S256"]
+}
+```
+
+For a normal MCP OAuth flow that requests only MCP scopes, the `/token` response
+must omit `id_token` completely. It must not return `"id_token": null`.
+
+Expected successful token shape:
+
+```json
+{
+  "access_token": "...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "scope": "mcp:read mcp:tools:run",
+  "refresh_token": "..."
+}
+```
+
+`id_token` is only expected for OpenID Connect flows that request the `openid`
+scope.
+
+### Claude Code
+
+Add the development MCP server:
+
+```bash
+claude mcp add --transport http incidentflow-dev https://mcp-dev.incidentflow.io/mcp
+```
+
+Authenticate with OAuth:
+
+```bash
+claude mcp login incidentflow-dev
+```
+
+Claude Code opens the browser. If the browser does not open, paste the printed
+authorization URL into a browser, complete login/consent, and return to the CLI
+when prompted.
+
+Verify the server is configured:
+
+```bash
+claude mcp list
+claude mcp get incidentflow-dev
+```
+
+Remove or re-authenticate when needed:
+
+```bash
+claude mcp logout incidentflow-dev
+claude mcp remove incidentflow-dev
+```
+
+Production uses the same commands with a different name and URL:
+
+```bash
+claude mcp add --transport http incidentflow https://mcp.incidentflow.io/mcp
+claude mcp login incidentflow
+```
+
+### Codex CLI
+
+Add the development MCP server:
+
+```bash
+codex mcp add incidentflow-dev \
+  --url https://mcp-dev.incidentflow.io/mcp \
+  --oauth-resource https://mcp-dev.incidentflow.io/mcp
+```
+
+Authenticate with OAuth and request the MCP scopes:
+
+```bash
+codex mcp login incidentflow-dev --scopes mcp:read,mcp:tools:run
+```
+
+Verify the server is configured:
+
+```bash
+codex mcp list
+codex mcp get incidentflow-dev
+codex mcp get incidentflow-dev --json
+```
+
+Remove or re-authenticate when needed:
+
+```bash
+codex mcp logout incidentflow-dev
+codex mcp remove incidentflow-dev
+```
+
+Production uses the same commands with a different name and URL:
+
+```bash
+codex mcp add incidentflow \
+  --url https://mcp.incidentflow.io/mcp \
+  --oauth-resource https://mcp.incidentflow.io/mcp
+
+codex mcp login incidentflow --scopes mcp:read,mcp:tools:run
+```
+
+
 ## Local API Docs (OpenAPI + Fern)
 
 This repository includes a code-derived OpenAPI spec and Fern docs config so contributors can inspect the full public API surface locally.
@@ -104,23 +260,33 @@ Check failing pods in staging
 
 Available read-only tools include:
 
+- `k8s_agent_status`
 - `k8s_connection_health`
 - `k8s_cluster_overview`
 - `k8s_namespace_overview`
-- `k8s_rbac_check`
-- `k8s_agent_status`
 - `k8s_list_namespaces`
 - `k8s_list_pods`
+- `k8s_show_unhealthy_pods`
 - `k8s_get_pod`
+- `k8s_describe_pod`
+- `k8s_debug_pod`
 - `k8s_get_pod_logs`
 - `k8s_list_events`
 - `k8s_list_deployments`
-- `k8s_list_services`
 - `k8s_get_rollout_status`
-- `k8s_show_unhealthy_pods`
 - `k8s_analyze_workload`
-- `k8s_describe_pod`
-- `k8s_debug_pod`
+- `k8s_list_services`
+- `k8s_rbac_check`
+
+To inspect the canonical tool metadata exported by this package:
+
+```bash
+uv run incidentflow-mcp tools list --json-output
+```
+
+Agents can call `incidentflow_capabilities` for a deterministic in-band
+inventory of the 39 operational tools grouped by category, without search
+ranking or result limits.
 
 Cluster selection behavior:
 
@@ -135,9 +301,164 @@ but it may not carry enough platform context for Kubernetes command dispatch.
 
 ### Grafana release status
 
-Grafana work exists in source but is not part of the verified public tool surface yet. Do not
-advertise or enable it for customers until the MCP registry imports cleanly, onboarding proves a
-real datasource query with least-privilege credentials, and its manual/E2E acceptance suite passes.
+The MCP package now ships Grafana read tools over the /mcp transport.
+All tools are read-only and rely on platform-api for allow-lists, PromQL guardrails, and label sanitization.
+
+MCP does not connect to Grafana directly and does not store a Grafana service
+account token. The request path is:
+
+```text
+MCP grafana_* tool
+  -> platform-api /internal/integrations/grafana/*
+  -> platform-api decrypts stored Grafana SA token
+  -> Grafana API / datasource proxy
+```
+
+The MCP-to-platform call uses `PLATFORM_API_INTERNAL_API_KEY` as
+`X-Internal-Api-Key`. The user-facing MCP bearer token is only used to resolve
+and authorize the workspace. If the token carries a workspace scope, an explicit
+different `workspace_id` is rejected with `workspace_scope_mismatch`.
+
+Available tools:
+- grafana_list_dashboards
+- grafana_get_dashboard
+- grafana_extract_panel_queries
+- grafana_metrics_query
+- grafana_metrics_query_range
+- analyze_dashboard_health
+
+Typical workflows:
+
+```text
+List approved dashboards: grafana_list_dashboards
+Read dashboard metadata: grafana_get_dashboard {"dashboard_uid":"dns"}
+Extract dashboard queries: grafana_extract_panel_queries {"dashboard_uid":"dns"}
+Run instant PromQL: grafana_metrics_query {"datasource_uid":"prometheus", "query":"sum(rate(http_requests_total[5m]))"}
+Run range PromQL: grafana_metrics_query_range {"datasource_uid":"prometheus", "query":"sum(rate(http_requests_total[5m]))", "start":"now-1h", "end":"now", "step":"30s"}
+Inspect full dashboard health: analyze_dashboard_health {"dashboard_uid":"dns", "start":"now-6h", "end":"now", "step":"60s"}
+```
+
+Production/dev prerequisites:
+
+- The workspace must have a connected Grafana integration in platform-api.
+- At least one dashboard must be saved in `grafana_allowed_dashboards`.
+- MCP must have `PLATFORM_API_BASE_URL` pointing to platform-api and
+  `PLATFORM_API_INTERNAL_API_KEY` configured.
+- MCP should have either a workspace-scoped token or
+  `MCP_DEFAULT_WORKSPACE_ID`/`INCIDENTFLOW_WORKSPACE_ID` configured for local
+  smoke tests.
+
+### Local Grafana smoke stack
+
+For local MCP testing, `docker-compose.yml` includes a `grafana-smoke` profile with:
+
+- Grafana on `http://localhost:3000`
+- Prometheus on `http://localhost:9090`
+- node-exporter on `http://localhost:9100`
+- Grafana.com dashboard `1860` imported automatically
+- a one-shot helper that creates a Grafana service-account token for platform-api
+
+Start the stack:
+
+```bash
+docker compose --profile grafana-smoke up -d prometheus node-exporter grafana grafana-dashboard-1860
+```
+
+Create and print a Grafana service-account token:
+
+```bash
+docker compose --profile grafana-smoke run --rm grafana-sa-token
+```
+
+Use the printed `GRAFANA_SA_TOKEN` with platform-api. For local-only testing,
+platform-api must allow private/loopback Grafana URLs:
+
+```bash
+GRAFANA_ALLOW_PRIVATE_URLS_FOR_DEV=true \
+AGENT_GATEWAY_URL=ws://host.docker.internal:8002/agents/ws \
+uv run uvicorn platform_api.main:app --reload --app-dir src --host 0.0.0.0 --port 8000
+```
+
+Connect platform-api to local Grafana with the service-account token:
+
+```bash
+curl -sS -X POST http://localhost:8000/api/v1/integrations/grafana/connect \
+  -H "Authorization: Bearer $PLATFORM_USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data "{\"grafana_url\":\"http://localhost:3000\",\"grafana_token\":\"$GRAFANA_SA_TOKEN\",\"default_datasource_uid\":\"prometheus\"}"
+```
+
+Then discover dashboards and save dashboard `1860` to the workspace allow-list:
+
+```bash
+curl -sS http://localhost:8000/api/v1/integrations/grafana/dashboards \
+  -H "Authorization: Bearer $PLATFORM_USER_TOKEN"
+
+curl -sS -X POST http://localhost:8000/api/v1/integrations/grafana/allowed-dashboards \
+  -H "Authorization: Bearer $PLATFORM_USER_TOKEN" \
+  -H "Content-Type: application/json" \
+  --data '{"dashboards":[{"dashboard_uid":"rYdddlPWk","title":"Node Exporter Full","folder":"","datasource_uid":"prometheus","enabled":true}]}'
+```
+
+Finally call MCP through the normal `/mcp` transport:
+
+```bash
+curl -sS http://127.0.0.1:8001/mcp \
+  -H "Authorization: Bearer $MCP_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"grafana_list_dashboards","arguments":{}}}'
+```
+
+### Creating an MCP PAT with workspace scope
+
+Grafana (and Kubernetes) tools resolve the workspace via the MCP bearer token.
+A token without a `workspace_id` will return empty results for any workspace-scoped tool.
+
+**Step 1 — find the workspace ID:**
+
+```bash
+# from the platform-api database
+psql $DATABASE_URL -c "SELECT id, name FROM workspaces;"
+# or from the platform-api REST API (when authenticated)
+curl -sS http://localhost:8000/api/v1/workspaces \
+  -H "Authorization: Bearer $PLATFORM_USER_TOKEN"
+```
+
+**Step 2 — create a PAT bound to that workspace:**
+
+```bash
+uv run incidentflow-mcp token create \
+  --name "local-dev" \
+  --workspace-id "<workspace-uuid>"
+```
+
+The `--workspace-id` flag was added specifically to avoid the empty-result
+issue where tokens created without it returned 0 dashboards from
+`grafana_list_dashboards`.
+
+**Step 3 — wire the token into `.vscode/mcp.json`:**
+
+```json
+{
+  "servers": {
+    "incidentflow-local": {
+      "url": "http://127.0.0.1:8001/mcp",
+      "type": "http",
+      "headers": {
+        "Authorization": "Bearer <token printed by token create>"
+      }
+    }
+  }
+}
+```
+
+**Revoke old tokens** (any previously created without `--workspace-id`):
+
+```bash
+uv run incidentflow-mcp token list      # find token IDs
+uv run incidentflow-mcp token revoke <token_id>
+```
 
 ### CI automation (GitHub Actions)
 
@@ -451,3 +772,62 @@ Example (full):
   "response_mode": "full"
 }
 ```
+
+---
+
+## Fixes and validation log
+
+### Bug: `grafana_metrics_query_range` returned HTTP 500
+
+**Root cause:** `start` / `end` values such as `now-15m` and `now` were forwarded
+verbatim to Prometheus via the Grafana datasource proxy.  Prometheus only accepts
+Unix timestamps or RFC 3339 strings — it does not support Grafana-style relative
+expressions.
+
+**Fix:** Added `_resolve_timestamp()` to
+`src/platform_api/infra/grafana/client.py`.  The function converts
+`now`, `now-<N><unit>` (ms / s / m / h / d / w) to integer Unix timestamps
+before the Grafana proxy call.  RFC 3339 strings and plain Unix timestamps pass
+through unchanged.
+
+```python
+# examples
+_resolve_timestamp("now")      → "1782836058"
+_resolve_timestamp("now-15m")  → "1782835158"
+_resolve_timestamp("now-6h")   → "1782814458"
+_resolve_timestamp("2026-01-01T00:00:00Z")  → "2026-01-01T00:00:00Z"  # passthrough
+```
+
+### Bug: `grafana_list_dashboards` returned 0 results
+
+**Root cause:** Tokens created with `incidentflow-mcp token create` did not
+accept a `--workspace-id` flag, so every PAT was stored with
+`workspace_id: null`.  The platform-api `/internal/integrations/grafana/allowed-dashboards`
+endpoint requires a workspace UUID to look up the allow-list.
+
+**Fix:** Added `--workspace-id UUID` option to `token create` and updated
+`token list` to show the workspace column.
+
+### Grafana tools — end-to-end smoke test results
+
+All 7 Grafana MCP tools verified against the local smoke stack
+(`docker compose --profile grafana-smoke`, dashboard `Node Exporter Full` / uid `rYdddlPWk`):
+
+| Tool | Result |
+|---|---|
+| `grafana_list_dashboards` | ✅ 1 dashboard returned |
+| `grafana_get_dashboard` | ✅ 31 panels, metadata correct |
+| `grafana_extract_panel_queries` | ✅ 284 PromQL expressions extracted |
+| `grafana_metrics_query` | ✅ instant query — 2 series, both UP |
+| `grafana_metrics_query_range` | ✅ 16 samples over 15 m — fixed by `_resolve_timestamp` |
+
+```
+up{} — last 15 min (step 60s)
+1.0 ┤ ●──●──●──●──●──●──●──●──●──●──●──●──●──●──●──● node-exporter:9100
+    │ ○──○──○──○──○──○──○──○──○──○──○──○──○──○──○──○ prometheus:9090
+0.0 ┤
+    └──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬──┬
+      -15  -14  -13  -12  -11  -10  -9  -8  -7  -6  -5  -4  -3  -2  -1   0 min
+```
+| `analyze_dashboard_health` | ✅ 284 panels, 0 errors, 124 rejected by guardrails |
+| `analyze_dns_dashboard` | ✅ 0 DNS panels (expected — Node Exporter is not a DNS dashboard) |

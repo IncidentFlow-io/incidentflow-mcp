@@ -7,10 +7,9 @@ before reaching tool logic.
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field, model_validator
-
 
 # ---------------------------------------------------------------------------
 # Shared enums
@@ -21,6 +20,7 @@ class Severity(StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
+    WARNING = "warning"
     LOW = "low"
     INFO = "info"
 
@@ -39,9 +39,13 @@ class AlertStatus(StrEnum):
 class IncidentSummaryInput(BaseModel):
     """Input for the incident_summary tool."""
 
-    incident_id: Annotated[str, Field(min_length=1, max_length=128, description="Unique incident identifier")]
+    incident_id: Annotated[
+        str, Field(min_length=1, max_length=128, description="Unique incident identifier")
+    ]
     include_timeline: bool = Field(default=True, description="Include event timeline in summary")
-    include_affected_services: bool = Field(default=True, description="Include impacted service list")
+    include_affected_services: bool = Field(
+        default=True, description="Include impacted service list"
+    )
 
 
 class TimelineEvent(BaseModel):
@@ -86,7 +90,9 @@ class Alert(BaseModel):
 class CorrelateAlertsInput(BaseModel):
     """Input for the correlate_alerts tool."""
 
-    alerts: Annotated[list[Alert], Field(min_length=1, max_length=500, description="List of alerts to correlate")]
+    alerts: Annotated[
+        list[Alert], Field(min_length=1, max_length=500, description="List of alerts to correlate")
+    ]
     window_minutes: int = Field(
         default=60,
         ge=1,
@@ -116,6 +122,9 @@ class AlertCluster(BaseModel):
     dominant_severity: Severity
     likely_root_cause: str
     confidence: Annotated[float, Field(ge=0.0, le=1.0)]
+    evidence: list[str] = Field(default_factory=list)
+    confidence_level: str = "possible"
+    missing_evidence: list[str] = Field(default_factory=list)
     human_context: dict[str, Any] | None = None
 
 

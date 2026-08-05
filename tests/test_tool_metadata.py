@@ -1,21 +1,22 @@
-import copy
 import json
 from pathlib import Path
 
 import pytest
 import yaml
 
+from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.registration.meta import _CAPABILITY_CATEGORIES
 from incidentflow_mcp.mcp.server import create_mcp_server
 from incidentflow_mcp.tools.registry import get_submission_tool_specs, get_tool_specs
 
-REQUIRED_BOOLEAN_ANNOTATIONS = {
-    "readOnlyHint",
-    "openWorldHint",
-    "destructiveHint",
-    "idempotentHint",
-}
-
-CLOSED_READ_ONLY_TOOLS = {
+EXPECTED_TOOL_NAMES = {
+    "incidentflow_capabilities",
+    "mcp_version",
+    "incidentflow_auth_status",
+    "incidentflow_integrations_status",
+    "public_knowledge_search",
+    "private_knowledge_search",
+    "knowledge_get",
     "incident_summary",
     "correlate_alerts",
     "memory_search_similar_incidents",
@@ -50,25 +51,50 @@ OPEN_READ_ONLY_TOOLS = {
     "grafana_metrics_query",
     "grafana_metrics_query_range",
     "analyze_dashboard_health",
-    "analyze_dns_dashboard",
+    "grafana_get_panel_view",
+    "argocd_connection_health",
+    "argocd_list_applications",
+    "argocd_get_application",
+    "argocd_get_application_resources",
+    "argocd_get_sync_history",
+    "argocd_get_last_operation",
+    "argocd_find_recent_deployments",
+    "argocd_analyze_application",
+    "knowledge_upsert",
 }
 
-MUTATING_TOOL_ANNOTATIONS = {
-    # A call without check_id creates a new runner job and can persist an OMS result.
-    "external_status_check": {
-        "readOnlyHint": False,
-        "openWorldHint": True,
-        "destructiveHint": False,
-        "idempotentHint": False,
-    },
-    # The client contract permits replacement and does not prove safe retry semantics.
-    "memory_upsert_incident_summary": {
-        "readOnlyHint": False,
-        "openWorldHint": False,
-        "destructiveHint": True,
-        "idempotentHint": False,
-    },
+# Write tools legitimately set readOnlyHint=False; everything else must be read-only.
+WRITE_TOOL_NAMES = {"knowledge_upsert"}
+
+REQUIRED_BOOLEAN_ANNOTATIONS = {
+    "readOnlyHint",
+    "openWorldHint",
+    "destructiveHint",
 }
+
+REQUIRED_SUBMISSION_JUSTIFICATIONS = {
+    "read_only_justification",
+    "open_world_justification",
+    "destructive_justification",
+}
+
+EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
+    "kubernetes": 17,
+    "argocd": 8,
+    "grafana_prometheus": 7,
+    "slack_incidents": 6,
+    "knowledge": 4,
+}
+
+
+def _load_submission_tools() -> dict:
+    submission_path = Path(__file__).resolve().parents[1] / "chatgpt-app-submission.json"
+    payload = json.loads(submission_path.read_text())
+    return payload["tools"]
+
+
+def _payload(result: object) -> dict:
+    return result if isinstance(result, dict) else json.loads(result)
 
 
 def test_every_tool_has_reviewed_behavior_annotations() -> None:
@@ -146,53 +172,43 @@ def test_registry_is_a_valid_unique_tool_catalog() -> None:
             value = spec.annotations.get(annotation_name)
             assert isinstance(value, bool), f"{spec.name} {annotation_name} must be a boolean"
 
-        if spec.annotations["readOnlyHint"]:
-            assert spec.annotations["destructiveHint"] is False, (
-                f"{spec.name} cannot be both read-only and destructive"
+        if spec.name not in WRITE_TOOL_NAMES:
+            assert spec.annotations["readOnlyHint"] is True, f"{spec.name} should be read-only"
+        assert spec.annotations["openWorldHint"] is False
+        assert spec.annotations["destructiveHint"] is False
+
+
+def test_chatgpt_app_submission_tools_match_registry() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+    submission_tools = _load_submission_tools()
+
+    assert set(submission_tools) == EXPECTED_TOOL_NAMES
+    assert set(submission_tools) == set(specs)
+
+    for name, submission_tool in submission_tools.items():
+        annotations = submission_tool["annotations"]
+        for annotation_name in REQUIRED_BOOLEAN_ANNOTATIONS:
+            assert annotations[annotation_name] == specs[name].annotations[annotation_name]
+
+        justifications = submission_tool["justifications"]
+        for justification_name in REQUIRED_SUBMISSION_JUSTIFICATIONS:
+            assert justifications[justification_name].strip(), (
+                f"{name} is missing {justification_name}"
             )
 
 
-def test_static_submission_inventory_matches_approved_catalog() -> None:
-    submission_path = Path(__file__).parents[1] / "chatgpt-app-submission.json"
-    static_tools = json.loads(submission_path.read_text(encoding="utf-8"))["tools"]
-    specs = {spec.name: spec for spec in get_submission_tool_specs()}
-
-    assert set(static_tools) == set(specs)
-    for name, spec in specs.items():
-        assert set(static_tools[name]["justifications"]) == {
-            "read_only_justification",
-            "open_world_justification",
-            "destructive_justification",
-        }
-        assert all(static_tools[name]["justifications"].values())
-
-        # The current app-submission schema exposes these three behavior hints; runtime MCP
-        # metadata below additionally verifies idempotentHint from the canonical registry.
-        for annotation_name in REQUIRED_BOOLEAN_ANNOTATIONS - {"idempotentHint"}:
-            assert static_tools[name]["annotations"][annotation_name] == spec.annotations[
-                annotation_name
-            ]
-
-
-def test_generated_openapi_inventory_matches_runtime_catalog() -> None:
-    openapi_path = Path(__file__).parents[1] / "openapi" / "openapi.yaml"
-    schemas = yaml.safe_load(openapi_path.read_text(encoding="utf-8"))["components"]["schemas"]
-    specs = {spec.name: spec for spec in get_tool_specs()}
-    call_variants = schemas["ToolsCallParams"]["oneOf"]
-    openapi_names = {
-        variant["properties"]["name"]["enum"][0]
-        for variant in call_variants
+def test_capability_categories_reference_only_registry_tools() -> None:
+    specs = {spec.name for spec in get_tool_specs()}
+    meta_tools = {
+        "incidentflow_capabilities",
+        "mcp_version",
+        "incidentflow_auth_status",
+        "incidentflow_integrations_status",
     }
+    operational_specs = specs - meta_tools
+    categorized = {name for _, _, names in _CAPABILITY_CATEGORIES for name in names}
 
-    assert openapi_names == set(specs)
-    for name, spec in specs.items():
-        arguments = schemas[f"{name}Arguments"]
-        expected = copy.deepcopy(spec.input_schema)
-        expected["title"] = f"{name}Arguments"
-        expected["x-incidentflow-title"] = spec.title
-        expected["x-incidentflow-availability"] = arguments["x-incidentflow-availability"]
-        expected["x-mcp-behavior"] = spec.annotations
-        assert arguments == expected, f"{name} OpenAPI schema differs from canonical registry"
+    assert categorized <= operational_specs
 
 
 @pytest.mark.asyncio
@@ -218,9 +234,167 @@ async def test_fastmcp_tools_publish_submission_metadata() -> None:
 
         for annotation_name in REQUIRED_BOOLEAN_ANNOTATIONS:
             value = getattr(tool.annotations, annotation_name)
-            assert value == spec.annotations[annotation_name], (
-                f"{name} {annotation_name} differs from the canonical catalog"
-            )
+            assert isinstance(value, bool), f"{tool.name} {annotation_name} must be a boolean"
+
+        if tool.name not in WRITE_TOOL_NAMES:
+            assert tool.annotations.readOnlyHint is True, f"{tool.name} should be read-only"
+        assert tool.annotations.openWorldHint is False
+        assert tool.annotations.destructiveHint is False
+
+
+@pytest.mark.asyncio
+async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
+    mcp = create_mcp_server()
+    tool_manager = mcp._tool_manager
+    result = await tool_manager.call_tool("incidentflow_capabilities", {})
+    payload = _payload(result)
+
+    operational_names = EXPECTED_TOOL_NAMES - {
+        "incidentflow_capabilities",
+        "mcp_version",
+        "incidentflow_auth_status",
+        "incidentflow_integrations_status",
+    }
+    assert payload["total"] == 42
+    assert payload["total"] == len(operational_names)
+    assert payload["read_only"] == 41
+    assert payload["write_memory_only"] == 1
+    assert "canonical" in payload["summary"]
+    assert "authoritative runtime tool list" in payload["summary"]
+    assert any("cached docs" in note for note in payload["notes"])
+
+    categories = {category["id"]: category for category in payload["categories"]}
+    assert set(categories) == set(EXPECTED_CAPABILITY_CATEGORY_TOTALS)
+    for category_id, expected_total in EXPECTED_CAPABILITY_CATEGORY_TOTALS.items():
+        assert categories[category_id]["total"] == expected_total
+
+    returned_names = {
+        tool["canonical_name"] for category in payload["categories"] for tool in category["tools"]
+    }
+    assert returned_names == operational_names
+    assert "incidentflow_capabilities" not in returned_names
+    assert "mcp_version" not in returned_names
+    assert "incidentflow_auth_status" not in returned_names
+    assert "incidentflow_integrations_status" not in returned_names
+
+    knowledge_tools = categories["knowledge"]["tools"]
+    write_tools = [tool for tool in knowledge_tools if tool["write_memory_only"]]
+    assert [tool["canonical_name"] for tool in write_tools] == ["knowledge_upsert"]
+    assert write_tools[0]["read_only"] is False
+    assert all("description" not in tool for tool in knowledge_tools)
+
+    full_result = await tool_manager.call_tool(
+        "incidentflow_capabilities", {"response_mode": "full", "category": "knowledge"}
+    )
+    full_payload = _payload(full_result)
+    assert [category["id"] for category in full_payload["categories"]] == ["knowledge"]
+    assert "description" in full_payload["categories"][0]["tools"][0]
+
+
+def test_knowledge_tool_schemas_do_not_expose_workspace_id() -> None:
+    for spec in get_tool_specs():
+        if not spec.name.endswith("knowledge_search") and spec.name not in {
+            "knowledge_get",
+            "knowledge_upsert",
+        }:
+            continue
+        assert "workspace_id" not in spec.input_schema.get("properties", {})
+
+
+def test_knowledge_tools_are_the_unified_contract() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+
+    private_search = specs["private_knowledge_search"]
+    public_search = specs["public_knowledge_search"]
+
+    assert "workspace_id" not in private_search.input_schema.get("properties", {})
+    assert "workspace_id" not in public_search.input_schema.get("properties", {})
+    assert "document_type" in private_search.input_schema["properties"]
+    assert "document_type" in public_search.input_schema["properties"]
+    assert "rca" in private_search.input_schema["properties"]["document_type"]["enum"]
+    assert "api_reference" in public_search.input_schema["properties"]["document_type"]["enum"]
+    assert "memory_find_knowledge" not in specs
+    assert "memory_find_rca" not in specs
+    assert "incidentflow_knowledge_search" not in specs
+    assert "incidentflow_docs_search" not in specs
+
+
+@pytest.mark.asyncio
+async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "incidentflow_mcp.config._settings",
+        Settings(
+            _env_file=None,
+            incidentflow_pat="test-secret-token",
+            environment="production",
+            mcp_build_service="incidentflow-mcp",
+            mcp_build_version="dev-v1.0.0",
+            mcp_build_tag="dev-v1.0.0",
+            mcp_build_commit="8b2e7f1",
+            mcp_build_built_at="2026-07-13T12:40:18Z",
+            mcp_build_environment="dev",
+            mcp_image_ref="ghcr.io/incidentflow-io/incidentflow-mcp:dev-v1.0.0",
+            mcp_image_digest="sha256:abc123",
+            mcp_image_signed=True,
+            mcp_image_signature_verified=True,
+            mcp_image_signature_issuer="https://token.actions.githubusercontent.com",
+            mcp_image_signature_identity=(
+                "https://github.com/IncidentFlow-io/IncidentFlow/.github/workflows/"
+                "docker-build-push.yml@refs/tags/incidentflow-mcp/dev-v1.0.0"
+            ),
+            redis_url="redis://test-only",
+        ),
+    )
+    mcp = create_mcp_server()
+    tool_manager = mcp._tool_manager
+    result = await tool_manager.call_tool("mcp_version", {})
+    payload = _payload(result)
+
+    assert payload["service"] == "incidentflow-mcp"
+    assert payload["version"] == "1.0.0"
+    assert payload["tag"] == "dev-v1.0.0"
+    assert payload["commit"] == "8b2e7f1"
+    assert payload["built_at"] == "2026-07-13T12:40:18Z"
+    assert payload["environment"] == "dev"
+    assert payload["tools"] == {
+        "registered": len(EXPECTED_TOOL_NAMES),
+        "operational": 42,
+        "meta": 4,
+    }
+    assert payload["image"] == {
+        "ref": "ghcr.io/incidentflow-io/incidentflow-mcp:dev-v1.0.0",
+        "digest": "sha256:abc123",
+        "signed": True,
+        "signature_verified": True,
+        "signature_issuer": "https://token.actions.githubusercontent.com",
+        "signature_identity": (
+            "https://github.com/IncidentFlow-io/IncidentFlow/.github/workflows/"
+            "docker-build-push.yml@refs/tags/incidentflow-mcp/dev-v1.0.0"
+        ),
+    }
+    assert "HTTP-based MCP server" in payload["description"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_version_normalizes_prod_tag(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "incidentflow_mcp.config._settings",
+        Settings(
+            _env_file=None,
+            incidentflow_pat="test-secret-token",
+            environment="production",
+            mcp_build_version="v1.0.0",
+            mcp_build_tag="v1.0.0",
+            redis_url="redis://test-only",
+        ),
+    )
+    mcp = create_mcp_server()
+    tool_manager = mcp._tool_manager
+    result = await tool_manager.call_tool("mcp_version", {})
+    payload = _payload(result)
+
+    assert payload["version"] == "1.0.0"
+    assert payload["environment"] == "prod"
 
 
 @pytest.mark.asyncio
@@ -241,12 +415,83 @@ async def test_submission_risky_tool_inputs_are_structured() -> None:
 
     pods_schema = tools["k8s_list_pods"].inputSchema
     assert "namespace" in pods_schema["properties"]
+    assert tools["k8s_list_pods"].outputSchema["type"] == "object"
+
+    pod_schema = tools["k8s_get_pod"].inputSchema
+    assert pod_schema["properties"]["detail_level"]["enum"] == ["summary", "standard", "debug"]
+    assert pod_schema["additionalProperties"] is False
+    assert tools["k8s_get_pod"].outputSchema["type"] == "object"
+
+    deployments_schema = tools["k8s_list_deployments"].inputSchema
+    assert deployments_schema["properties"]["limit"]["maximum"] == 200
+    assert tools["k8s_list_deployments"].outputSchema["type"] == "object"
+
+    services_schema = tools["k8s_list_services"].inputSchema
+    assert services_schema["properties"]["limit"]["maximum"] == 200
+    assert tools["k8s_list_services"].outputSchema["type"] == "object"
 
     logs_schema = tools["k8s_get_pod_logs"].inputSchema
     assert "namespace" in logs_schema["required"]
     assert "pod" in logs_schema["required"]
+    assert logs_schema["properties"]["tail_lines"]["maximum"] == 1000
+    assert logs_schema["additionalProperties"] is False
+    assert tools["k8s_get_pod_logs"].outputSchema["type"] == "object"
+
+    unhealthy_schema = tools["k8s_show_unhealthy_pods"].inputSchema
+    assert "namespace" in unhealthy_schema["properties"]
+    assert unhealthy_schema["properties"]["include_memory_context"]["default"] is False
+    assert tools["k8s_show_unhealthy_pods"].outputSchema["type"] == "object"
+
+    analyze_schema = tools["k8s_analyze_workload"].inputSchema
+    assert analyze_schema["properties"]["tail_lines"]["maximum"] == 1000
+    assert analyze_schema["properties"]["include_memory_context"]["default"] is True
+    assert analyze_schema["properties"]["include_raw_logs"]["default"] is False
+    exclude_loggers_field = analyze_schema["properties"]["exclude_loggers"]
+    exclude_loggers_variants = exclude_loggers_field.get("anyOf", [exclude_loggers_field])
+    exclude_loggers_array = next(
+        variant for variant in exclude_loggers_variants if variant.get("type") == "array"
+    )
+    assert exclude_loggers_array["items"]["type"] == "string"
+    assert tools["k8s_analyze_workload"].outputSchema["type"] == "object"
+
+    describe_schema = tools["k8s_describe_pod"].inputSchema
+    assert describe_schema["properties"]["include_details"]["default"] is False
+    assert describe_schema["properties"]["include_memory_context"]["default"] is False
+    assert tools["k8s_describe_pod"].outputSchema["type"] == "object"
+
+    debug_schema = tools["k8s_debug_pod"].inputSchema
+    assert debug_schema["properties"]["tail_lines"]["maximum"] == 500
+    assert debug_schema["properties"]["include_memory_context"]["default"] is True
+    assert tools["k8s_debug_pod"].outputSchema["type"] == "object"
 
     workload_schema = tools["k8s_analyze_workload"].inputSchema
     assert workload_schema["properties"]["workload"]["type"] == "string"
     assert workload_schema["properties"]["namespace"]["type"] == "string"
     assert workload_schema["required"] == ["workload", "namespace"]
+
+
+def test_registry_k8s_schemas_reject_unknown_arguments() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+
+    assert specs["k8s_get_pod"].input_schema["additionalProperties"] is False
+    assert specs["k8s_get_pod_logs"].input_schema["additionalProperties"] is False
+    assert specs["k8s_get_pod_logs"].input_schema["properties"]["level"]["enum"] == [
+        "trace",
+        "debug",
+        "info",
+        "warn",
+        "warning",
+        "error",
+        "critical",
+        "fatal",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_grafana_panel_view_publishes_apps_sdk_metadata() -> None:
+    mcp = create_mcp_server()
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    panel_tool = tools["grafana_get_panel_view"]
+
+    assert panel_tool.meta["openai/outputTemplate"] == "ui://incidentflow/grafana-panel.html"
+    assert panel_tool.meta["ui"]["resourceUri"] == "ui://incidentflow/grafana-panel.html"

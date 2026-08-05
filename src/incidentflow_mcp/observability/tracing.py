@@ -58,14 +58,13 @@ def configure_tracing(
     resource = Resource.create(resource_attrs)
     provider = TracerProvider(resource=resource)
     provider.add_span_processor(
-        BatchSpanProcessor(
-            OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True)
-        )
+        BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint, insecure=True))
     )
     trace.set_tracer_provider(provider)
 
     try:
         from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
         HTTPXClientInstrumentor().instrument(tracer_provider=provider)
     except Exception:
         logger.debug("HTTPX auto-instrumentation unavailable")
@@ -80,10 +79,11 @@ def configure_tracing(
     )
 
 
-def get_tracer() -> "Tracer":
+def get_tracer() -> Tracer:
     """Return the module-scoped tracer; noop tracer when OTEL is unavailable."""
     try:
         from opentelemetry import trace
+
         return trace.get_tracer(_TRACER_NAME)
     except ImportError:
         return _NoopTracer()  # type: ignore[return-value]
@@ -93,6 +93,7 @@ def inject_trace_headers(headers: dict[str, str]) -> dict[str, str]:
     """Inject W3C traceparent/tracestate into an outbound HTTP headers dict."""
     try:
         from opentelemetry.propagate import inject
+
         inject(headers)
     except Exception:
         pass
@@ -103,6 +104,7 @@ def current_trace_context() -> tuple[str, str]:
     """Return (trace_id_hex, span_id_hex) of the active span, or ('', '')."""
     try:
         from opentelemetry import trace
+
         ctx = trace.get_current_span().get_span_context()
         if ctx.is_valid:
             return format(ctx.trace_id, "032x"), format(ctx.span_id, "016x")
@@ -123,23 +125,26 @@ def _normalize_env(value: str) -> str:
 class _NoopSpan:
     """No-op span returned by _NoopTracer so callers never get None."""
 
-    def set_attribute(self, *a, **kw): ...  # noqa: ANN002,ANN003
-    def set_status(self, *a, **kw): ...  # noqa: ANN002,ANN003
-    def record_exception(self, *a, **kw): ...  # noqa: ANN002,ANN003
-    def add_event(self, *a, **kw): ...  # noqa: ANN002,ANN003
+    def set_attribute(self, *a, **kw): ...
+    def set_status(self, *a, **kw): ...
+    def record_exception(self, *a, **kw): ...
+    def add_event(self, *a, **kw): ...
     def end(self): ...
-    def __enter__(self): return self
-    def __exit__(self, *a): ...  # noqa: ANN002
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a): ...
 
 
 class _NoopTracer:
     """Minimal stand-in so callers don't need to guard against None."""
 
-    def start_as_current_span(self, name: str, **kwargs):  # noqa: ANN001
+    def start_as_current_span(self, name: str, **kwargs):
         from contextlib import nullcontext
+
         return nullcontext(_NoopSpan())
 
-    def start_span(self, name: str, **kwargs):  # noqa: ANN001
+    def start_span(self, name: str, **kwargs):
         return _NoopSpan()
 
 
@@ -153,6 +158,7 @@ def instrument_fastapi_app(app: object) -> None:
         return
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
         FastAPIInstrumentor.instrument_app(app, tracer_provider=_provider)  # type: ignore[arg-type]
     except Exception:
         logger.debug("FastAPI auto-instrumentation unavailable")

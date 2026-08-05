@@ -38,10 +38,26 @@ _FAKE_INCIDENTS: dict[str, dict] = {
         ),
         "affected_services": ["payments-service", "checkout-service", "fraud-detection"],
         "timeline": [
-            {"timestamp": "2026-01-15T03:14:00Z", "description": "Alert fired: DB pool >90%", "actor": "prometheus"},
-            {"timestamp": "2026-01-15T03:15:30Z", "description": "PagerDuty escalation sent", "actor": "pagerduty"},
-            {"timestamp": "2026-01-15T03:22:00Z", "description": "On-call engineer acknowledged", "actor": "alice@example.com"},
-            {"timestamp": "2026-01-15T03:45:00Z", "description": "Missing index identified in slow query log", "actor": "alice@example.com"},
+            {
+                "timestamp": "2026-01-15T03:14:00Z",
+                "description": "Alert fired: DB pool >90%",
+                "actor": "prometheus",
+            },
+            {
+                "timestamp": "2026-01-15T03:15:30Z",
+                "description": "PagerDuty escalation sent",
+                "actor": "pagerduty",
+            },
+            {
+                "timestamp": "2026-01-15T03:22:00Z",
+                "description": "On-call engineer acknowledged",
+                "actor": "alice@example.com",
+            },
+            {
+                "timestamp": "2026-01-15T03:45:00Z",
+                "description": "Missing index identified in slow query log",
+                "actor": "alice@example.com",
+            },
         ],
         "recommendations": [
             "Add index on transactions(created_at, status) to reduce query latency",
@@ -62,10 +78,26 @@ _FAKE_INCIDENTS: dict[str, dict] = {
         ),
         "affected_services": ["notification-worker", "email-gateway"],
         "timeline": [
-            {"timestamp": "2026-02-03T11:00:00Z", "description": "Deployment notification-worker@v2.3.1 rolled out", "actor": "ci/cd"},
-            {"timestamp": "2026-02-03T11:45:00Z", "description": "OOMKilled pods detected — restartCount > 3", "actor": "kubernetes"},
-            {"timestamp": "2026-02-03T12:00:00Z", "description": "Rollback to v2.3.0 initiated", "actor": "bob@example.com"},
-            {"timestamp": "2026-02-03T12:05:00Z", "description": "Pods stable — incident mitigated", "actor": "bob@example.com"},
+            {
+                "timestamp": "2026-02-03T11:00:00Z",
+                "description": "Deployment notification-worker@v2.3.1 rolled out",
+                "actor": "ci/cd",
+            },
+            {
+                "timestamp": "2026-02-03T11:45:00Z",
+                "description": "OOMKilled pods detected — restartCount > 3",
+                "actor": "kubernetes",
+            },
+            {
+                "timestamp": "2026-02-03T12:00:00Z",
+                "description": "Rollback to v2.3.0 initiated",
+                "actor": "bob@example.com",
+            },
+            {
+                "timestamp": "2026-02-03T12:05:00Z",
+                "description": "Pods stable — incident mitigated",
+                "actor": "bob@example.com",
+            },
         ],
         "recommendations": [
             "Profile template renderer for memory leaks before re-deploying v2.3.1",
@@ -116,11 +148,7 @@ def incident_summary(input_data: IncidentSummaryInput) -> IncidentSummaryOutput:
     if input_data.include_timeline:
         for event in raw["timeline"]:
             ts = event["timestamp"]
-            dt = (
-                datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                if isinstance(ts, str)
-                else ts
-            )
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00")) if isinstance(ts, str) else ts
             timeline.append(
                 TimelineEvent(
                     timestamp=dt,

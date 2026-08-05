@@ -42,6 +42,21 @@ _SESSION_DURATION_BUCKETS = (
     14400.0,
 )
 
+# Practical latency buckets shared by the clean, service-scoped latency metrics.
+_LATENCY_BUCKETS = (
+    0.005,
+    0.01,
+    0.025,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.5,
+    5.0,
+    10.0,
+)
+
 _MCP_METHOD_TO_REQUEST_TYPE = {
     "initialize": "InitializeRequest",
     "ping": "PingRequest",
@@ -55,13 +70,20 @@ _MCP_METHOD_TO_REQUEST_TYPE = {
 }
 
 _TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
-_KNOWN_ROUTES = frozenset({
-    "/mcp",
-    "/healthz",
-    "/readyz",
-    "/metrics",
-    "/install.sh",
-})
+_KNOWN_ROUTES = frozenset(
+    {
+        "/mcp",
+        "/healthz",
+        "/readyz",
+        "/metrics",
+        "/install.sh",
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/openid-configuration",
+        "/.well-known/jwks.json",
+    }
+)
 
 http_requests_total = Counter(
     "http_requests_total",
@@ -129,10 +151,11 @@ mcp_request_type_duration_seconds = Histogram(
 )
 mcp_tool_requests_total = Counter(
     "mcp_tool_requests_total",
-    "Total MCP tool requests by tool/method/status/outcome.",
+    "Total MCP tool requests by category/tool/method/status/outcome.",
     (
         "namespace",
         "pod",
+        "category",
         "tool",
         "method",
         "status_code",
@@ -144,14 +167,19 @@ mcp_tool_requests_total = Counter(
 )
 mcp_tool_request_duration_seconds = Histogram(
     "mcp_tool_request_duration_seconds",
-    "MCP tool request latency in seconds by tool/method/outcome.",
-    ("namespace", "pod", "tool", "method", "outcome", "traffic_type"),
+    "MCP tool request latency in seconds by category/tool/method/outcome.",
+    ("namespace", "pod", "category", "tool", "method", "outcome", "traffic_type"),
     buckets=_HTTP_DURATION_BUCKETS,
 )
 mcp_tool_requests_in_flight = Gauge(
     "mcp_tool_requests_in_flight",
     "Current in-flight MCP tool requests.",
     ("namespace", "pod", "tool", "traffic_type"),
+)
+mcp_registered_tools = Gauge(
+    "mcp_registered_tools",
+    "Registered MCP tools from the runtime registry. Value is always 1 for each tool.",
+    ("tool", "category", "read_only"),
 )
 mcp_tool_errors_total = Counter(
     "mcp_tool_errors_total",
@@ -163,24 +191,129 @@ mcp_platform_api_jobs_errors_total = Counter(
     "Total platform-api async jobs client errors by operation and status code.",
     ("namespace", "pod", "operation", "status_code", "error_type"),
 )
+mcp_integration_guard_total = Counter(
+    "mcp_integration_guard_total",
+    "Integration guard decisions by tool, integration, result, and environment.",
+    ("tool", "integration", "result", "environment"),
+)
+mcp_auth_failures_total = Counter(
+    "mcp_auth_failures_total",
+    "Total MCP authentication failures by normalized reason.",
+    ("reason",),
+)
+mcp_auth_success_total = Counter(
+    "mcp_auth_success_total",
+    "Total MCP authentication successes by safe client identifier and auth method.",
+    ("client_id", "auth_method"),
+)
+
+_TOOL_CATEGORY_BY_NAME = {
+    # Meta
+    "incidentflow_capabilities": "meta",
+    "mcp_version": "meta",
+    "incidentflow_auth_status": "meta",
+    "incidentflow_integrations_status": "meta",
+    # Kubernetes
+    "k8s_agent_status": "kubernetes",
+    "k8s_connection_health": "kubernetes",
+    "k8s_cluster_overview": "kubernetes",
+    "k8s_namespace_overview": "kubernetes",
+    "k8s_list_namespaces": "kubernetes",
+    "k8s_list_pods": "kubernetes",
+    "k8s_show_unhealthy_pods": "kubernetes",
+    "k8s_get_pod": "kubernetes",
+    "k8s_describe_pod": "kubernetes",
+    "k8s_debug_pod": "kubernetes",
+    "k8s_get_pod_logs": "kubernetes",
+    "k8s_list_events": "kubernetes",
+    "k8s_list_deployments": "kubernetes",
+    "k8s_get_rollout_status": "kubernetes",
+    "k8s_analyze_workload": "kubernetes",
+    "k8s_list_services": "kubernetes",
+    "k8s_rbac_check": "kubernetes",
+    # Argo CD
+    "argocd_connection_health": "argocd",
+    "argocd_list_applications": "argocd",
+    "argocd_get_application": "argocd",
+    "argocd_get_application_resources": "argocd",
+    "argocd_get_sync_history": "argocd",
+    "argocd_get_last_operation": "argocd",
+    "argocd_find_recent_deployments": "argocd",
+    "argocd_analyze_application": "argocd",
+    # Grafana / Prometheus
+    "grafana_list_dashboards": "grafana_prometheus",
+    "grafana_get_dashboard": "grafana_prometheus",
+    "grafana_extract_panel_queries": "grafana_prometheus",
+    "grafana_metrics_query": "grafana_prometheus",
+    "grafana_metrics_query_range": "grafana_prometheus",
+    "analyze_dashboard_health": "grafana_prometheus",
+    "grafana_get_panel_view": "grafana_prometheus",
+    # Slack / Incidents
+    "slack_alerts_list": "slack_incidents",
+    "slack_alert_thread_get": "slack_incidents",
+    "incident_thread_summary": "slack_incidents",
+    "incident_summary": "slack_incidents",
+    "correlate_alerts": "slack_incidents",
+    "external_status_check": "slack_incidents",
+    # Knowledge
+    "public_knowledge_search": "knowledge",
+    "private_knowledge_search": "knowledge",
+    "knowledge_get": "knowledge",
+    "knowledge_upsert": "knowledge",
+}
+
+
+def tool_category(tool_name: str) -> str:
+    if tool_name == "unknown":
+        return "unknown"
+    return _TOOL_CATEGORY_BY_NAME.get(tool_name, "uncategorized")
+
+
+# Clean, low-cardinality latency histograms (service-scoped names, no prefix).
+tool_duration_seconds = Histogram(
+    "tool_duration_seconds",
+    "MCP tool execution latency in seconds by tool and outcome.",
+    ("tool", "status"),
+    buckets=_LATENCY_BUCKETS,
+)
+mcp_request_duration_seconds = Histogram(
+    "mcp_request_duration_seconds",
+    "Full MCP request latency in seconds from HTTP entrypoint to response.",
+    ("endpoint", "method"),
+    buckets=_LATENCY_BUCKETS,
+)
 
 
 def render_prometheus_metrics() -> bytes:
     return generate_latest()
 
 
+def publish_registered_tools(
+    rows: list[tuple[str, str, bool]] | tuple[tuple[str, str, bool], ...],
+) -> None:
+    """Publish registry inventory as a stable gauge independent of tool traffic."""
+    for tool, category, read_only in rows:
+        mcp_registered_tools.labels(
+            tool=tool,
+            category=category,
+            read_only="true" if read_only else "false",
+        ).set(1)
+
+
 def normalize_route(path: str) -> str:
     if path in _KNOWN_ROUTES:
         return path
-    return "other"
+    return "unmatched"
 
 
 def classify_traffic(route: str) -> str:
     if route in ("/healthz", "/readyz"):
-        return "probe"
+        return "health"
+    if route == "/metrics":
+        return "metrics"
     if route == "/mcp":
         return "business"
-    return "other"
+    return "internal"
 
 
 def classify_status(status_code: int) -> str:

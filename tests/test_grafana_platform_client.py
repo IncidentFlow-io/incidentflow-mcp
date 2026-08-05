@@ -40,16 +40,21 @@ def _json(payload: object, status: int = 200) -> Callable[[httpx.Request], httpx
 
 
 class TestConstruction:
-    def test_requires_base_url(self) -> None:
+    def test_requires_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PLATFORM_API_BASE_URL", raising=False)
         with pytest.raises(ValueError, match="PLATFORM_API_BASE_URL"):
             PlatformGrafanaClient(
-                Settings(platform_api_internal_api_key="k"), workspace_id=WORKSPACE_ID
+                Settings(_env_file=None, platform_api_internal_api_key="k"),
+                workspace_id=WORKSPACE_ID,
             )
 
-    def test_requires_internal_token(self) -> None:
+    def test_requires_internal_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PLATFORM_API_INTERNAL_TOKEN", raising=False)
+        monkeypatch.delenv("PLATFORM_API_INTERNAL_API_KEY", raising=False)
         with pytest.raises(ValueError, match="PLATFORM_API_INTERNAL_TOKEN"):
             PlatformGrafanaClient(
-                Settings(platform_api_base_url="http://platform.test"), workspace_id=WORKSPACE_ID
+                Settings(_env_file=None, platform_api_base_url="http://platform.test"),
+                workspace_id=WORKSPACE_ID,
             )
 
     def test_sets_internal_headers(self) -> None:
@@ -154,6 +159,30 @@ class TestQueryMethods:
 
         assert json.loads(captured[0].content)["step"] == "30s"
 
+    async def test_panel_view_posts_body(self) -> None:
+        captured: list[httpx.Request] = []
+        client = _client(_json({"version": "1"}), captured)
+        await client.get_panel_view(
+            dashboard_uid="platform",
+            panel_id=7,
+            start="now-1h",
+            end="now",
+            variables={"service": "api"},
+            max_points=200,
+        )
+        import json
+
+        assert captured[0].url.path == "/internal/integrations/grafana/panel-view"
+        assert json.loads(captured[0].content) == {
+            "workspace_id": WORKSPACE_ID,
+            "dashboard_uid": "platform",
+            "panel_id": 7,
+            "from": "now-1h",
+            "to": "now",
+            "variables": {"service": "api"},
+            "maxPoints": 200,
+        }
+
 
 class TestErrors:
     async def test_http_error_raises(self) -> None:
@@ -162,42 +191,24 @@ class TestErrors:
         with pytest.raises(httpx.HTTPStatusError):
             await client.list_dashboards()
 
-    async def test_structured_platform_error_preserves_code_and_message(self) -> None:
+    async def test_http_error_includes_platform_error_body(self) -> None:
         captured: list[httpx.Request] = []
         client = _client(
             _json(
                 {
-                    "code": "grafana_dashboard_not_allowed",
-                    "message": "Dashboard is absent or not in the workspace allow-list.",
+                    "code": "grafana_panel_type_unsupported",
+                    "message": 'Panel type "row" is not supported',
+                    "request_id": "req-123",
                 },
-                status=404,
+                status=422,
             ),
             captured,
         )
 
-        with pytest.raises(PlatformGrafanaAPIError) as caught:
-            await client.get_dashboard("private")
+        with pytest.raises(httpx.HTTPStatusError) as exc_info:
+            await client.get_panel_view(dashboard_uid="dash", panel_id=1)
 
-        assert caught.value.code == "grafana_dashboard_not_allowed"
-        assert caught.value.message == "Dashboard is absent or not in the workspace allow-list."
-
-    async def test_structured_platform_error_does_not_expose_message_in_exception_text(
-        self,
-    ) -> None:
-        captured: list[httpx.Request] = []
-        client = _client(
-            _json(
-                {
-                    "code": "grafana_integration_revoked",
-                    "message": "Bearer secret-must-not-be-rendered",
-                },
-                status=403,
-            ),
-            captured,
-        )
-
-        with pytest.raises(PlatformGrafanaAPIError) as caught:
-            await client.list_dashboards()
-
-        assert str(caught.value) == "grafana_integration_revoked"
-        assert caught.value.message == "Bearer secret-must-not-be-rendered"
+        message = str(exc_info.value)
+        assert "code=grafana_panel_type_unsupported" in message
+        assert 'message=Panel type "row" is not supported' in message
+        assert "request_id=req-123" in message

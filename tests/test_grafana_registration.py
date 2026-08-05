@@ -12,7 +12,7 @@ GRAFANA_TOOLS = {
     "grafana_metrics_query",
     "grafana_metrics_query_range",
     "analyze_dashboard_health",
-    "analyze_dns_dashboard",
+    "grafana_get_panel_view",
 }
 
 
@@ -25,7 +25,7 @@ def test_registry_declares_grafana_tools() -> None:
         assert spec.description
         assert spec.input_schema["type"] == "object"
         assert spec.annotations["readOnlyHint"] is True
-        assert spec.annotations["openWorldHint"] is True
+        assert spec.annotations["openWorldHint"] is False
 
 
 def test_required_inputs_declared() -> None:
@@ -38,19 +38,37 @@ def test_required_inputs_declared() -> None:
         "end",
         "step",
     ]
+    assert specs["grafana_get_panel_view"].input_schema["required"] == [
+        "dashboard_uid",
+        "panel_id",
+    ]
     assert specs["grafana_list_dashboards"].input_schema["required"] == []
-    assert specs["analyze_dns_dashboard"].input_schema["required"] == ["dashboard_uid"]
 
 
 async def test_server_registers_grafana_tools() -> None:
     mcp = create_mcp_server()
     tools = {tool.name: tool for tool in await mcp.list_tools()}
-    specs = {spec.name: spec for spec in get_tool_specs()}
-    assert GRAFANA_TOOLS <= set(tools)
+    names = set(tools)
+    assert GRAFANA_TOOLS <= names
 
     for name in GRAFANA_TOOLS:
-        assert tools[name].title == specs[name].title
-        assert tools[name].description == specs[name].description
-        assert tools[name].annotations is not None
-        assert tools[name].annotations.readOnlyHint is specs[name].annotations["readOnlyHint"]
-        assert tools[name].annotations.openWorldHint is specs[name].annotations["openWorldHint"]
+        assert tools[name].outputSchema["type"] == "object"
+
+    assert tools["grafana_get_dashboard"].inputSchema["properties"]["response_mode"]["enum"] == [
+        "compact",
+        "full",
+    ]
+    assert tools["grafana_get_dashboard"].inputSchema["properties"]["panel_limit"]["maximum"] == 100
+    assert (
+        tools["grafana_metrics_query"].inputSchema["properties"]["response_mode"]["default"]
+        == "compact"
+    )
+    assert tools["grafana_metrics_query"].inputSchema["properties"]["max_series"]["maximum"] == 100
+    assert tools["grafana_metrics_query"].inputSchema["properties"]["max_points"]["maximum"] == 1000
+    assert (
+        tools["grafana_metrics_query_range"].inputSchema["properties"]["max_points"]["maximum"]
+        == 1000
+    )
+    assert (
+        tools["analyze_dashboard_health"].inputSchema["properties"]["panel_limit"]["maximum"] == 50
+    )

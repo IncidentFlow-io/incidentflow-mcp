@@ -4,7 +4,7 @@ Shared pytest fixtures.
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -198,7 +198,7 @@ def repo_auth_client(
             token_hash=token_hash,
             name="test-repo-token",
             scopes=["mcp:read", "mcp:tools:run"],
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
     monkeypatch.setattr("incidentflow_mcp.auth.repository._repo", repo)

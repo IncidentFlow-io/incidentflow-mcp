@@ -23,8 +23,6 @@ def render_install_script(request: Request) -> str:
     mcp_url = f"{origin}/mcp"
 
     template = (
-        files("incidentflow_mcp.assets")
-        .joinpath(_INSTALL_TEMPLATE)
-        .read_text(encoding="utf-8")
+        files("incidentflow_mcp.assets").joinpath(_INSTALL_TEMPLATE).read_text(encoding="utf-8")
     )
     return template.replace("{{SERVER_ORIGIN}}", origin).replace("{{MCP_URL}}", mcp_url)

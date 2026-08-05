@@ -11,12 +11,9 @@ tools are unit-testable with a fake and stay decoupled from the httpx client.
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
-
-_DNS_EXPR_MARKERS = ("coredns_", "kube_dns", "dns")
-_DNS_ERROR_CODES = ("nxdomain", "servfail")
 
 
 class GrafanaReadClient(Protocol):
@@ -38,6 +35,16 @@ class GrafanaReadClient(Protocol):
         start: str = "now-6h",
         end: str = "now",
         step: str | None = None,
+    ) -> dict[str, Any]: ...
+    async def get_panel_view(
+        self,
+        *,
+        dashboard_uid: str,
+        panel_id: int,
+        start: str = "now-1h",
+        end: str = "now",
+        variables: dict[str, str | list[str]] | None = None,
+        max_points: int = 300,
     ) -> dict[str, Any]: ...
 
 
@@ -88,11 +95,15 @@ class MetricSample(BaseModel):
 
 
 class MetricSeries(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     metric: dict[str, str] = Field(default_factory=dict)
     samples: list[MetricSample] = Field(default_factory=list)
 
 
 class QueryOutput(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     datasource_uid: str = ""
     query: str = ""
     result_type: str = ""
@@ -101,6 +112,8 @@ class QueryOutput(BaseModel):
 
 
 class PanelAnalysis(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     panel_title: str = ""
     expr: str = ""
     datasource_uid: str | None = None
@@ -111,11 +124,205 @@ class PanelAnalysis(BaseModel):
 
 
 class AnalyzeOutput(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     dashboard_uid: str
     dashboard_title: str = ""
     time_range: str = ""
     panels: list[PanelAnalysis] = Field(default_factory=list)
     summary_hints: list[str] = Field(default_factory=list)
+
+
+class PanelViewDataPoint(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    timestamp: int
+
+
+class PanelViewOutput(BaseModel):
+    # Platform-api owns the full schema and aliases. MCP validates and relays the
+    # contract without adding raw Grafana responses or secrets.
+    model_config = ConfigDict(extra="allow")
+
+    version: str = "1"
+    panel: dict[str, Any]
+    dashboard: dict[str, Any]
+    source: dict[str, Any]
+    visualization: dict[str, Any]
+    timeRange: dict[str, Any]
+    variables: dict[str, str | list[str]] = Field(default_factory=dict)
+    series: list[dict[str, Any]] = Field(default_factory=list)
+    data: list[PanelViewDataPoint] = Field(default_factory=list)
+    annotations: list[dict[str, Any]] = Field(default_factory=list)
+    links: dict[str, str]
+    warnings: list[str] = Field(default_factory=list)
+
+
+ResponseMode = Literal["compact", "full"]
+
+
+def _append_warning(payload: dict[str, Any], warning: str) -> None:
+    warnings = payload.setdefault("warnings", [])
+    if isinstance(warnings, list) and warning not in warnings:
+        warnings.append(warning)
+
+
+def _trim_samples(
+    series: list[dict[str, Any]], *, max_points: int
+) -> tuple[list[dict[str, Any]], bool]:
+    truncated = False
+    compact_series: list[dict[str, Any]] = []
+    for item in series:
+        compact = dict(item)
+        samples = compact.get("samples")
+        if isinstance(samples, list) and len(samples) > max_points:
+            compact["samples"] = samples[-max_points:]
+            compact["samples_returned"] = max_points
+            compact["samples_total"] = len(samples)
+            compact["samples_truncated"] = True
+            truncated = True
+        compact_series.append(compact)
+    return compact_series, truncated
+
+
+def _compact_query_payload(
+    payload: dict[str, Any], *, max_series: int, max_points: int
+) -> dict[str, Any]:
+    compact = dict(payload)
+    series = compact.get("series")
+    if not isinstance(series, list):
+        return compact
+
+    total_series = len(series)
+    bounded_series, samples_truncated = _trim_samples(series[:max_series], max_points=max_points)
+    compact["series"] = bounded_series
+    compact["series_returned"] = len(bounded_series)
+    compact["series_total"] = compact.get("series_total", total_series)
+    if total_series > max_series or samples_truncated:
+        compact["truncated"] = True
+        reason = f"Metric series trimmed to {max_series} series and {max_points} samples each."
+        _append_warning(compact, reason)
+    return compact
+
+
+def _compact_dashboard_payload(payload: dict[str, Any], *, panel_limit: int) -> dict[str, Any]:
+    compact = dict(payload)
+    dashboard = compact.get("dashboard")
+    if not isinstance(dashboard, dict):
+        return compact
+
+    if not compact.get("uid") and dashboard.get("uid"):
+        compact["uid"] = dashboard.get("uid")
+    if not compact.get("title") and dashboard.get("title"):
+        compact["title"] = dashboard.get("title")
+    if not compact.get("folder") and dashboard.get("folder"):
+        compact["folder"] = dashboard.get("folder")
+
+    panels = dashboard.get("panels")
+    compact_dashboard = {
+        key: dashboard.get(key)
+        for key in ("uid", "title", "schemaVersion", "version", "refresh", "tags", "time")
+        if key in dashboard
+    }
+    if isinstance(panels, list):
+        compact_panels = []
+        for panel in panels[:panel_limit]:
+            if isinstance(panel, dict):
+                compact_panels.append(
+                    {
+                        key: panel.get(key)
+                        for key in ("id", "title", "type", "datasource", "targets")
+                        if key in panel
+                    }
+                )
+            else:
+                compact_panels.append(panel)
+        compact_dashboard["panels"] = compact_panels
+        compact_dashboard["panels_returned"] = len(compact_panels)
+        compact_dashboard["panels_total"] = len(panels)
+        if len(panels) > panel_limit:
+            compact["truncated"] = True
+            _append_warning(compact, f"Dashboard panels trimmed to {panel_limit}.")
+    compact["dashboard"] = compact_dashboard
+    return compact
+
+
+def _compact_analyze_payload(
+    payload: dict[str, Any], *, panel_limit: int, max_series: int, max_points: int
+) -> dict[str, Any]:
+    compact = dict(payload)
+    panels = compact.get("panels")
+    if not isinstance(panels, list):
+        return compact
+
+    total_panels = len(panels)
+    compact_panels: list[dict[str, Any]] = []
+    truncated = total_panels > panel_limit
+    for panel in panels[:panel_limit]:
+        if not isinstance(panel, dict):
+            continue
+        panel_copy = dict(panel)
+        series = panel_copy.get("series")
+        if isinstance(series, list):
+            panel_copy["series"], series_truncated = _trim_samples(
+                series[:max_series], max_points=max_points
+            )
+            panel_copy["series_returned"] = len(panel_copy["series"])
+            panel_copy["series_total"] = len(series)
+            truncated = truncated or len(series) > max_series or series_truncated
+        compact_panels.append(panel_copy)
+
+    compact["panels"] = compact_panels
+    compact["panels_returned"] = len(compact_panels)
+    compact["panels_total"] = total_panels
+    if truncated:
+        compact["summary_hints"] = _analyze_summary_hints(compact_panels)
+        compact["truncated"] = True
+        _append_warning(
+            compact,
+            (
+                f"Dashboard analysis trimmed to {panel_limit} panels, {max_series} series "
+                f"per panel, and {max_points} samples per series."
+            ),
+        )
+    return compact
+
+
+def _analyze_summary_hints(panels: list[dict[str, Any]]) -> list[str]:
+    if not panels:
+        return ["no Prometheus panels found on this dashboard"]
+    rejected = sum(
+        1
+        for panel in panels
+        if isinstance(panel.get("warning"), str) and panel["warning"].startswith("rejected")
+    )
+    failed = sum(
+        1
+        for panel in panels
+        if isinstance(panel.get("warning"), str) and panel["warning"].startswith("query failed")
+    )
+    with_anomalies = sum(1 for panel in panels if panel.get("anomalies"))
+    return [
+        f"{len(panels)} panel queries analyzed",
+        f"{rejected} rejected by guardrails",
+        f"{failed} failed to query",
+        f"{with_anomalies} with anomalies flagged",
+    ]
+
+
+def _with_panel_view_cardinality(payload: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(payload)
+    series = compact.get("series")
+    data = compact.get("data")
+
+    if isinstance(series, list):
+        compact.setdefault("series_returned", len(series))
+        compact.setdefault("series_total", len(series))
+    if isinstance(data, list):
+        compact.setdefault("samples_returned", len(data))
+        compact.setdefault("samples_total", len(data))
+    compact.setdefault("truncated", bool(compact.get("warnings")))
+    return compact
 
 
 # ---------------------------------------------------------------------------
@@ -130,9 +337,15 @@ async def grafana_list_dashboards(client: GrafanaReadClient) -> ListDashboardsOu
 
 
 async def grafana_get_dashboard(
-    client: GrafanaReadClient, *, dashboard_uid: str
+    client: GrafanaReadClient,
+    *,
+    dashboard_uid: str,
+    response_mode: ResponseMode = "compact",
+    panel_limit: int = 20,
 ) -> DashboardDetailOutput:
     payload = await client.get_dashboard(dashboard_uid)
+    if response_mode == "compact":
+        payload = _compact_dashboard_payload(payload, panel_limit=panel_limit)
     return DashboardDetailOutput.model_validate(payload)
 
 
@@ -145,9 +358,18 @@ async def grafana_extract_panel_queries(
 
 
 async def grafana_metrics_query(
-    client: GrafanaReadClient, *, datasource_uid: str, query: str, time: str | None = None
+    client: GrafanaReadClient,
+    *,
+    datasource_uid: str,
+    query: str,
+    time: str | None = None,
+    response_mode: ResponseMode = "compact",
+    max_series: int = 20,
+    max_points: int = 120,
 ) -> QueryOutput:
     payload = await client.query(datasource_uid=datasource_uid, query=query, time=time)
+    if response_mode == "compact":
+        payload = _compact_query_payload(payload, max_series=max_series, max_points=max_points)
     return QueryOutput.model_validate(payload)
 
 
@@ -159,10 +381,15 @@ async def grafana_metrics_query_range(
     start: str,
     end: str,
     step: str,
+    response_mode: ResponseMode = "compact",
+    max_series: int = 20,
+    max_points: int = 120,
 ) -> QueryOutput:
     payload = await client.query_range(
         datasource_uid=datasource_uid, query=query, start=start, end=end, step=step
     )
+    if response_mode == "compact":
+        payload = _compact_query_payload(payload, max_series=max_series, max_points=max_points)
     return QueryOutput.model_validate(payload)
 
 
@@ -173,89 +400,36 @@ async def analyze_dashboard_health(
     start: str = "now-6h",
     end: str = "now",
     step: str | None = None,
+    response_mode: ResponseMode = "compact",
+    panel_limit: int = 10,
+    max_series: int = 20,
+    max_points: int = 120,
 ) -> AnalyzeOutput:
     payload = await client.analyze(dashboard_uid=dashboard_uid, start=start, end=end, step=step)
+    if response_mode == "compact":
+        payload = _compact_analyze_payload(
+            payload, panel_limit=panel_limit, max_series=max_series, max_points=max_points
+        )
     return AnalyzeOutput.model_validate(payload)
 
 
-async def analyze_dns_dashboard(
+async def grafana_get_panel_view(
     client: GrafanaReadClient,
     *,
     dashboard_uid: str,
-    start: str = "now-6h",
+    panel_id: int,
+    start: str = "now-1h",
     end: str = "now",
-    step: str | None = None,
-) -> AnalyzeOutput:
-    analysis = await analyze_dashboard_health(
-        client, dashboard_uid=dashboard_uid, start=start, end=end, step=step
+    variables: dict[str, str | list[str]] | None = None,
+    max_points: int = 300,
+) -> PanelViewOutput:
+    payload = await client.get_panel_view(
+        dashboard_uid=dashboard_uid,
+        panel_id=panel_id,
+        start=start,
+        end=end,
+        variables=variables or {},
+        max_points=max_points,
     )
-    analysis.summary_hints = [
-        *analysis.summary_hints,
-        *_dns_summary_hints(analysis.panels),
-    ]
-    return analysis
-
-
-def _dns_summary_hints(panels: list[PanelAnalysis]) -> list[str]:
-    dns_panel_titles = _dns_panel_titles(panels)
-    hints: list[str] = []
-    if dns_panel_titles:
-        hints.append(f"DNS-focused panels detected: {_join_limited(dns_panel_titles)}")
-    else:
-        hints.append("No DNS-focused panels detected by expression markers")
-
-    error_code_panels = _dns_error_code_panels(panels)
-    if error_code_panels:
-        details = [
-            f"{code.upper()} ({_join_limited(titles)})"
-            for code, titles in error_code_panels.items()
-        ]
-        hints.append(f"DNS error response samples above zero: {'; '.join(details)}")
-    return hints
-
-
-def _dns_panel_titles(panels: list[PanelAnalysis]) -> list[str]:
-    return [
-        _panel_label(panel)
-        for panel in panels
-        if _contains_any(panel.expr, _DNS_EXPR_MARKERS)
-    ]
-
-
-def _dns_error_code_panels(panels: list[PanelAnalysis]) -> dict[str, list[str]]:
-    code_panels: dict[str, list[str]] = {}
-    for code in _DNS_ERROR_CODES:
-        titles: list[str] = []
-        for panel in panels:
-            if _panel_has_positive_code_sample(panel, code):
-                titles.append(_panel_label(panel))
-        if titles:
-            code_panels[code] = titles
-    return code_panels
-
-
-def _panel_has_positive_code_sample(panel: PanelAnalysis, code: str) -> bool:
-    for series in panel.series:
-        labels = [*series.metric.keys(), *series.metric.values()]
-        if not any(_contains_any(label, (code,)) for label in labels):
-            continue
-        if any(sample.value > 0 for sample in series.samples):
-            return True
-    return False
-
-
-def _contains_any(value: str, markers: tuple[str, ...]) -> bool:
-    normalized = value.lower()
-    return any(marker in normalized for marker in markers)
-
-
-def _panel_label(panel: PanelAnalysis) -> str:
-    return panel.panel_title.strip() or "untitled panel"
-
-
-def _join_limited(values: list[str], *, limit: int = 5) -> str:
-    unique_values = list(dict.fromkeys(values))
-    if len(unique_values) <= limit:
-        return ", ".join(unique_values)
-    remainder = len(unique_values) - limit
-    return f"{', '.join(unique_values[:limit])}, +{remainder} more"
+    payload = _with_panel_view_cardinality(payload)
+    return PanelViewOutput.model_validate(payload)

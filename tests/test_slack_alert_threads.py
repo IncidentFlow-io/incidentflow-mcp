@@ -4,7 +4,10 @@ from typing import Any, ClassVar
 
 import pytest
 
-from incidentflow_mcp.mcp.server import _normalize_slack_thread_mode
+from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
+from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.registration.slack import normalize_slack_thread_mode
+from incidentflow_mcp.mcp.server import create_mcp_server
 from incidentflow_mcp.slack.slack_client import SlackThreadFetchResult
 from incidentflow_mcp.tools import slack_alerts
 
@@ -140,6 +143,16 @@ class DuplicateThreadFakeSlackClient(FakeSlackClient):
         second = dict(ROOT)
         second["ts"] = "1710000000.000200"
         second["thread_ts"] = ROOT["ts"]
+        return [first, second]
+
+
+class DuplicateAlertFakeSlackClient(FakeSlackClient):
+    async def conversation_history(self, *, channel_id: str, limit: int) -> list[dict[str, Any]]:
+        _ = channel_id, limit
+        first = dict(ROOT)
+        first["ts"] = "1710000000.000100"
+        second = dict(ROOT)
+        second["ts"] = "1710000060.000100"
         return [first, second]
 
 
@@ -355,6 +368,7 @@ async def test_thread_fetch_rate_limit_warning_does_not_crash(
         limit=10,
         include_threads=True,
         thread_mode="full",
+        deduplicate=False,
     )
 
     assert result.alerts[0].thread is not None
@@ -371,10 +385,50 @@ async def test_full_mode_dedupes_thread_fetches(monkeypatch: pytest.MonkeyPatch)
         limit=10,
         include_threads=True,
         thread_mode="full",
+        deduplicate=False,
     )
 
     assert len(result.alerts) == 2
     assert FakeSlackClient.replies_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_alert_list_deduplicates_repeated_notifications(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", DuplicateAlertFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alerts(
+        token="x",
+        channel="#alerts",
+        limit=10,
+    )
+
+    assert result.parsed == 2
+    assert result.returned == 1
+    alert = result.alerts[0]
+    assert alert.fingerprint is not None
+    assert alert.occurrences == 2
+    assert alert.deduplicated is True
+    assert alert.first_seen == "2024-03-09T16:00:00.000100+00:00"
+    assert alert.last_seen == "2024-03-09T16:01:00.000100+00:00"
+
+
+@pytest.mark.asyncio
+async def test_alert_list_can_disable_deduplication(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", DuplicateAlertFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alerts(
+        token="x",
+        channel="#alerts",
+        limit=10,
+        deduplicate=False,
+    )
+
+    assert result.deduplicated is False
+    assert result.parsed == 2
+    assert result.returned == 2
+    assert [alert.occurrences for alert in result.alerts] == [1, 1]
 
 
 @pytest.mark.asyncio
@@ -446,12 +500,147 @@ async def test_incident_thread_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["commands"] == ["kubectl get pods -n cert-manager"]
 
 
+@pytest.mark.asyncio
+async def test_incident_thread_summary_flags_stale_cross_cluster_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", FakeSlackClient)
+
+    result = await slack_alerts.summarize_incident_thread(
+        token="x",
+        channel_id="C12345678",
+        thread_ts="1710000000.000100",
+        alert_context={
+            "alert_name": "InstanceDown",
+            "datetime_utc": "2024-03-09T16:00:00Z",
+            "labels": {"cluster": "minikube"},
+            "expected_cluster": "incidentflow-dev",
+        },
+    )
+
+    assert any("minikube" in risk and "incidentflow-dev" in risk for risk in result["risks"])
+    assert any("stale" in risk for risk in result["risks"])
+    assert result["open_questions"]
+
+
 def test_thread_mode_aliases_normalize_to_full() -> None:
-    assert _normalize_slack_thread_mode("summarize") == "full"
-    assert _normalize_slack_thread_mode("analysis") == "full"
-    assert _normalize_slack_thread_mode(" full ") == "full"
+    assert normalize_slack_thread_mode("summarize") == "full"
+    assert normalize_slack_thread_mode("analysis") == "full"
+    assert normalize_slack_thread_mode(" full ") == "full"
 
 
 def test_unknown_thread_mode_still_raises() -> None:
     with pytest.raises(ValueError, match="none, metadata, full"):
-        _normalize_slack_thread_mode("deep")
+        normalize_slack_thread_mode("deep")
+
+
+@pytest.mark.asyncio
+async def test_slack_alerts_list_rejects_zero_limit_before_slack_access(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "incidentflow_mcp.config._settings",
+        Settings(_env_file=None, environment="development", redis_url="redis://test-only"),
+    )
+
+    async def allow_tool(*args: object, **kwargs: object) -> None:
+        _ = args, kwargs
+        return None
+
+    monkeypatch.setattr(
+        "incidentflow_mcp.mcp.server.resolve_tool_integration_context",
+        allow_tool,
+    )
+    set_current_auth_context(
+        {
+            "authenticated": True,
+            "auth_method": "oauth",
+            "bearer_token": "token",
+            "client_id": "oauth-client",
+            "workspace_id": "ws_123",
+            "workspace_name": "Demo Workspace",
+            "workspace_slug": "demo",
+            "workspace_role": "owner",
+            "user_id": "user_123",
+            "email": "demo@example.com",
+            "plan": None,
+        }
+    )
+    try:
+        result = await create_mcp_server()._tool_manager.call_tool(
+            "slack_alerts_list",
+            {"channel": "alerts", "limit": 0},
+        )
+    finally:
+        clear_current_auth_context()
+
+    assert result["status"] == "failed"
+    assert result["error"]["message"] == "limit must be between 1 and 200"
+
+
+# ──────────────────────────────────────────────
+# include_raw compact/redacted behavior
+# ──────────────────────────────────────────────
+
+RAW_ROOT = {
+    "ts": "1710000000.000100",
+    "text": (
+        "[FIRING:1] PodUnreachable\nCluster: incidentflow\nNamespace: default\n"
+        "Description: critical - pod 10.0.5.42 unreachable\n"
+        "kubectl describe pod api-0 -n default"
+    ),
+    "reply_count": 0,
+    "reply_users": [],
+}
+
+
+class RawTextFakeSlackClient(FakeSlackClient):
+    async def thread_replies(
+        self,
+        *,
+        channel_id: str,
+        thread_ts: str,
+        max_replies: int,
+        include_root: bool = False,
+    ) -> SlackThreadFetchResult:
+        return SlackThreadFetchResult(root=RAW_ROOT, replies=[], messages=[RAW_ROOT])
+
+
+@pytest.mark.asyncio
+async def test_thread_get_default_omits_raw_and_extracts_commands(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", RawTextFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alert_thread(
+        token="x",
+        channel_id="C12345678",
+        message_ts="1710000000.000100",
+    )
+
+    root = result.root_alert
+    assert root is not None
+    assert root.raw_text is None
+    assert root.extracted_commands == ["kubectl describe pod api-0 -n default"]
+    assert "10.0.5.42" not in root.summary
+    assert "[redacted-ip]" in root.summary
+
+
+@pytest.mark.asyncio
+async def test_thread_get_include_raw_returns_raw_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(slack_alerts, "SlackClient", RawTextFakeSlackClient)
+
+    result = await slack_alerts.fetch_slack_alert_thread(
+        token="x",
+        channel_id="C12345678",
+        message_ts="1710000000.000100",
+        include_raw=True,
+    )
+
+    root = result.root_alert
+    assert root is not None
+    assert root.raw_text is not None
+    assert "10.0.5.42" in root.raw_text
+    assert root.extracted_commands == ["kubectl describe pod api-0 -n default"]

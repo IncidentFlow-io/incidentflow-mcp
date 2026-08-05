@@ -82,7 +82,7 @@ class PlatformGrafanaClient:
                 params=params,
                 headers=self._outbound_headers(),
             )
-        self._raise_for_platform_error(response)
+        _raise_for_status_with_body(response)
         return dict(response.json())
 
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -92,7 +92,7 @@ class PlatformGrafanaClient:
                 json=payload,
                 headers=self._outbound_headers(),
             )
-        self._raise_for_platform_error(response)
+        _raise_for_status_with_body(response)
         return dict(response.json())
 
     async def list_dashboards(self) -> list[dict[str, Any]]:
@@ -164,3 +164,55 @@ class PlatformGrafanaClient:
         if step is not None:
             body["step"] = step
         return await self._post(f"{_BASE_PATH}/analyze", body)
+
+    async def get_panel_view(
+        self,
+        *,
+        dashboard_uid: str,
+        panel_id: int,
+        start: str = "now-1h",
+        end: str = "now",
+        variables: dict[str, str | list[str]] | None = None,
+        max_points: int = 300,
+    ) -> dict[str, Any]:
+        """Return a normalized Apps SDK Grafana panel view."""
+        return await self._post(
+            f"{_BASE_PATH}/panel-view",
+            {
+                "workspace_id": self._workspace_id,
+                "dashboard_uid": dashboard_uid,
+                "panel_id": panel_id,
+                "from": start,
+                "to": end,
+                "variables": variables or {},
+                "maxPoints": max_points,
+            },
+        )
+
+
+def _raise_for_status_with_body(response: httpx.Response) -> None:
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        message = str(exc)
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if isinstance(payload, dict):
+            code = payload.get("code")
+            detail = payload.get("message") or payload.get("detail")
+            request_id = payload.get("request_id")
+            details = payload.get("details")
+            parts = []
+            if code:
+                parts.append(f"code={code}")
+            if detail:
+                parts.append(f"message={detail}")
+            if request_id:
+                parts.append(f"request_id={request_id}")
+            if details:
+                parts.append(f"details={details}")
+            if parts:
+                message = f"{message}; platform-api error: " + "; ".join(parts)
+        raise httpx.HTTPStatusError(message, request=exc.request, response=exc.response) from exc

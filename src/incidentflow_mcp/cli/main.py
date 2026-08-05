@@ -17,6 +17,7 @@ Usage:
 
 import json
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 
 import click
@@ -43,11 +44,19 @@ def cli() -> None:
 @click.option("--port", default=None, type=int, help="Bind port (overrides PORT env var)")
 @click.option("--reload", is_flag=True, default=False, help="Enable auto-reload (dev only)")
 @click.option("--log-level", default=None, help="Log level: debug|info|warning|error")
+@click.option("--log-format", default=None, help="Log format: text|json")
+@click.option(
+    "--library-log-level",
+    default=None,
+    help="Third-party logger level: debug|info|warning|error",
+)
 def serve(
     host: str | None,
     port: int | None,
     reload: bool,
     log_level: str | None,
+    log_format: str | None,
+    library_log_level: str | None,
 ) -> None:
     """Start the MCP HTTP server."""
     settings = get_settings()
@@ -55,9 +64,31 @@ def serve(
     _host = host or settings.host
     _port = port or settings.port
     _level = log_level or settings.log_level
+    _format = log_format or settings.log_format
+    _library_level = library_log_level or settings.library_log_level
 
-    configure_logging(_level, settings.library_log_level)
-    logger.info("launching server on %s:%d", _host, _port)
+    _propagate_server_settings_to_reload_child(
+        host=_host,
+        port=_port,
+        log_level=_level,
+        log_format=_format,
+        library_log_level=_library_level,
+    )
+    configure_logging(
+        _level,
+        _library_level,
+        _format,
+        service=settings.mcp_server_name,
+        service_version=settings.mcp_server_version,
+        environment=settings.runtime_environment(),
+    )
+    logger.info(
+        "server_launching",
+        extra={
+            "host": _host,
+            "port": _port,
+        },
+    )
 
     uvicorn.run(
         "incidentflow_mcp.app:create_app",
@@ -65,8 +96,26 @@ def serve(
         port=_port,
         factory=True,
         log_level=_level.lower(),
+        log_config=None,
+        access_log=False,
         reload=reload,
     )
+
+
+def _propagate_server_settings_to_reload_child(
+    *,
+    host: str,
+    port: int,
+    log_level: str,
+    log_format: str,
+    library_log_level: str,
+) -> None:
+    """Keep uvicorn reload child settings aligned with CLI flags."""
+    os.environ["HOST"] = host
+    os.environ["PORT"] = str(port)
+    os.environ["LOG_LEVEL"] = log_level
+    os.environ["LOG_FORMAT"] = log_format
+    os.environ["LIBRARY_LOG_LEVEL"] = library_log_level
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +143,15 @@ def token_group() -> None:
     metavar="DAYS",
     help="Expire the token after N days (default: never)",
 )
-def token_create(name: str, scopes: str, expires_in_days: int | None) -> None:
+@click.option(
+    "--workspace-id",
+    default=None,
+    metavar="UUID",
+    help="Workspace UUID to bind this token to (required for Grafana/K8s tools)",
+)
+def token_create(
+    name: str, scopes: str, expires_in_days: int | None, workspace_id: str | None
+) -> None:
     """Generate a new Personal Access Token and store it in the token DB."""
     from incidentflow_mcp.auth.repository import JsonTokenRepository, TokenRecord
     from incidentflow_mcp.auth.tokens import generate_pat
@@ -111,17 +168,19 @@ def token_create(name: str, scopes: str, expires_in_days: int | None) -> None:
         scopes=scope_list,
         created_at=now,
         expires_at=expires_at,
+        workspace_id=workspace_id,
     )
 
     repo = JsonTokenRepository()
     repo.save(record)
 
     click.echo("\nToken created successfully!\n")
-    click.echo(f"  Name:     {name}")
-    click.echo(f"  Token ID: {token_id}")
-    click.echo(f"  Scopes:   {', '.join(scope_list)}")
+    click.echo(f"  Name:         {name}")
+    click.echo(f"  Token ID:     {token_id}")
+    click.echo(f"  Scopes:       {', '.join(scope_list)}")
+    click.echo(f"  Workspace ID: {workspace_id or '(none — Grafana/K8s tools will not work)'}")
     if expires_at:
-        click.echo(f"  Expires:  {expires_at.strftime('%Y-%m-%d %H:%M UTC')}")
+        click.echo(f"  Expires:      {expires_at.strftime('%Y-%m-%d %H:%M UTC')}")
     click.echo("\n  Token (shown once — store it securely):\n")
     click.echo(f"    {plaintext}\n")
     click.echo("  Set it in your environment:")
@@ -140,7 +199,7 @@ def token_list() -> None:
         click.echo("No tokens found.")
         return
 
-    header = f"{'ID':<12}  {'NAME':<24}  {'SCOPES':<28}  {'CREATED':<20}  STATUS"
+    header = f"{'ID':<12}  {'NAME':<24}  {'SCOPES':<28}  {'WORKSPACE':<38}  {'CREATED':<20}  STATUS"
     click.echo(f"\n{header}")
     click.echo("-" * len(header))
 
@@ -154,7 +213,12 @@ def token_list() -> None:
             status = "active"
         scopes_str = ",".join(r.scopes)
         created_str = r.created_at.strftime("%Y-%m-%d %H:%M")
-        click.echo(f"{r.token_id:<12}  {r.name:<24}  {scopes_str:<28}  {created_str:<20}  {status}")
+        workspace_str = r.workspace_id or "(none)"
+        row = (
+            f"{r.token_id:<12}  {r.name:<24}  {scopes_str:<28}  "
+            f"{workspace_str:<38}  {created_str:<20}  {status}"
+        )
+        click.echo(row)
 
     click.echo()
 
