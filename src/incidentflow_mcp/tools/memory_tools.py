@@ -34,7 +34,10 @@ class PlatformAPIMemoryClient:
         )
 
     def _headers(self) -> dict[str, str]:
-        headers: dict[str, str] = {"Content-Type": "application/json"}
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "X-Internal-Caller": "incidentflow-mcp",
+        }
         if self._internal_key:
             headers["X-Internal-Api-Key"] = self._internal_key
         return headers

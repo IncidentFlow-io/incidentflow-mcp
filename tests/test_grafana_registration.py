@@ -21,6 +21,7 @@ def test_registry_declares_grafana_tools() -> None:
     assert GRAFANA_TOOLS <= set(specs)
     for name in GRAFANA_TOOLS:
         spec = specs[name]
+        assert spec.title
         assert spec.description
         assert spec.input_schema["type"] == "object"
         assert spec.annotations["readOnlyHint"] is True
@@ -43,5 +44,13 @@ def test_required_inputs_declared() -> None:
 
 async def test_server_registers_grafana_tools() -> None:
     mcp = create_mcp_server()
-    names = {tool.name for tool in await mcp.list_tools()}
-    assert GRAFANA_TOOLS <= names
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    specs = {spec.name: spec for spec in get_tool_specs()}
+    assert GRAFANA_TOOLS <= set(tools)
+
+    for name in GRAFANA_TOOLS:
+        assert tools[name].title == specs[name].title
+        assert tools[name].description == specs[name].description
+        assert tools[name].annotations is not None
+        assert tools[name].annotations.readOnlyHint is specs[name].annotations["readOnlyHint"]
+        assert tools[name].annotations.openWorldHint is specs[name].annotations["openWorldHint"]

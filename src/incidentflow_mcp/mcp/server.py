@@ -68,6 +68,12 @@ _VALID_EXECUTION_MODES = {"auto", "sync", "async"}
 _TERMINAL_JOB_STATUSES = {"succeeded", "failed", "cancelled", "canceled"}
 _VALID_RESPONSE_MODES = {"compact", "full"}
 _VALID_SLACK_THREAD_MODES = {"none", "metadata", "full"}
+_MEMORY_TOOL_NAMES = {
+    "memory_search_similar_incidents",
+    "memory_get_service_context",
+    "memory_upsert_incident_summary",
+    "memory_find_runbook",
+}
 _K8S_ALLOWED_ACTIONS = {
     "k8s.list_namespaces",
     "k8s.list_pods",
@@ -121,6 +127,25 @@ def _resolve_execution_mode(settings: Settings, requested_mode: str) -> str:
         raise ValueError(f"Unsupported execution_mode: {requested_mode}")
     if mode == "auto":
         return "async" if settings.async_tools_enabled() else "sync"
+    return mode
+
+
+def _resolve_incident_summary_mode(settings: Settings, requested_mode: str) -> str:
+    """Resolve only modes backed by the documented incident-summary contract."""
+    if settings.environment.strip().lower() not in {"development", "dev", "test", "demo"}:
+        raise ValueError(
+            "incident_summary is unavailable outside explicit demo/test mode because its "
+            "built-in catalog contains synthetic incidents; no production runner currently "
+            "implements the documented result contract"
+        )
+    mode = _resolve_execution_mode(settings, requested_mode)
+    if mode == "async":
+        raise ValueError(
+            "incident_summary async mode is unavailable because no runner currently "
+            "implements the documented incident-summary result contract; use "
+            "execution_mode=sync for the built-in demo catalog. Use "
+            "external_status_check for GitHub or AWS provider status."
+        )
     return mode
 
 
@@ -669,15 +694,24 @@ async def _k8s_agent_status_payload(
             "checked_at": _checked_at(),
             "error": "No Kubernetes cluster matched the requested selector.",
         }
+    agent_status = str(cluster.get("agent_status") or "").strip().lower()
+    connected = cluster.get("connected") is True
+    public_status = (
+        "stale"
+        if agent_status == "stale"
+        else "connected"
+        if connected
+        else "offline"
+    )
     return {
-        "status": "connected" if cluster.get("connected") is True else "offline",
+        "status": public_status,
         "cluster_id": cluster.get("cluster_id"),
         "cluster_name": cluster.get("name"),
         "environment": cluster.get("environment"),
         "agent_id": cluster.get("agent_id"),
         "agent_version": cluster.get("agent_version"),
         "agent_status": cluster.get("agent_status"),
-        "agent_online": cluster.get("connected") is True,
+        "agent_online": connected and public_status == "connected",
         "last_seen_at": cluster.get("last_seen_at"),
         "last_heartbeat_at": cluster.get("last_heartbeat_at"),
         "checked_at": _checked_at(),
@@ -786,9 +820,16 @@ async def _k8s_connection_health_payload(
         "k8s.list_namespaces. MCP HTTP handler latency is logged separately "
         "by the observability middleware (see duration_ms in http_request logs)."
     )
+    core_permissions = [
+        value for value in permissions.values() if value is not None
+    ]
     status.update(
         {
-            "status": "connected" if _command_ok(namespaces_response) else "degraded",
+            "status": (
+                "connected"
+                if _command_ok(namespaces_response) and all(core_permissions)
+                else "degraded"
+            ),
             "latency_ms": latency_ms,
             "latency_breakdown": {
                 "agent_lookup_ms": agent_lookup_ms,
@@ -869,6 +910,13 @@ async def _k8s_cluster_overview_payload(
         params={},
         timeout_seconds=timeout_seconds,
     )
+    if not _command_ok(namespaces_response):
+        return {
+            "status": "failed",
+            "error": _command_error(namespaces_response),
+            "component_errors": {"namespaces": _command_error(namespaces_response)},
+            "checked_at": _checked_at(),
+        }
     namespaces = _namespace_names(_command_data(namespaces_response, "namespaces"))
     if namespace:
         namespaces = [namespace]
@@ -877,6 +925,7 @@ async def _k8s_cluster_overview_payload(
     deployments: list[Any] = []
     services: list[Any] = []
     events: list[Any] = []
+    component_errors: dict[str, dict[str, Any]] = {}
     for item in namespaces:
         pods_response = await _send_k8s_command(
             client=client,
@@ -910,12 +959,22 @@ async def _k8s_cluster_overview_payload(
             params={"namespace": item},
             timeout_seconds=timeout_seconds,
         )
+        responses = {
+            "pods": pods_response,
+            "deployments": deployments_response,
+            "services": services_response,
+            "events": events_response,
+        }
+        for component, response in responses.items():
+            error = _command_error(response)
+            if error is not None:
+                component_errors[f"{item}/{component}"] = error
         pods.extend(_command_data(pods_response, "pods"))
         deployments.extend(_command_data(deployments_response, "deployments"))
         services.extend(_command_data(services_response, "services"))
         events.extend(_command_data(events_response, "events"))
 
-    return _overview_payload(
+    overview = _overview_payload(
         namespaces=namespaces,
         pods=pods,
         deployments=deployments,
@@ -923,6 +982,16 @@ async def _k8s_cluster_overview_payload(
         events=events,
         namespace=namespace,
     )
+    if component_errors:
+        all_components_failed = len(component_errors) == len(namespaces) * 4
+        overview.update(
+            {
+                "status": "failed" if all_components_failed else "partial",
+                "component_errors": component_errors,
+                "error": next(iter(component_errors.values())) if all_components_failed else None,
+            }
+        )
+    return overview
 
 
 async def _k8s_rbac_check_payload(
@@ -1574,6 +1643,47 @@ def _build_describe_response(desc: dict[str, Any]) -> dict[str, Any]:
     diagnosis = _diagnose_pod_from_description(status, containers, events)
     workload = _workload_from_pod_name(pod_name)
 
+    safe_containers: list[dict[str, Any]] = []
+    for container in containers:
+        safe_container: dict[str, Any] = {
+            "name": str(container.get("name") or ""),
+            "image": _strip_image_digest(str(container.get("image") or "")),
+            "ready": bool(container.get("ready")),
+            "restart_count": _container_restart_count(container),
+        }
+        state = container.get("state")
+        if isinstance(state, dict):
+            safe_state: dict[str, Any] = {}
+            for state_name in ("waiting", "terminated", "running"):
+                detail = state.get(state_name)
+                if not isinstance(detail, dict):
+                    continue
+                safe_state[state_name] = {
+                    key: _redact_sensitive_text(str(detail.get(key) or ""))
+                    for key in ("reason", "message", "exit_code", "signal", "started_at")
+                    if detail.get(key) is not None
+                }
+            if safe_state:
+                safe_container["state"] = safe_state
+        last_state = container.get("last_state")
+        if isinstance(last_state, dict):
+            terminated = last_state.get("terminated")
+            if isinstance(terminated, dict):
+                safe_container["last_state"] = {
+                    "terminated": {
+                        key: _redact_sensitive_text(str(terminated.get(key) or ""))
+                        for key in (
+                            "reason",
+                            "message",
+                            "exit_code",
+                            "signal",
+                            "finished_at",
+                        )
+                        if terminated.get(key) is not None
+                    }
+                }
+        safe_containers.append(safe_container)
+
     historical = diagnosis.get("historical_warnings") or []
 
     if diagnosis["healthy"]:
@@ -1627,14 +1737,14 @@ def _build_describe_response(desc: dict[str, Any]) -> dict[str, Any]:
                 "reason": str(status.get("reason") or ""),
                 "message": str(status.get("message") or ""),
             },
-            "containers": containers,
+            "containers": safe_containers,
             "resources": resources,
             "probes": probes,
             "events": [
                 {
                     "type": e.get("type"),
                     "reason": e.get("reason"),
-                    "message": str(e.get("message") or "")[:200],
+                    "message": _redact_sensitive_text(str(e.get("message") or ""))[:200],
                     "count": e.get("count", 1),
                     "last_seen": e.get("last_seen"),
                 }
@@ -1788,6 +1898,7 @@ def _log_lines_from_payload(payload: dict[str, Any]) -> list[str]:
 
 def _redact_sensitive_text(value: str) -> str:
     redacted = re.sub(r"(redis://)([^:@\s]+:)?([^@\s]+)@", r"\1***@", value)
+    redacted = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+", "Bearer ***", redacted)
     redacted = re.sub(
         r"(?i)\b(password|passwd|pwd|token|secret|api[_-]?key)=([^\s,;]+)",
         r"\1=***",
@@ -1857,6 +1968,8 @@ def _compact_log_payload(
         line for line in selected if any(pattern in line.lower() for pattern in important_patterns)
     ]
     compact_data = dict(payload.get("data") if isinstance(payload.get("data"), dict) else {})
+    for raw_log_key in ("logs", "log", "text", "output"):
+        compact_data.pop(raw_log_key, None)
     compact_data.update(
         {
             "lines": selected[-120:],
@@ -2196,6 +2309,7 @@ async def _execute_external_status_check(
     days_back: int = 30,
     response_mode: str = "compact",
     token_workspace_id: str | None = None,
+    persist_to_oms: bool = False,
 ) -> str:
     resolved_token_workspace_id = token_workspace_id or _current_token_workspace_id()
     resolved_workspace_id = _resolve_job_workspace_id(
@@ -2233,7 +2347,7 @@ async def _execute_external_status_check(
                 "providers": selected_providers,
                 "external_status_only": True,
                 "days_back": days_back,
-                "persist_to_oms": settings.mcp_oms_persist_enabled,
+                "persist_to_oms": persist_to_oms,
             },
             "artifact_refs": [],
             "evidence_refs": [],
@@ -2252,7 +2366,14 @@ async def _execute_external_status_check(
             job_id=job_id,
             status=submitted.get("status", "queued"),
             poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
-            extra={"providers": selected_providers},
+            extra={
+                "providers": selected_providers,
+                "persistence": {
+                    "requested": persist_to_oms,
+                    "effective": None,
+                    "stored": False,
+                },
+            },
         )
 
     job = await _poll_until_done(
@@ -2295,45 +2416,18 @@ def create_mcp_server() -> FastMCP:
         execution_mode: str = "auto",
         workspace_id: str | None = None,
     ) -> str:
-        mode = _resolve_execution_mode(settings, execution_mode)
+        mode = _resolve_incident_summary_mode(settings, execution_mode)
         input_data = IncidentSummaryInput(
             incident_id=incident_id,
             include_timeline=include_timeline,
             include_affected_services=include_affected_services,
         )
 
-        resolved_workspace_id = _resolve_job_workspace_id(
-            workspace_id,
-            token_workspace_id=_current_token_workspace_id(),
-            default_workspace_id=settings.mcp_default_workspace_id,
-        )
         if mode == "sync":
             result: IncidentSummaryOutput = _incident_summary_impl(input_data)
             return result.model_dump_json(indent=2)
 
-        client = PlatformAPIJobsClient(settings)
-        submitted = await client.submit_job(
-            {
-                "job_type": "incident.summary.generate",
-                "runner_mode": "summary",
-                "task_profile": "summary.small",
-                "workspace_id": resolved_workspace_id,
-                "incident_id": incident_id,
-                "payload": input_data.model_dump(),
-                "artifact_refs": [],
-                "evidence_refs": [],
-            }
-        )
-        logger.info(
-            "mcp_async_job_submitted tool=incident_summary job_id=%s workspace_id=%s",
-            submitted["job_id"],
-            resolved_workspace_id,
-        )
-        return _build_async_result(
-            job_id=submitted["job_id"],
-            status=submitted.get("status", "queued"),
-            poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
-        )
+        raise AssertionError(f"Unexpected enabled incident_summary mode: {mode}")
 
     @mcp.tool(**_tool_metadata(_specs["correlate_alerts"]))
     async def correlate_alerts(
@@ -2349,15 +2443,15 @@ def create_mcp_server() -> FastMCP:
             ),
         ] = None,
         alerts_json: Annotated[
-            str | None,
+            str,
             Field(
-                default=None,
+                default="",
                 description=(
                     "Legacy JSON string containing the same alert object array as alerts. "
                     "Prefer alerts for new calls."
                 ),
             ),
-        ] = None,
+        ] = "",
         window_minutes: int = 60,
         min_cluster_size: int = 2,
         execution_mode: str = "auto",
@@ -2383,6 +2477,7 @@ def create_mcp_server() -> FastMCP:
         wait_for_result: bool = True,
         days_back: int = 30,
         response_mode: str = "compact",
+        persist_to_oms: bool = False,
     ) -> str:
         mode = _resolve_external_status_mode(execution_mode)
         if mode != "async":
@@ -2398,6 +2493,7 @@ def create_mcp_server() -> FastMCP:
             wait_for_result=wait_for_result,
             days_back=days_back,
             response_mode=response_mode,
+            persist_to_oms=persist_to_oms,
         )
 
     @mcp.tool(**_tool_metadata(_specs["slack_alerts_list"]))
@@ -2478,61 +2574,6 @@ def create_mcp_server() -> FastMCP:
             return _platform_slack_error_json(exc)
         return result.model_dump_json(indent=2)
 
-    async def _auto_upsert_thread_summary(
-        *,
-        workspace_id: str,
-        channel_id: str,
-        thread_ts: str,
-        result: dict[str, Any],
-        alert_context: IncidentThreadAlertContext | None,
-    ) -> None:
-        """Fire-and-forget: embed slack thread summary into Qdrant memory."""
-        try:
-            from incidentflow_mcp.tools.memory_tools import PlatformAPIMemoryClient
-
-            # Build rich embedding text from all available summary fields
-            parts: list[str] = []
-            if title := result.get("title"):
-                parts.append(str(title))
-            if summary := result.get("summary"):
-                parts.append(str(summary))
-            if rca := result.get("probable_root_cause"):
-                parts.append(f"Root cause: {rca}")
-            if actions := result.get("actions_taken"):
-                if isinstance(actions, list) and actions:
-                    parts.append(f"Actions: {', '.join(str(a) for a in actions[:5])}")
-
-            text = ". ".join(filter(None, parts)).strip()
-            if not text:
-                return
-
-            # Stable deterministic incident_id from channel + thread_ts
-            incident_id = f"slack:{channel_id}:{thread_ts}"
-
-            service = alert_context.service if alert_context else None
-            severity = alert_context.severity if alert_context else None
-            status = result.get("status")
-
-            mem = PlatformAPIMemoryClient(settings)
-            await mem.upsert(
-                workspace_id=workspace_id,
-                incident_id=incident_id,
-                source="slack_thread",
-                text=text,
-                service=service,
-                severity=severity,
-                status=status,
-            )
-            logger.info(
-                "memory: auto-upserted slack thread workspace=%s incident=%s service=%s",
-                workspace_id,
-                incident_id,
-                service,
-            )
-        except Exception:
-            # Never block the main response — log and move on
-            logger.warning("memory: failed to auto-upsert thread summary", exc_info=True)
-
     @mcp.tool(**_tool_metadata(_specs["incident_thread_summary"]))
     async def incident_thread_summary(
         channel_id: str,
@@ -2562,17 +2603,6 @@ def create_mcp_server() -> FastMCP:
             )
         except PlatformSlackAPIError as exc:
             return _platform_slack_error_json(exc)
-
-        # Auto-persist to semantic memory — non-blocking, never delays the response
-        asyncio.create_task(  # noqa: RUF006
-            _auto_upsert_thread_summary(
-                workspace_id=token_workspace_id,
-                channel_id=channel_id,
-                thread_ts=thread_ts,
-                result=result,
-                alert_context=alert_context,
-            )
-        )
 
         return json.dumps(result, indent=2)
 
@@ -2627,10 +2657,18 @@ def create_mcp_server() -> FastMCP:
             cluster_id=str(cluster["cluster_id"]),
             timeout_seconds=timeout_seconds,
         )
+        if overview.get("status") == "failed":
+            overview.update(
+                {
+                    "cluster_id": cluster.get("cluster_id"),
+                    "cluster_name": cluster.get("name"),
+                }
+            )
+            return _json(overview)
         health = _cluster_health_assessment(overview)
         overview.update(
             {
-                "status": "connected",
+                "status": "partial" if overview.get("status") == "partial" else "connected",
                 "cluster_id": cluster.get("cluster_id"),
                 "cluster_name": cluster.get("name"),
                 "cluster_health": health["cluster_health"],
@@ -2667,7 +2705,11 @@ def create_mcp_server() -> FastMCP:
             namespace=namespace,
             timeout_seconds=timeout_seconds,
         )
-        overview.update({"status": "connected", "cluster_id": resolved_cluster_id})
+        if overview.get("status") != "failed":
+            overview["status"] = (
+                "partial" if overview.get("status") == "partial" else "connected"
+            )
+        overview["cluster_id"] = resolved_cluster_id
         return _json(overview)
 
     @mcp.tool(**_tool_metadata(_specs["k8s_rbac_check"]))
@@ -2721,7 +2763,7 @@ def create_mcp_server() -> FastMCP:
         cluster_id: str | None = None,
         timeout_seconds: int = 30,
     ) -> str:
-        return await _send_k8s_agent_command(
+        raw = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -2729,6 +2771,30 @@ def create_mcp_server() -> FastMCP:
             action="k8s.list_namespaces",
             params={},
             timeout_seconds=timeout_seconds,
+        )
+        payload = json.loads(raw)
+        if not _command_ok(payload):
+            return raw
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        namespaces = [
+            item
+            for item in data.get("namespaces", [])
+            if isinstance(item, dict) and str(item.get("name") or "").strip()
+        ]
+        namespaces.sort(key=lambda item: str(item.get("name") or ""))
+        bounded = namespaces[:200]
+        return json.dumps(
+            {
+                **payload,
+                "data": {
+                    **data,
+                    "namespaces": bounded,
+                    "count": len(bounded),
+                    "total": len(namespaces),
+                    "truncated": len(namespaces) > len(bounded),
+                },
+            },
+            indent=2,
         )
 
     @mcp.tool(**_tool_metadata(_specs["k8s_list_pods"]))
@@ -3113,7 +3179,7 @@ def create_mcp_server() -> FastMCP:
         if not workload:
             raise ValueError("Please specify a pod or deployment name to analyze.")
 
-        rollout = await _send_k8s_agent_command(
+        rollout_raw = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -3122,6 +3188,7 @@ def create_mcp_server() -> FastMCP:
             params={"namespace": namespace, "deployment": workload},
             timeout_seconds=timeout_seconds,
         )
+        rollout = json.loads(rollout_raw)
         pods = await _fetch_pods_for_analysis(
             settings=settings,
             namespace=namespace,
@@ -3132,7 +3199,7 @@ def create_mcp_server() -> FastMCP:
         )
         pods_data = pods.get("data") if isinstance(pods, dict) else None
         pod_items = pods_data.get("pods") if isinstance(pods_data, dict) else []
-        deployments = await _send_k8s_agent_command(
+        deployments_raw = await _send_k8s_agent_command(
             settings=settings,
             cluster_id=cluster_id,
             environment=environment,
@@ -3141,7 +3208,8 @@ def create_mcp_server() -> FastMCP:
             params={"namespace": namespace},
             timeout_seconds=timeout_seconds,
         )
-        deployments_data = json.loads(deployments).get("data")
+        deployments = json.loads(deployments_raw)
+        deployments_data = deployments.get("data")
         deployment_items = (
             deployments_data.get("deployments") if isinstance(deployments_data, dict) else []
         )
@@ -3155,9 +3223,18 @@ def create_mcp_server() -> FastMCP:
             deployment_items if isinstance(deployment_items, list) else [],
             workload,
         )
-        logs_data = None
+        logs_data: dict[str, Any] | None = None
+        component_errors: dict[str, dict[str, Any]] = {}
+        for component, response in (
+            ("rollout", rollout),
+            ("pods", pods),
+            ("deployments", deployments),
+        ):
+            error = _command_error(response)
+            if error is not None:
+                component_errors[component] = error
         if selected_pod:
-            logs = await _send_k8s_agent_command(
+            logs_raw = await _send_k8s_agent_command(
                 settings=settings,
                 cluster_id=cluster_id,
                 environment=environment,
@@ -3170,12 +3247,25 @@ def create_mcp_server() -> FastMCP:
                 },
                 timeout_seconds=timeout_seconds,
             )
-            logs_data = json.loads(logs).get("data")
+            logs = json.loads(logs_raw)
+            logs_error = _command_error(logs)
+            if logs_error is not None:
+                component_errors["logs"] = logs_error
+            else:
+                compact_logs = _compact_log_payload(
+                    logs,
+                    level=None,
+                    contains=None,
+                    exclude=None,
+                    compact=True,
+                )
+                value = compact_logs.get("data")
+                logs_data = value if isinstance(value, dict) else None
         return json.dumps(
             {
-                "status": "success",
+                "status": "partial" if component_errors else "success",
                 "data": {
-                    "rollout_status": json.loads(rollout).get("data"),
+                    "rollout_status": rollout.get("data"),
                     "pods": [_sanitize_pod(p) for p in related_pods if isinstance(p, dict)],
                     "pods_total": len(related_pods),
                     "logs": logs_data,
@@ -3187,7 +3277,8 @@ def create_mcp_server() -> FastMCP:
                     ),
                     "tail_lines": tail_lines,
                 },
-                "error": None,
+                "errors": component_errors,
+                "error": next(iter(component_errors.values())) if component_errors else None,
             },
             indent=2,
         )
@@ -3200,28 +3291,19 @@ def create_mcp_server() -> FastMCP:
         )
         return PlatformGrafanaClient(settings, workspace_id=resolved_workspace_id)
 
-    @mcp.tool(
-        name="grafana_list_dashboards",
-        description=_specs["grafana_list_dashboards"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["grafana_list_dashboards"]))
     async def grafana_list_dashboards(workspace_id: str | None = None) -> str:
         result = await _grafana_tools.grafana_list_dashboards(_grafana_client(workspace_id))
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(
-        name="grafana_get_dashboard",
-        description=_specs["grafana_get_dashboard"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["grafana_get_dashboard"]))
     async def grafana_get_dashboard(dashboard_uid: str, workspace_id: str | None = None) -> str:
         result = await _grafana_tools.grafana_get_dashboard(
             _grafana_client(workspace_id), dashboard_uid=dashboard_uid
         )
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(
-        name="grafana_extract_panel_queries",
-        description=_specs["grafana_extract_panel_queries"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["grafana_extract_panel_queries"]))
     async def grafana_extract_panel_queries(
         dashboard_uid: str, workspace_id: str | None = None
     ) -> str:
@@ -3230,10 +3312,7 @@ def create_mcp_server() -> FastMCP:
         )
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(
-        name="grafana_metrics_query",
-        description=_specs["grafana_metrics_query"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["grafana_metrics_query"]))
     async def grafana_metrics_query(
         datasource_uid: str,
         query: str,
@@ -3245,10 +3324,7 @@ def create_mcp_server() -> FastMCP:
         )
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(
-        name="grafana_metrics_query_range",
-        description=_specs["grafana_metrics_query_range"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["grafana_metrics_query_range"]))
     async def grafana_metrics_query_range(
         datasource_uid: str,
         query: str,
@@ -3267,10 +3343,7 @@ def create_mcp_server() -> FastMCP:
         )
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(
-        name="analyze_dashboard_health",
-        description=_specs["analyze_dashboard_health"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["analyze_dashboard_health"]))
     async def analyze_dashboard_health(
         dashboard_uid: str,
         start: str = "now-6h",
@@ -3287,10 +3360,7 @@ def create_mcp_server() -> FastMCP:
         )
         return result.model_dump_json(indent=2)
 
-    @mcp.tool(
-        name="analyze_dns_dashboard",
-        description=_specs["analyze_dns_dashboard"].description,
-    )
+    @mcp.tool(**_tool_metadata(_specs["analyze_dns_dashboard"]))
     async def analyze_dns_dashboard(
         dashboard_uid: str,
         start: str = "now-6h",
@@ -3374,6 +3444,10 @@ def create_mcp_server() -> FastMCP:
         diagnosis = describe["data"]["diagnosis"]
 
         logs_payload = json.loads(logs_raw_str)
+        component_errors: dict[str, dict[str, Any]] = {}
+        logs_error = _command_error(logs_payload)
+        if logs_error is not None:
+            component_errors["logs"] = logs_error
         logs_data = _compact_log_payload(
             logs_payload, level=None, contains=None, exclude=None, compact=True
         )
@@ -3394,10 +3468,17 @@ def create_mcp_server() -> FastMCP:
                     timeout_seconds=timeout_seconds,
                 )
                 rollout_payload = json.loads(rollout_str)
-                rollout_inner = (rollout_payload.get("data") or {}).get("rollout") or {}
-                rollout_complete = bool(rollout_inner.get("complete"))
-            except Exception:
-                pass
+                rollout_error = _command_error(rollout_payload)
+                if rollout_error is not None:
+                    component_errors["rollout"] = rollout_error
+                else:
+                    rollout_inner = (rollout_payload.get("data") or {}).get("rollout") or {}
+                    rollout_complete = bool(rollout_inner.get("complete"))
+            except Exception as exc:
+                component_errors["rollout"] = {
+                    "code": "rollout_check_failed",
+                    "message": _redact_sensitive_text(str(exc))[:200],
+                }
 
         # --- Build compact SRE report ---
         pod_meta = describe["data"]["pod"]
@@ -3482,11 +3563,12 @@ def create_mcp_server() -> FastMCP:
 
         return json.dumps(
             {
-                "status": "success",
+                "status": "partial" if component_errors else "success",
                 "summary": describe["summary"],
                 "findings": findings,
                 "recommendations": recommendations,
                 "evidence": evidence,
+                "errors": component_errors,
             },
             indent=2,
         )
@@ -3597,6 +3679,10 @@ def create_mcp_server() -> FastMCP:
             return json.dumps(result, indent=2)
         except MemoryAPIError as exc:
             return json.dumps({"error": str(exc)})
+
+    if settings.environment.strip().lower() == "production":
+        for tool_name in _MEMORY_TOOL_NAMES:
+            mcp.remove_tool(tool_name)
 
     register_resources(mcp)
 

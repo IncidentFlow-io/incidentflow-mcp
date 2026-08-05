@@ -64,6 +64,7 @@ def test_client_headers_include_internal_key() -> None:
     c = PlatformAPIMemoryClient(s)
     headers = c._headers()
     assert headers["X-Internal-Api-Key"] == "my-key"
+    assert headers["X-Internal-Caller"] == "incidentflow-mcp"
 
 
 def test_client_headers_omit_key_when_none() -> None:
@@ -72,6 +73,7 @@ def test_client_headers_omit_key_when_none() -> None:
     c = PlatformAPIMemoryClient(s)
     headers = c._headers()
     assert "X-Internal-Api-Key" not in headers
+    assert headers["X-Internal-Caller"] == "incidentflow-mcp"
 
 
 # ──────────────────────────────────────────────

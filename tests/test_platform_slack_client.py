@@ -42,6 +42,13 @@ def test_platform_slack_error_preserves_platform_code() -> None:
     assert str(exc_info.value) == "slack_not_connected_for_workspace"
 
 
+def test_platform_slack_client_uses_scoped_internal_caller_headers() -> None:
+    client = _client()
+
+    assert client._headers["X-Internal-Api-Key"] == "internal-token"
+    assert client._headers["X-Internal-Caller"] == "incidentflow-mcp"
+
+
 def test_mcp_platform_slack_error_json_preserves_code() -> None:
     payload = _platform_slack_error_json(
         PlatformSlackAPIError(

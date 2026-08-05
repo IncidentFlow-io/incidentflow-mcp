@@ -20,6 +20,7 @@ from incidentflow_mcp.mcp.server import (
     _overview_payload,
     _resolve_correlation_mode,
     _resolve_execution_mode,
+    _resolve_incident_summary_mode,
     _resolve_job_workspace_id,
     _resolve_k8s_cluster_id,
     _resolve_slack_tool_access,
@@ -92,6 +93,26 @@ def test_resolve_execution_mode_auto_sync_in_dev() -> None:
 def test_resolve_execution_mode_auto_async_in_production() -> None:
     settings = Settings(_env_file=None, environment="production", mcp_async_tools_enabled=None)
     assert _resolve_execution_mode(settings, "auto") == "async"
+
+
+def test_incident_summary_modes_disable_unimplemented_async_contract() -> None:
+    development = Settings(
+        _env_file=None,
+        environment="development",
+        mcp_async_tools_enabled=None,
+    )
+    production = Settings(
+        _env_file=None,
+        environment="production",
+        mcp_async_tools_enabled=None,
+    )
+
+    assert _resolve_incident_summary_mode(development, "auto") == "sync"
+    assert _resolve_incident_summary_mode(development, "sync") == "sync"
+    with pytest.raises(ValueError, match="no runner currently implements"):
+        _resolve_incident_summary_mode(development, "async")
+    with pytest.raises(ValueError, match="outside explicit demo/test mode"):
+        _resolve_incident_summary_mode(production, "auto")
 
 
 def test_correlate_alerts_auto_stays_sync_and_async_is_rejected() -> None:
@@ -772,6 +793,7 @@ async def test_platform_api_jobs_client_submit_includes_internal_key(
         async def post(self, url: str, json: dict, headers: dict[str, str]) -> FakeResponse:
             captured["url"] = url
             captured["key"] = headers.get("X-Internal-Api-Key", "")
+            captured["caller"] = headers.get("X-Internal-Caller", "")
             captured["job_type"] = json["job_type"]
             return FakeResponse(
                 {
@@ -799,6 +821,7 @@ async def test_platform_api_jobs_client_submit_includes_internal_key(
     assert response["job_id"] == "job_123"
     assert captured["url"] == "http://platform.test/api/v1/ai/jobs"
     assert captured["key"] == "secret-key"
+    assert captured["caller"] == "incidentflow-mcp"
     assert captured["job_type"] == "incident.summary.generate"
 
 
@@ -910,6 +933,7 @@ async def test_external_status_check_starts_new_job_when_check_id_missing() -> N
             self.submit_calls += 1
             assert payload["job_type"] == "alert.group.summary.generate"
             assert payload["payload"]["providers"] == ["aws"]
+            assert payload["payload"]["persist_to_oms"] is False
             return {"job_id": "new_job", "status": "queued"}
 
         async def get_job(self, job_id: str) -> dict:
@@ -939,6 +963,50 @@ async def test_external_status_check_starts_new_job_when_check_id_missing() -> N
     assert payload["mode"] == "async"
     assert payload["job_id"] == "new_job"
     assert payload["status"] == "queued"
+    assert payload["persistence"] == {
+        "requested": False,
+        "effective": None,
+        "stored": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_external_status_check_forwards_explicit_oms_opt_in() -> None:
+    class FakeClient:
+        payload: dict | None = None
+
+        async def submit_job(self, payload: dict) -> dict:
+            self.payload = payload
+            return {"job_id": "new_job", "status": "queued"}
+
+        async def get_job(self, job_id: str) -> dict:  # pragma: no cover
+            raise AssertionError(job_id)
+
+    settings = Settings(
+        _env_file=None,
+        environment="test",
+        platform_api_base_url="http://platform.test",
+        mcp_oms_persist_enabled=False,
+    )
+    fake_client = FakeClient()
+
+    output = await _execute_external_status_check(
+        settings=settings,
+        client=fake_client,
+        providers=["github"],
+        workspace_id="ws_1",
+        check_id=None,
+        wait_for_result=False,
+        persist_to_oms=True,
+    )
+
+    assert fake_client.payload is not None
+    assert fake_client.payload["payload"]["persist_to_oms"] is True
+    assert json.loads(output)["persistence"] == {
+        "requested": True,
+        "effective": None,
+        "stored": False,
+    }
 
 
 @pytest.mark.asyncio
