@@ -6,11 +6,13 @@ boundary so SDK upgrades fail loudly in a focused place.
 
 from __future__ import annotations
 
+import json
 from types import MethodType
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.exceptions import UrlElicitationRequiredError
+from mcp.types import CallToolResult, TextContent
 
 from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.tools.contracts import apply_tool_contract
@@ -40,7 +42,12 @@ async def run_tool_with_structured_errors(
     except UrlElicitationRequiredError:
         raise
     except Exception as exc:
-        return apply_tool_contract(structured_tool_exception(exc), tool_name=tool.name)
+        payload = apply_tool_contract(structured_tool_exception(exc), tool_name=tool.name)
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(payload))],
+            structuredContent=payload,
+            isError=True,
+        )
 
 
 def harden_fastmcp_tool_contracts(mcp: FastMCP) -> None:
