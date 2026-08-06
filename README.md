@@ -722,8 +722,9 @@ commands from Slack; remediation must be a separate approved action.
 - `response_mode=full`: raw platform job payload for deep RCA analysis.
 
 Polling behavior:
-- If `check_id` is provided, MCP polls that existing `job_id` and does not create a new job.
-- If `check_id` is omitted, MCP submits a new async job.
+- If `job_id` is provided, MCP polls that existing UUID and does not create a new job.
+- `check_id` remains a deprecated alias for `job_id`.
+- If neither is provided, MCP submits a new async job.
 
 Example (compact):
 

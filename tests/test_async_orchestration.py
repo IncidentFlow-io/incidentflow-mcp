@@ -8,6 +8,7 @@ import pytest
 
 from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.compatibility.fastmcp_contracts import run_tool_with_structured_errors
 from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.mcp.server import (
     create_mcp_server,
@@ -20,6 +21,7 @@ from incidentflow_mcp.mcp.services.async_jobs import (
     normalize_polled_incident_summary_job,
     resolve_correlation_mode,
     resolve_execution_mode,
+    resolve_external_status_job_id,
     resolve_job_workspace_id,
 )
 from incidentflow_mcp.mcp.services.kubernetes_analysis import (
@@ -189,13 +191,26 @@ def test_incident_summary_schema_supports_check_id_polling() -> None:
     assert spec.input_schema["required"] == []
 
 
-def test_external_status_check_schema_contains_response_mode_and_check_id_polling_hint() -> None:
+def test_external_status_check_schema_contains_response_mode_and_job_id_polling_hint() -> None:
     spec = next(s for s in get_tool_specs() if s.name == "external_status_check")
     properties = spec.input_schema["properties"]
 
     assert properties["response_mode"]["default"] == "compact"
     assert properties["response_mode"]["enum"] == ["compact", "full"]
-    assert "polls this job" in properties["check_id"]["description"]
+    assert "job_id" in properties
+    assert "UUID" in properties["job_id"]["description"]
+    assert "Deprecated" in properties["check_id"]["description"]
+
+
+def test_resolve_external_status_job_id_requires_a_uuid() -> None:
+    job_id = "c1742dce-8fe1-41c1-88e1-0ba455edd5cc"
+
+    assert resolve_external_status_job_id(job_id, None) == job_id
+    assert resolve_external_status_job_id(None, job_id) == job_id
+    with pytest.raises(ValueError, match="Invalid job_id format"):
+        resolve_external_status_job_id("qcvjkzcs7j74", None)
+    with pytest.raises(ValueError, match="must match"):
+        resolve_external_status_job_id(job_id, "be4f22c5-2ba3-46c9-8a2a-262df26946ef")
 
 
 def test_resolve_job_workspace_id_prefers_explicit_scope_or_default() -> None:
@@ -1285,6 +1300,29 @@ def test_structured_tool_exception_wraps_http_status_body() -> None:
     assert payload["error"]["upstream_response"]["error"]["code"] == "FORBIDDEN"
 
 
+@pytest.mark.asyncio
+async def test_fastmcp_runtime_error_sets_is_error() -> None:
+    request = httpx.Request("GET", "https://platform.example/api/v1/ai/jobs/missing")
+    response = httpx.Response(404, request=request, json={"detail": "AI job not found"})
+
+    class FakeMetadata:
+        async def call_fn_with_arg_validation(self, *args: object, **kwargs: object) -> object:
+            raise httpx.HTTPStatusError("not found", request=request, response=response)
+
+    class FakeTool:
+        name = "external_status_check"
+        fn_metadata = FakeMetadata()
+        fn = object()
+        is_async = True
+        context_kwarg = None
+
+    result = await run_tool_with_structured_errors(FakeTool(), {})
+
+    assert result.isError is True
+    assert result.structuredContent["ok"] is False
+    assert result.structuredContent["error"]["code"] == "HTTP_404"
+
+
 async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error() -> None:
     from incidentflow_mcp.mcp.server import create_mcp_server
 
@@ -1294,10 +1332,11 @@ async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error
         {"namespace": "default", "pod": "api-123", "tail_lines_typo": 10},
     )
 
-    assert result["status"] == "failed"
-    assert result["error"]["code"] == "VALIDATION_ERROR"
-    assert result["error"]["details"][0]["type"] == "extra_forbidden"
-    assert result["error"]["details"][0]["loc"] == ("tail_lines_typo",)
+    assert result.isError is True
+    assert result.structuredContent["status"] == "failed"
+    assert result.structuredContent["error"]["code"] == "VALIDATION_ERROR"
+    assert result.structuredContent["error"]["details"][0]["type"] == "extra_forbidden"
+    assert result.structuredContent["error"]["details"][0]["loc"] == ("tail_lines_typo",)
 
 
 def test_compact_external_status_includes_failed_provider_entries() -> None:
@@ -1326,9 +1365,9 @@ def test_compact_external_status_includes_failed_provider_entries() -> None:
         }
     )
 
-    assert result["status"] == "partial"
+    assert result["execution_status"] == "partial_success"
     assert result["providers"][1]["provider"] == "aws"
-    assert result["providers"][1]["status"] == "error"
+    assert result["providers"][1]["provider_status"] == "error"
     assert result["providers"][1]["source_url"] == "https://status.aws.amazon.com/rss/all.rss"
 
 
@@ -1576,9 +1615,10 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
     )
     payload = _payload(output)
 
-    assert payload["status"] == "ok"
+    assert payload["execution_status"] == "success"
     assert payload["checked_at"] == "2026-03-17T18:00:00Z"
     provider = payload["providers"][0]
+    assert provider["provider_status"] == "minor"
     compact_incident = provider["active_incidents"][0]
     assert compact_incident["id"] == "inc_1"
     assert compact_incident["updates_count"] == 1
@@ -1721,7 +1761,7 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
 
         async def get_job(self, job_id: str) -> dict:
             self.get_calls += 1
-            assert job_id == "existing_job"
+            assert job_id == "c1742dce-8fe1-41c1-88e1-0ba455edd5cc"
             return {
                 "job_id": job_id,
                 "status": "failed",
@@ -1740,7 +1780,7 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
         client=fake_client,
         providers=["aws", "github"],
         workspace_id="ws_1",
-        check_id="existing_job",
+        check_id="c1742dce-8fe1-41c1-88e1-0ba455edd5cc",
         response_mode="compact",
     )
     payload = _payload(output)
@@ -1748,7 +1788,7 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
     assert fake_client.submit_calls == 0
     assert fake_client.get_calls == 1
     assert payload["mode"] == "completed"
-    assert payload["job_id"] == "existing_job"
+    assert payload["job_id"] == "c1742dce-8fe1-41c1-88e1-0ba455edd5cc"
     assert payload["status"] == "failed"
     assert payload["error"]["reason"] == "provider timeout"
     assert payload["response_mode"] == "compact"
