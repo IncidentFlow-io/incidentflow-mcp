@@ -168,6 +168,7 @@
                 "connected",
                 "degraded",
                 "offline",
+                "stale",
                 "not_configured",
                 "unknown"
               ],
