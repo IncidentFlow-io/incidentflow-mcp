@@ -6,6 +6,8 @@ from collections.abc import Callable
 from typing import Any
 
 from incidentflow_mcp.mcp.context import ToolRegistrationContext
+from incidentflow_mcp.mcp.errors import structured_tool_exception
+from incidentflow_mcp.tools.contracts import ErrorCode
 from incidentflow_mcp.tools.knowledge_search_tools import (
     KnowledgeSearchAPIError,
     knowledge_get,
@@ -48,7 +50,7 @@ def register_knowledge_tools(
                 limit=limit,
             )
         except KnowledgeSearchAPIError as exc:
-            return {"error": str(exc)}
+            return structured_tool_exception(exc, code=ErrorCode.UPSTREAM_ERROR)
 
     @ctx.mcp.tool(**ctx.metadata("private_knowledge_search"))
     async def private_knowledge_search_tool(
@@ -71,7 +73,12 @@ def register_knowledge_tools(
                 limit=limit,
             )
         except (KnowledgeSearchAPIError, ValueError) as exc:
-            return {"error": str(exc)}
+            return structured_tool_exception(
+                exc,
+                code=ErrorCode.INVALID_ARGUMENT
+                if isinstance(exc, ValueError)
+                else ErrorCode.UPSTREAM_ERROR,
+            )
 
     @ctx.mcp.tool(**ctx.metadata("knowledge_get"))
     async def knowledge_get_tool(
@@ -90,7 +97,12 @@ def register_knowledge_tools(
                 response_mode=response_mode,
             )
         except (KnowledgeSearchAPIError, ValueError) as exc:
-            return {"error": str(exc)}
+            return structured_tool_exception(
+                exc,
+                code=ErrorCode.INVALID_ARGUMENT
+                if isinstance(exc, ValueError)
+                else ErrorCode.UPSTREAM_ERROR,
+            )
 
     @ctx.mcp.tool(**ctx.metadata("knowledge_upsert"))
     async def knowledge_upsert_tool(
@@ -125,4 +137,9 @@ def register_knowledge_tools(
                 dry_run=dry_run,
             )
         except (MemoryAPIError, ValueError) as exc:
-            return {"error": str(exc)}
+            return structured_tool_exception(
+                exc,
+                code=ErrorCode.INVALID_ARGUMENT
+                if isinstance(exc, ValueError)
+                else ErrorCode.UPSTREAM_ERROR,
+            )

@@ -77,8 +77,7 @@ def test_metrics_endpoint_exposes_registered_tool_inventory(auth_client: TestCli
     payload = auth_client.get("/metrics").text
 
     assert (
-        'mcp_registered_tools{category="meta",read_only="true",tool="mcp_version"} 1.0'
-        in payload
+        'mcp_registered_tools{category="meta",read_only="true",tool="mcp_version"} 1.0' in payload
     )
     assert (
         'mcp_registered_tools{category="kubernetes",read_only="true",tool="k8s_list_pods"} 1.0'

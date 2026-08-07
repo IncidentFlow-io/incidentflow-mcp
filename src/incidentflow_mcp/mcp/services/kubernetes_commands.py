@@ -273,7 +273,7 @@ async def _k8s_agent_status_payload(
     except httpx.HTTPError as exc:
         return {
             "status": "offline",
-            "agent_online": False,
+            "healthy": False,
             "checked_at": _checked_at(),
             "error": str(exc),
         }
@@ -287,7 +287,7 @@ async def _k8s_agent_status_payload(
     if cluster is None:
         return {
             "status": "offline",
-            "agent_online": False,
+            "healthy": False,
             "clusters": clusters,
             "checked_at": _checked_at(),
             "error": "No Kubernetes cluster matched the requested selector.",
@@ -300,7 +300,7 @@ async def _k8s_agent_status_payload(
         "agent_id": cluster.get("agent_id"),
         "agent_version": cluster.get("agent_version"),
         "agent_status": cluster.get("agent_status"),
-        "agent_online": cluster.get("connected") is True,
+        "healthy": cluster.get("connected") is True,
         "last_seen_at": cluster.get("last_seen_at"),
         "last_heartbeat_at": cluster.get("last_heartbeat_at"),
         "checked_at": _checked_at(),
@@ -325,7 +325,7 @@ async def _k8s_connection_health_payload(
         cluster_name=cluster_name,
     )
     resolved_cluster_id = status.get("cluster_id")
-    if not resolved_cluster_id or status.get("agent_online") is not True:
+    if not resolved_cluster_id or status.get("healthy") is not True:
         status.update(
             {
                 "latency_ms": None,

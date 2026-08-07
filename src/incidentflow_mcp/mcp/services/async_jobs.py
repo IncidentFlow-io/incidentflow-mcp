@@ -295,13 +295,13 @@ def compact_external_status_result(result: Any) -> Any:
         if isinstance(fetched_at, str) and (checked_at is None or fetched_at > checked_at):
             checked_at = fetched_at
 
-    execution_status = "success"
+    check_status = "success"
     if errors_list and compact_statuses:
-        execution_status = "partial_success"
+        check_status = "partial_success"
     elif errors_list and not compact_statuses:
-        execution_status = "failed"
+        check_status = "failed"
     elif str(result.get("status") or "").lower() not in {"success", "ok"}:
-        execution_status = str(result.get("status") or "unknown")
+        check_status = str(result.get("status") or "unknown")
 
     provider_names = {
         str(provider_status.get("provider") or "").lower()
@@ -331,7 +331,7 @@ def compact_external_status_result(result: Any) -> Any:
         provider_names.add(provider)
 
     compact_result = {
-        "execution_status": execution_status,
+        "check_status": check_status,
         "checked_at": checked_at,
         "providers": compact_statuses,
     }

@@ -50,7 +50,11 @@ from incidentflow_mcp.tools.registry import get_tool_specs
 
 
 def _payload(result: object) -> dict:
-    return result if isinstance(result, dict) else json.loads(result)
+    data = result if isinstance(result, dict) else json.loads(result)
+    # Unwrap the canonical response envelope to the tool-specific data payload.
+    if isinstance(data, dict) and "schema_id" in data and "data" in data:
+        return data["data"]
+    return data
 
 
 class FakeAgentClusterClient:
@@ -466,7 +470,7 @@ async def test_k8s_connection_health_reports_connected_and_permissions() -> None
     payload = await _k8s_connection_health_payload(client=client, bearer_token="token")
 
     assert payload["status"] == "connected"
-    assert payload["agent_online"] is True
+    assert payload["healthy"] is True
     assert payload["agent_version"] == "0.1.0"
     assert payload["namespaces"] == ["incidentflow-prod"]
     assert payload["permissions"]["get_logs"] is True
@@ -845,9 +849,10 @@ async def test_k8s_namespace_overview_returns_namespace_error_before_empty_overv
     finally:
         clear_current_auth_context()
 
-    assert result["status"] == "failed"
-    assert result["error"]["code"] == "NAMESPACE_DENIED"
-    assert result["cluster_id"] == "cluster_prod"
+    payload = _payload(result)
+    assert payload["status"] == "failed"
+    assert payload["error"]["code"] == "NAMESPACE_DENIED"
+    assert payload["cluster_id"] == "cluster_prod"
     assert calls == [("k8s.list_pods", {"namespace": "does-not-exist"})]
 
 
@@ -927,12 +932,13 @@ async def test_k8s_analyze_workload_missing_workload_is_not_healthy(
     finally:
         clear_current_auth_context()
 
-    assert result["status"] == "failed"
-    assert result["health"] == "unknown"
-    assert result["severity"] == "warning"
-    assert result["summary"] == "No matching workload found for does-not-exist"
-    assert result["error"]["code"] == "NOT_FOUND"
-    assert result["data"]["pods_total"] == 0
+    payload = _payload(result)
+    assert payload["status"] == "failed"
+    assert payload["health"] == "unknown"
+    assert payload["severity"] == "warning"
+    assert payload["summary"] == "No matching workload found for does-not-exist"
+    assert payload["error"]["code"] == "NOT_FOUND"
+    assert payload["data"]["pods_total"] == 0
 
 
 def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
@@ -1291,13 +1297,14 @@ def test_structured_tool_exception_wraps_http_status_body() -> None:
     )
     exc = httpx.HTTPStatusError("forbidden", request=request, response=response)
 
-    payload = structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+    payload = structured_tool_exception(exc)
+    fields = payload["__tool_error__"]
 
-    assert payload["ok"] is False
-    assert payload["status"] == "failed"
-    assert payload["error"]["code"] == "HTTP_403"
-    assert payload["error"]["http_status"] == 403
-    assert payload["error"]["upstream_response"]["error"]["code"] == "FORBIDDEN"
+    # 403 maps to the canonical PERMISSION_DENIED code.
+    assert fields["code"] == "PERMISSION_DENIED"
+    assert fields["retryable"] is False
+    assert fields["details"]["http_status"] == 403
+    assert fields["details"]["upstream_response"]["error"]["code"] == "FORBIDDEN"
 
 
 @pytest.mark.asyncio
@@ -1319,8 +1326,9 @@ async def test_fastmcp_runtime_error_sets_is_error() -> None:
     result = await run_tool_with_structured_errors(FakeTool(), {})
 
     assert result.isError is True
-    assert result.structuredContent["ok"] is False
-    assert result.structuredContent["error"]["code"] == "HTTP_404"
+    assert result.structuredContent["status"] == "error"
+    assert result.structuredContent["error"]["code"] == "NOT_FOUND"
+    assert result.structuredContent["error"]["details"]["http_status"] == 404
 
 
 async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error() -> None:
@@ -1333,10 +1341,11 @@ async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error
     )
 
     assert result.isError is True
-    assert result.structuredContent["status"] == "failed"
-    assert result.structuredContent["error"]["code"] == "VALIDATION_ERROR"
-    assert result.structuredContent["error"]["details"][0]["type"] == "extra_forbidden"
-    assert result.structuredContent["error"]["details"][0]["loc"] == ("tail_lines_typo",)
+    assert result.structuredContent["status"] == "error"
+    assert result.structuredContent["error"]["code"] == "INVALID_ARGUMENT"
+    errors = result.structuredContent["error"]["details"]["errors"]
+    assert errors[0]["type"] == "extra_forbidden"
+    assert list(errors[0]["loc"]) == ["tail_lines_typo"]
 
 
 def test_compact_external_status_includes_failed_provider_entries() -> None:
@@ -1365,7 +1374,7 @@ def test_compact_external_status_includes_failed_provider_entries() -> None:
         }
     )
 
-    assert result["execution_status"] == "partial_success"
+    assert result["check_status"] == "partial_success"
     assert result["providers"][1]["provider"] == "aws"
     assert result["providers"][1]["provider_status"] == "error"
     assert result["providers"][1]["source_url"] == "https://status.aws.amazon.com/rss/all.rss"
@@ -1615,7 +1624,7 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
     )
     payload = _payload(output)
 
-    assert payload["execution_status"] == "success"
+    assert payload["check_status"] == "success"
     assert payload["checked_at"] == "2026-03-17T18:00:00Z"
     provider = payload["providers"][0]
     assert provider["provider_status"] == "minor"

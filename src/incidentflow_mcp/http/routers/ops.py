@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.http.install_script import render_install_script
 from incidentflow_mcp.observability.metrics import METRICS_CONTENT_TYPE, render_prometheus_metrics
+from incidentflow_mcp.version import resolve_service_version
 
 
 def _oauth_authority_base(settings: Settings, request: Request) -> str:
@@ -119,7 +120,7 @@ def create_ops_router(settings: Settings) -> APIRouter:
             content={
                 "status": "ok",
                 "service": settings.mcp_server_name,
-                "version": settings.mcp_server_version,
+                "version": resolve_service_version(settings),
                 "environment": settings.environment,
             }
         )

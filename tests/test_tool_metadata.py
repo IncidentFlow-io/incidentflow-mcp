@@ -88,7 +88,11 @@ def _load_submission_tools() -> dict:
 
 
 def _payload(result: object) -> dict:
-    return result if isinstance(result, dict) else json.loads(result)
+    data = result if isinstance(result, dict) else json.loads(result)
+    # Unwrap the canonical response envelope to the tool-specific data payload.
+    if isinstance(data, dict) and "schema_id" in data and "data" in data:
+        return data["data"]
+    return data
 
 
 def test_all_registry_tools_have_submission_metadata() -> None:
@@ -278,7 +282,12 @@ async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatc
     payload = _payload(result)
 
     assert payload["service"] == "incidentflow-mcp"
-    assert payload["version"] == "1.0.0"
+    assert payload["service_version"] == "1.0.0"
+    assert payload["api_version"] == "v1"
+    assert payload["contract_version"] == "1.0"
+    assert payload["supported_api_versions"] == ["v1"]
+    assert payload["supported_schema_versions"] == ["1.0"]
+    assert payload["deprecated_api_versions"] == []
     assert payload["tag"] == "dev-v1.0.0"
     assert payload["commit"] == "8b2e7f1"
     assert payload["built_at"] == "2026-07-13T12:40:18Z"
@@ -299,7 +308,6 @@ async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatc
             "docker-build-push.yml@refs/tags/incidentflow-mcp/dev-v1.0.0"
         ),
     }
-    assert "HTTP-based MCP server" in payload["description"]
 
 
 @pytest.mark.asyncio
@@ -320,7 +328,7 @@ async def test_mcp_version_normalizes_prod_tag(monkeypatch: pytest.MonkeyPatch) 
     result = await tool_manager.call_tool("mcp_version", {})
     payload = _payload(result)
 
-    assert payload["version"] == "1.0.0"
+    assert payload["service_version"] == "1.0.0"
     assert payload["environment"] == "prod"
 
 

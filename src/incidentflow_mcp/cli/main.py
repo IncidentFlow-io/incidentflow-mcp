@@ -25,6 +25,7 @@ import uvicorn
 
 from incidentflow_mcp.config import get_settings
 from incidentflow_mcp.logging_config import configure_logging
+from incidentflow_mcp.version import resolve_service_version
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,7 @@ def serve(
         _library_level,
         _format,
         service=settings.mcp_server_name,
-        service_version=settings.mcp_server_version,
+        service_version=resolve_service_version(settings),
         environment=settings.runtime_environment(),
     )
     logger.info(

@@ -11,7 +11,17 @@ from incidentflow_mcp.auth.principal import IncidentFlowPrincipal
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.integrations import IntegrationStatusService, integration_actions
 from incidentflow_mcp.mcp.context import ToolRegistrationContext
+from incidentflow_mcp.tools.contracts import (
+    API_VERSION,
+    CONTRACT_VERSION,
+    DEPRECATED_API_VERSIONS,
+    SCHEMA_VERSION,
+    SUPPORTED_API_VERSIONS,
+    SUPPORTED_SCHEMA_VERSIONS,
+    capability_schema_metadata,
+)
 from incidentflow_mcp.tools.registry import get_tool_specs
+from incidentflow_mcp.version import resolve_service_version
 
 _CAPABILITIES_TOOL_NAME = "incidentflow_capabilities"
 _VERSION_TOOL_NAME = "mcp_version"
@@ -113,6 +123,8 @@ def _capability_tool_entry(spec: Any, *, response_mode: str) -> dict[str, Any]:
         "supports_shared_dev_fallback": bool(getattr(spec, "supports_shared_dev_fallback", False)),
         "read_only": read_only,
         "write_memory_only": spec.name == "knowledge_upsert",
+        # Per-tool schema metadata (req #8): input/output/error schema ids + versions.
+        **capability_schema_metadata(spec.name),
     }
     if response_mode == "full":
         entry["description"] = spec.description
@@ -217,15 +229,6 @@ def _incidentflow_capabilities_payload(
     }
 
 
-def _normalize_build_version(raw: str | None, fallback: str) -> str:
-    version = (raw or "").strip() or fallback
-    if version.startswith("dev-v"):
-        return version.removeprefix("dev-v")
-    if version.startswith("v"):
-        return version.removeprefix("v")
-    return version
-
-
 def _environment_from_build_metadata(
     *,
     tag: str | None,
@@ -248,18 +251,25 @@ def _mcp_version_payload(settings: Settings) -> dict[str, Any]:
     specs = get_tool_specs()
     meta_count = sum(1 for spec in specs if spec.name in _META_TOOL_NAMES)
     tag = (settings.mcp_build_tag or "").strip() or None
-    version_source = settings.mcp_build_version or tag
+    environment = _environment_from_build_metadata(
+        tag=tag,
+        build_environment=settings.mcp_build_environment,
+        fallback=settings.environment,
+    )
     return {
         "service": settings.mcp_build_service or settings.mcp_server_name,
-        "version": _normalize_build_version(version_source, settings.mcp_server_version),
+        # Single source of truth: same value in logs, OTEL resource and image metadata.
+        "service_version": resolve_service_version(settings),
+        "api_version": API_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "supported_api_versions": list(SUPPORTED_API_VERSIONS),
+        "supported_schema_versions": list(SUPPORTED_SCHEMA_VERSIONS),
+        "deprecated_api_versions": list(DEPRECATED_API_VERSIONS),
+        "environment": environment,
         "tag": tag,
         "commit": (settings.mcp_build_commit or "").strip() or None,
         "built_at": (settings.mcp_build_built_at or "").strip() or None,
-        "environment": _environment_from_build_metadata(
-            tag=tag,
-            build_environment=settings.mcp_build_environment,
-            fallback=settings.environment,
-        ),
         "tools": {
             "registered": len(specs),
             "operational": len(specs) - meta_count,
@@ -273,7 +283,6 @@ def _mcp_version_payload(settings: Settings) -> dict[str, Any]:
             "signature_issuer": (settings.mcp_image_signature_issuer or "").strip() or None,
             "signature_identity": (settings.mcp_image_signature_identity or "").strip() or None,
         },
-        "description": _SERVER_DESCRIPTION,
     }
 
 
