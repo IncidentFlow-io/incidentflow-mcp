@@ -7,6 +7,8 @@ Both success and error envelopes must validate against the tool's own schema.
 
 from __future__ import annotations
 
+import logging
+
 import jsonschema
 import pytest
 from jsonschema import Draft202012Validator, FormatChecker
@@ -97,6 +99,11 @@ async def test_every_tool_response_validates_against_its_schema(
 
     set_current_auth_context(_auth_context())
     failures: list[str] = []
+    # This test drives every tool into a deterministic connection failure on
+    # purpose; we assert on the returned error ENVELOPE, not on logs. Mute the
+    # expected ConnectError WARNING tracebacks (log_cli is on) so the CI log
+    # stays readable. Restored in `finally`.
+    logging.disable(logging.ERROR)
     try:
         for tool in tools:
             name = tool.name
@@ -114,6 +121,7 @@ async def test_every_tool_response_validates_against_its_schema(
                     f"{name}: {envelope.get('status')} fails schema: {errors[0].message}"
                 )
     finally:
+        logging.disable(logging.NOTSET)
         clear_current_auth_context()
 
     assert not failures, "Schema conformance failures:\n" + "\n".join(failures)
