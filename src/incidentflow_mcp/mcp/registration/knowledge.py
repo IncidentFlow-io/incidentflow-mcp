@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from incidentflow_mcp.mcp.context import ToolRegistrationContext
 from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.tools.contracts import ErrorCode
+from incidentflow_mcp.tools.integration_guide import integration_guide as _integration_guide
 from incidentflow_mcp.tools.knowledge_search_tools import (
     KnowledgeSearchAPIError,
     knowledge_get,
@@ -72,6 +73,33 @@ def register_knowledge_tools(
             return _normalize_search_response(payload, query=query, scope="public")
         except KnowledgeSearchAPIError as exc:
             return structured_tool_exception(exc, code=ErrorCode.UPSTREAM_ERROR)
+
+    @ctx.mcp.tool(**ctx.metadata("integration_guide"))
+    async def integration_guide_tool(
+        integration: Literal["kubernetes", "slack", "grafana", "argocd"],
+        goal: Literal["install", "configure", "verify", "upgrade", "troubleshoot", "uninstall"],
+        method: str | None = None,
+        environment: str | None = None,
+        version: str | None = None,
+        problem: str | None = None,
+        context: dict[str, Any] | None = None,
+        response_mode: Literal["compact", "full"] = "compact",
+    ) -> dict[str, Any]:
+        try:
+            result = await _integration_guide(
+                ctx.settings,
+                integration=integration,
+                goal=goal,
+                method=method,
+                environment=environment,
+                version=version,
+                problem=problem,
+                context=context,
+                response_mode=response_mode,
+            )
+        except KnowledgeSearchAPIError as exc:
+            return structured_tool_exception(exc, code=ErrorCode.UPSTREAM_ERROR)
+        return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("private_knowledge_search"))
     async def private_knowledge_search_tool(

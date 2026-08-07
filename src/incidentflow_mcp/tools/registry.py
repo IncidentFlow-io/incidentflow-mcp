@@ -307,6 +307,81 @@ _TOOL_SPECS: list[ToolSpec] = [
         structured_output=True,
     ),
     ToolSpec(
+        name="integration_guide",
+        title="Integration Setup Guide",
+        description=(
+            "Returns a structured, documentation-backed guide for connecting, configuring, "
+            "verifying, upgrading, troubleshooting, or removing an IncidentFlow integration "
+            "(Kubernetes, Slack, Grafana, or Argo CD). Provides ordered steps, requirements, "
+            "verification checks, and doc sources. Read-only: it never accepts, returns, or "
+            "stores real secrets — commands are templates and required secrets are listed as "
+            "sensitive_inputs to be supplied by the user in the IncidentFlow application."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "integration": {
+                    "type": "string",
+                    "enum": ["kubernetes", "slack", "grafana", "argocd"],
+                    "description": "Which integration the guide is for.",
+                },
+                "goal": {
+                    "type": "string",
+                    "enum": [
+                        "install",
+                        "configure",
+                        "verify",
+                        "upgrade",
+                        "troubleshoot",
+                        "uninstall",
+                    ],
+                    "description": "What the user is trying to do.",
+                },
+                "method": {
+                    "type": "string",
+                    "description": (
+                        "Optional installation or connection method. Available values depend "
+                        "on the integration (e.g. helm/argocd/terraform/flux/raw_yaml for "
+                        "Kubernetes; oauth for Slack; service_account for Grafana; api_token "
+                        "for Argo CD)."
+                    ),
+                },
+                "environment": {
+                    "type": "string",
+                    "description": "Optional environment label such as production or staging.",
+                },
+                "version": {
+                    "type": "string",
+                    "description": "Optional product version to scope documentation sources.",
+                },
+                "problem": {
+                    "type": "string",
+                    "description": "Optional problem description for troubleshoot goals.",
+                    "maxLength": 2000,
+                },
+                "context": {
+                    "type": "object",
+                    "description": (
+                        "Optional non-secret integration parameters (e.g. cluster_name, "
+                        "namespace). Never include tokens or credentials."
+                    ),
+                    "additionalProperties": {
+                        "type": ["string", "number", "boolean", "null"],
+                    },
+                },
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                    "description": "full returns more documentation sources.",
+                },
+            },
+            "required": ["integration", "goal"],
+        },
+        annotations=_read_only_annotations(),
+        structured_output=True,
+    ),
+    ToolSpec(
         name="public_knowledge_search",
         title="Search Public Knowledge",
         description=(
@@ -1276,6 +1351,31 @@ _TOOL_SPECS: list[ToolSpec] = [
             },
             required=["namespace", "pod"],
         ),
+        annotations=_read_only_annotations(),
+        structured_output=True,
+    ),
+    ToolSpec(
+        name="grafana_connection_health",
+        title="Check Grafana Connection",
+        description=(
+            "Checks the connected Grafana integration for the current workspace and returns "
+            "read-only connection health, a normalized status, the number of configured "
+            "datasources, and any warnings. Access is mediated by platform-api; Grafana "
+            "credentials are never exposed."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "workspace_id": {
+                    "type": "string",
+                    "description": (
+                        "Workspace scope. Optional when the token has workspace scope "
+                        "or INCIDENTFLOW_WORKSPACE_ID is configured."
+                    ),
+                },
+            },
+            "required": [],
+        },
         annotations=_read_only_annotations(),
         structured_output=True,
     ),

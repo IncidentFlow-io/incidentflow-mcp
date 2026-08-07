@@ -92,6 +92,51 @@ class PlatformAPIKnowledgeClient:
                 )
                 return payload  # type: ignore[return-value]
 
+    async def search_docs(
+        self,
+        *,
+        query: str,
+        limit: int = 5,
+        document_type: str | None = None,
+        integration: str | None = None,
+        installation_method: str | None = None,
+        component: str | None = None,
+        product_version: str | None = None,
+    ) -> dict[str, Any]:
+        """Search only the public documentation collection with docs filters.
+
+        Targets ``/internal/docs/search`` (not the combined knowledge endpoint) so
+        the ``integration`` / ``installation_method`` / ``component`` /
+        ``product_version`` filters apply. Returns ``{"matches": [...]}``.
+        """
+        tracer = get_tracer()
+        with tracer.start_as_current_span("docs.search") as span:
+            span.set_attribute("docs.limit", limit)
+            body: dict[str, Any] = {"query": query, "limit": limit}
+            if document_type:
+                body["document_type"] = document_type
+            if integration:
+                body["integration"] = integration
+            if installation_method:
+                body["installation_method"] = installation_method
+            if component:
+                body["component"] = component
+            if product_version:
+                body["product_version"] = product_version
+
+            headers = self._headers()
+            inject_trace_headers(headers)
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(
+                    f"{self._base}/internal/docs/search",
+                    json=body,
+                    headers=headers,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                span.set_attribute("docs.matches_count", len(payload.get("matches", [])))
+                return payload  # type: ignore[return-value]
+
     async def get(
         self,
         *,

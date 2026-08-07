@@ -58,6 +58,9 @@ class PlatformGrafanaClient:
         _raise_for_status_with_body(response)
         return dict(response.json())
 
+    async def health(self) -> dict[str, Any]:
+        return await self._post(f"{_BASE_PATH}/health", {"workspace_id": self._workspace_id})
+
     async def list_dashboards(self) -> list[dict[str, Any]]:
         """Return the workspace's allow-listed dashboards."""
         payload = await self._get(

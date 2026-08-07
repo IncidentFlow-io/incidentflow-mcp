@@ -31,10 +31,12 @@ from incidentflow_mcp.tools.grafana import (
     AnalyzeOutput,
     DashboardDetailOutput,
     ExtractQueriesOutput,
+    GrafanaConnectionHealthOutput,
     ListDashboardsOutput,
     PanelViewOutput,
     QueryOutput,
 )
+from incidentflow_mcp.tools.integration_guide import IntegrationGuideOutput
 from incidentflow_mcp.tools.schemas import CorrelateAlertsOutput, IncidentSummaryOutput
 from incidentflow_mcp.tools.slack_alerts import SlackAlertsOutput, SlackAlertThreadOutput
 
@@ -463,6 +465,7 @@ TOOL_OUTPUT_MODELS: dict[str, type[BaseModel] | dict[str, Any]] = {
     "argocd_find_recent_deployments": ArgoCDOutput,
     "argocd_analyze_application": ArgoCDOutput,
     # grafana
+    "grafana_connection_health": GrafanaConnectionHealthOutput,
     "grafana_list_dashboards": ListDashboardsOutput,
     "grafana_get_dashboard": DashboardDetailOutput,
     "grafana_extract_panel_queries": ExtractQueriesOutput,
@@ -482,6 +485,7 @@ TOOL_OUTPUT_MODELS: dict[str, type[BaseModel] | dict[str, Any]] = {
     "private_knowledge_search": PrivateKnowledgeSearchData,
     "knowledge_get": KnowledgeGetData,
     "knowledge_upsert": KnowledgeUpsertData,
+    "integration_guide": IntegrationGuideOutput,
 }
 
 

@@ -140,7 +140,7 @@ _STRICT_SUCCESS_SAMPLES: dict[str, dict] = {
         "supported_schema_versions": ["1.0"],
         "deprecated_api_versions": [],
         "environment": "dev",
-        "tools": {"registered": 46, "operational": 42, "meta": 4},
+        "tools": {"registered": 48, "operational": 44, "meta": 4},
         "image": {"signed": False, "signature_verified": False},
     },
     "k8s_agent_status": {

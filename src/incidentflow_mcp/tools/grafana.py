@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class GrafanaReadClient(Protocol):
     """Subset of ``PlatformGrafanaClient`` the tools depend on."""
 
+    async def health(self) -> dict[str, Any]: ...
     async def list_dashboards(self) -> list[dict[str, Any]]: ...
     async def get_dashboard(self, dashboard_uid: str) -> dict[str, Any]: ...
     async def extract_queries(self, dashboard_uid: str) -> list[dict[str, Any]]: ...
@@ -60,6 +61,21 @@ class DashboardItem(BaseModel):
     tags: list[str] = Field(default_factory=list)
     datasource_uid: str | None = None
     enabled: bool = False
+
+
+class GrafanaConnectionHealthOutput(BaseModel):
+    """Read-only Grafana connection health (owned; strict)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["connected", "degraded", "offline", "not_configured", "unknown"]
+    healthy: bool
+    ok: bool
+    message: str = ""
+    datasources_found: int = 0
+    source: str = ""
+    truncated: bool = False
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ListDashboardsOutput(BaseModel):
@@ -328,6 +344,34 @@ def _with_panel_view_cardinality(payload: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
+
+
+async def grafana_connection_health(client: GrafanaReadClient) -> GrafanaConnectionHealthOutput:
+    payload = await client.health()
+    ok = bool(payload.get("ok"))
+    message = str(payload.get("message") or "")
+    if message == "grafana_not_configured":
+        status = "not_configured"
+    elif ok:
+        status = "connected"
+    elif message in {
+        "datasource_query_test_failed",
+        "grafana_query_failed",
+        "grafana_no_datasources",
+    }:
+        status = "degraded"
+    else:
+        status = "unknown"
+    return GrafanaConnectionHealthOutput(
+        status=status,
+        healthy=ok,
+        ok=ok,
+        message=message,
+        datasources_found=int(payload.get("datasources_found") or 0),
+        source=str(payload.get("source") or ""),
+        truncated=bool(payload.get("truncated")),
+        warnings=list(payload.get("warnings") or []),
+    )
 
 
 async def grafana_list_dashboards(client: GrafanaReadClient) -> ListDashboardsOutput:
