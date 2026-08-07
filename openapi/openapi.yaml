@@ -72,6 +72,232 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
       security: []
+  /version:
+    get:
+      tags:
+      - ops
+      summary: Service + contract version
+      description: "Unauthenticated version/contract block \u2014 no secrets. Mirrors mcp_version."
+      operationId: version_version_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /schemas:
+    get:
+      tags:
+      - ops
+      summary: JSON Schema catalog
+      description: Catalog of published JSON Schemas (envelope, error, per-tool responses).
+      operationId: schemas_schemas_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /schemas/{schema_id}:
+    get:
+      tags:
+      - ops
+      summary: One JSON Schema by id
+      description: Return one generated Draft 2020-12 JSON Schema, or 404 if unknown.
+      operationId: schema_by_id_schemas__schema_id__get
+      parameters:
+      - name: schema_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schema Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /.well-known/oauth-protected-resource:
+    get:
+      tags:
+      - ops
+      summary: OAuth protected resource metadata
+      operationId: oauth_protected_resource__well_known_oauth_protected_resource_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /.well-known/oauth-protected-resource/mcp:
+    get:
+      tags:
+      - ops
+      summary: OAuth protected resource metadata (MCP path)
+      operationId: oauth_protected_resource_mcp__well_known_oauth_protected_resource_mcp_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /.well-known/oauth-authorization-server:
+    get:
+      tags:
+      - ops
+      summary: OAuth authorization server metadata
+      operationId: oauth_authorization_server_metadata__well_known_oauth_authorization_server_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /.well-known/openid-configuration:
+    get:
+      tags:
+      - ops
+      summary: OpenID Connect discovery metadata
+      operationId: openid_configuration__well_known_openid_configuration_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /.well-known/jwks.json:
+    get:
+      tags:
+      - ops
+      summary: OAuth JWKS redirect
+      operationId: oauth_jwks__well_known_jwks_json_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /oauth/register:
+    post:
+      tags:
+      - ops
+      summary: OAuth dynamic client registration bridge
+      operationId: oauth_register_oauth_register_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /register:
+    post:
+      tags:
+      - ops
+      summary: OAuth dynamic client registration bridge
+      operationId: oauth_register_register_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /authorize:
+    get:
+      tags:
+      - ops
+      summary: OAuth authorization redirect
+      operationId: oauth_authorize_authorize_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /token:
+    post:
+      tags:
+      - ops
+      summary: OAuth token endpoint bridge
+      operationId: oauth_token_token_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /revoke:
+    post:
+      tags:
+      - ops
+      summary: OAuth token revocation bridge
+      operationId: oauth_revoke_revoke_post
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /.well-known/{challenge_path}:
+    get:
+      tags:
+      - ops
+      summary: OpenAI domain verification
+      description: Return the configured OpenAI Apps domain-verification token.
+      operationId: openai_domain_verification__well_known__challenge_path__get
+      parameters:
+      - name: challenge_path
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Challenge Path
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /mcp:
     get:
       tags:
@@ -234,13 +460,43 @@ paths:
           $ref: '#/components/responses/RateLimitError'
         '500':
           $ref: '#/components/responses/InternalServerError'
-tags:
-- name: ops
-  description: Operational/public endpoints
-- name: mcp
-  description: MCP Streamable HTTP transport endpoint
 components:
   schemas:
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
     IncidentSummaryInput:
       description: Input for the incident_summary tool.
       properties:
@@ -269,6 +525,7 @@ components:
       - critical
       - high
       - medium
+      - warning
       - low
       - info
       title: Severity
@@ -325,6 +582,13 @@ components:
             type: string
           title: Recommendations
           type: array
+        human_context_from_slack_thread:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Human Context From Slack Thread
       required:
       - incident_id
       - title
@@ -363,6 +627,20 @@ components:
             type: string
           title: Labels
           type: object
+        slack:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Slack
+        thread:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Thread
       required:
       - alert_id
       - name
@@ -433,6 +711,27 @@ components:
           minimum: 0.0
           title: Confidence
           type: number
+        evidence:
+          items:
+            type: string
+          title: Evidence
+          type: array
+        confidence_level:
+          default: possible
+          title: Confidence Level
+          type: string
+        missing_evidence:
+          items:
+            type: string
+          title: Missing Evidence
+          type: array
+        human_context:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          default: null
+          title: Human Context
       required:
       - cluster_id
       - alert_ids
@@ -472,12 +771,153 @@ components:
       - summary
       title: CorrelateAlertsOutput
       type: object
+    incidentflow_capabilitiesArguments:
+      type: object
+      properties:
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact omits long descriptions; full includes full metadata.
+        category:
+          type: string
+          description: Optional category id filter, e.g. kubernetes, grafana_prometheus, slack_incidents,
+            or knowledge.
+      required: []
+      title: incidentflow_capabilitiesArguments
+    mcp_versionArguments:
+      type: object
+      properties: {}
+      required: []
+      title: mcp_versionArguments
+    incidentflow_auth_statusArguments:
+      type: object
+      properties: {}
+      additionalProperties: false
+      title: incidentflow_auth_statusArguments
+    incidentflow_integrations_statusArguments:
+      type: object
+      properties: {}
+      additionalProperties: false
+      title: incidentflow_integrations_statusArguments
+    public_knowledge_searchArguments:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Natural language public knowledge query.
+        document_type:
+          type: string
+          enum:
+          - documentation
+          - integration_guide
+          - tool_reference
+          - runbook
+          - troubleshooting
+          - best_practice
+          - security_documentation
+          - faq
+          - api_reference
+          description: Optional public document type filter.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact returns excerpts only; full includes complete content.
+        limit:
+          type: integer
+          default: 8
+          minimum: 1
+          maximum: 20
+      required:
+      - query
+      title: public_knowledge_searchArguments
+    private_knowledge_searchArguments:
+      type: object
+      properties:
+        query:
+          type: string
+          description: Natural language private query.
+        document_type:
+          type: string
+          enum:
+          - incident
+          - rca
+          - postmortem
+          - runbook
+          - knowledge
+          - service_context
+          - deployment_note
+          description: Optional workspace document type filter.
+        service:
+          type: string
+          description: Optional service filter.
+        environment:
+          type: string
+          description: Optional workspace environment filter.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact returns excerpts only; full includes complete content.
+        limit:
+          type: integer
+          default: 8
+          minimum: 1
+          maximum: 20
+      required:
+      - query
+      title: private_knowledge_searchArguments
+    knowledge_getArguments:
+      type: object
+      properties:
+        id:
+          type: string
+          description: UI UUID, entry id, point id, exact title, or stable document id.
+        id_type:
+          type: string
+          enum:
+          - auto
+          - entry_id
+          - ui_id
+          - knowledge_id
+          - document_id
+          - point_id
+          - title
+          default: auto
+          description: Identifier type. auto tries deterministic exact lookups.
+        document_type:
+          type: string
+          enum:
+          - incident
+          - rca
+          - postmortem
+          - runbook
+          - knowledge
+          description: Optional type hint for stable document ids or title matches.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: full
+          description: compact omits document body; full includes complete content.
+      required:
+      - id
+      title: knowledge_getArguments
     incident_summaryArguments:
       type: object
       properties:
         incident_id:
           type: string
-          description: Unique incident identifier (e.g. INC-001)
+          description: Unique incident identifier (e.g. INC-001). Required unless check_id is provided
+            to poll an existing async job.
         include_timeline:
           type: boolean
           default: true
@@ -493,23 +933,90 @@ components:
           - sync
           - async
           default: auto
-          description: Execution strategy. auto => async in production, sync elsewhere.
+          description: Execution strategy. sync runs the read-only correlator inline and returns the summary
+            immediately; async dispatches a runner job and returns a job_id to poll via check_id; auto
+            picks async when async tools are enabled, else sync.
+        wait_for_result:
+          type: boolean
+          default: true
+          description: 'When polling with check_id: if true (default), polls until the job completes;
+            if false, returns the current job status immediately.'
+        check_id:
+          type: string
+          description: Existing async job_id to poll. When provided, MCP fetches this job's result instead
+            of creating a new summary (incident_id not required).
         workspace_id:
           type: string
-          description: Optional workspace scope for async orchestration
-      required:
-      - incident_id
+          description: Workspace scope for async orchestration. Optional when the token has workspace
+            scope or MCP_DEFAULT_WORKSPACE_ID is configured.
+      required: []
       title: incident_summaryArguments
     correlate_alertsArguments:
       type: object
       properties:
+        alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              alert_id:
+                type: string
+                description: Stable alert identifier.
+              name:
+                type: string
+                description: Alert name, for example InstanceDown.
+              service:
+                type: string
+                description: Affected service name.
+              severity:
+                type: string
+                enum:
+                - critical
+                - high
+                - medium
+                - warning
+                - low
+                - info
+              status:
+                type: string
+                enum:
+                - firing
+                - resolved
+                - pending
+              fired_at:
+                type: string
+                format: date-time
+                description: Time the alert fired, as an ISO 8601 timestamp.
+              labels:
+                type: object
+                additionalProperties:
+                  type: string
+                description: Optional alert labels such as env, namespace, pod, or deployment.
+              slack:
+                type: object
+                description: Optional Slack message metadata for the alert.
+              thread:
+                type: object
+                description: Optional Slack thread metadata for the alert.
+            required:
+            - alert_id
+            - name
+            - service
+            - severity
+            - status
+            - fired_at
+          minItems: 1
+          maxItems: 500
+          description: Alert objects to correlate. Each alert requires alert_id, name, service, severity,
+            status, and fired_at.
         alerts_json:
           type: string
-          description: JSON array of Alert objects to correlate
+          description: Legacy JSON string containing the same array accepted by alerts. Prefer alerts
+            for new calls.
         window_minutes:
           type: integer
           default: 60
-          description: "Correlation time window in minutes (1\u20131440)"
+          description: Correlation time window in minutes (1-1440)
         min_cluster_size:
           type: integer
           default: 2
@@ -521,12 +1028,11 @@ components:
           - sync
           - async
           default: auto
-          description: Execution strategy. auto => async in production, sync elsewhere.
+          description: Execution strategy. auto and sync run inline. async is reserved for a future dedicated
+            correlation runner.
         workspace_id:
           type: string
-          description: Optional workspace scope for async orchestration
-      required:
-      - alerts_json
+          description: Reserved for future async orchestration; ignored for inline correlation.
       title: correlate_alertsArguments
     external_status_checkArguments:
       type: object
@@ -563,10 +1069,12 @@ components:
           description: Runner orchestration mode. auto/sync are coerced to async.
         workspace_id:
           type: string
-          description: Optional workspace scope for async orchestration
+          description: Workspace scope for async orchestration. Optional when token has workspace scope
+            or MCP_DEFAULT_WORKSPACE_ID is configured.
         job_id:
           type: string
-          description: UUID of an existing async job to poll. When provided, MCP polls this job and does not create a new one.
+          description: UUID of an existing async job to poll. When provided, MCP polls this job and does
+            not create a new one.
         check_id:
           type: string
           description: Deprecated alias for job_id. Use job_id for polling an existing async job.
@@ -579,6 +1087,1109 @@ components:
           description: compact returns chat-safe summary; full returns raw job result payload.
       required: []
       title: external_status_checkArguments
+    slack_alerts_listArguments:
+      type: object
+      properties:
+        channel:
+          type: string
+          default: alerts
+          description: Slack channel name (#alerts or alerts) or channel ID.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Number of recent channel messages to inspect.
+        include_raw:
+          type: boolean
+          default: false
+          description: Include extracted raw Slack text in each parsed alert.
+        include_threads:
+          type: boolean
+          default: false
+          description: Enable Slack thread metadata or full thread enrichment.
+        thread_mode:
+          type: string
+          enum:
+          - none
+          - metadata
+          - full
+          default: none
+          description: none returns alert messages only; metadata returns thread counts/users; full fetches
+            replies and analysis.
+        max_thread_replies:
+          type: integer
+          default: 20
+          minimum: 0
+          maximum: 200
+          description: Maximum thread replies to fetch when thread_mode=full.
+        include_system_messages:
+          type: boolean
+          default: false
+          description: Include Slack channel join/leave and other system messages.
+        deduplicate:
+          type: boolean
+          default: true
+          description: Group repeated notifications for the same alert fingerprint and return first_seen,
+            last_seen, and occurrences.
+        workspace_id:
+          type: string
+          description: Workspace scope for platform Slack mode. Optional when INCIDENTFLOW_WORKSPACE_ID
+            is configured.
+      required: []
+      title: slack_alerts_listArguments
+    slack_alert_thread_getArguments:
+      type: object
+      properties:
+        channel_id:
+          type: string
+          description: Slack channel ID containing the alert message.
+        message_ts:
+          type: string
+          description: Slack root message timestamp or thread_ts.
+        include_root:
+          type: boolean
+          default: true
+          description: Include parsed root alert details in the response.
+        include_raw:
+          type: boolean
+          default: false
+          description: 'Include unfiltered raw Slack message text in the root alert. Default false returns
+            a compact response: IPs are redacted and commands are extracted into extracted_commands instead.'
+        max_replies:
+          type: integer
+          default: 50
+          minimum: 0
+          maximum: 200
+          description: Maximum Slack thread replies to fetch.
+        workspace_id:
+          type: string
+          description: Workspace scope for platform Slack mode. Optional when INCIDENTFLOW_WORKSPACE_ID
+            is configured.
+      required:
+      - channel_id
+      - message_ts
+      title: slack_alert_thread_getArguments
+    incident_thread_summaryArguments:
+      type: object
+      properties:
+        channel_id:
+          type: string
+          description: Slack channel ID containing the thread.
+        thread_ts:
+          type: string
+          description: Slack thread timestamp.
+        alert_context:
+          type: object
+          properties:
+            alert_name:
+              type: string
+              description: Alert name from the root Slack alert.
+            name:
+              type: string
+              description: Alternative alert name field.
+            summary:
+              type: string
+              description: Short alert or incident summary.
+            service:
+              type: string
+              description: Affected service name.
+            severity:
+              type: string
+              description: Alert severity.
+            status:
+              type: string
+              description: Alert status.
+            labels:
+              type: object
+              additionalProperties:
+                type: string
+              description: Alert labels copied from Grafana, Alertmanager, or IncidentFlow.
+          description: Optional alert or incident context to shape the summary title/root-cause hints.
+        workspace_id:
+          type: string
+          description: Workspace scope for platform Slack mode. Optional when INCIDENTFLOW_WORKSPACE_ID
+            is configured.
+      required:
+      - channel_id
+      - thread_ts
+      title: incident_thread_summaryArguments
+    k8s_connection_healthArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_connection_healthArguments
+    k8s_cluster_overviewArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_cluster_overviewArguments
+    k8s_namespace_overviewArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required:
+      - namespace
+      additionalProperties: false
+      title: k8s_namespace_overviewArguments
+    k8s_rbac_checkArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_rbac_checkArguments
+    k8s_agent_statusArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_agent_statusArguments
+    k8s_list_namespacesArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_list_namespacesArguments
+    k8s_list_podsArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        include_labels:
+          type: boolean
+          default: false
+          description: Include Kubernetes labels in the response. Off by default.
+        include_images:
+          type: boolean
+          default: true
+          description: Include container image name:tag in the response.
+        include_node:
+          type: boolean
+          default: true
+          description: Include the node name the pod is scheduled on.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Maximum number of pods to return. Defaults to 50.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_list_podsArguments
+    k8s_get_podArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        pod:
+          type: string
+        detail_level:
+          type: string
+          enum:
+          - summary
+          - standard
+          - debug
+          default: summary
+          description: summary=health basics only; standard=with events for this pod; debug=standard plus
+            raw agent response structure
+        include_labels:
+          type: boolean
+          default: false
+          description: Include Kubernetes labels in the response.
+        include_images:
+          type: boolean
+          default: true
+          description: Include container image name:tag in the response.
+        include_node:
+          type: boolean
+          default: true
+          description: Include the node name the pod is scheduled on.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required:
+      - namespace
+      - pod
+      additionalProperties: false
+      title: k8s_get_podArguments
+    k8s_get_pod_logsArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        pod:
+          type: string
+        container:
+          type: string
+        tail_lines:
+          type: integer
+          default: 200
+          minimum: 1
+          maximum: 1000
+        level:
+          type: string
+          enum:
+          - trace
+          - debug
+          - info
+          - warn
+          - warning
+          - error
+          - critical
+          - fatal
+          description: Optional case-insensitive level filter.
+        contains:
+          type: string
+          description: Only return log lines containing this text.
+        exclude:
+          type: string
+          description: Drop log lines containing this text.
+        since_minutes:
+          type: integer
+          minimum: 1
+        compact:
+          type: boolean
+          default: true
+          description: Return compact highlighted logs instead of raw logs.
+        json_parse:
+          type: boolean
+          default: false
+          description: Ask the agent to parse JSON log lines when supported.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required:
+      - namespace
+      - pod
+      additionalProperties: false
+      title: k8s_get_pod_logsArguments
+    k8s_list_eventsArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        pod:
+          type: string
+          description: Optional pod name to filter events to a specific pod.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Maximum number of deduplicated events to return.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_list_eventsArguments
+    k8s_list_deploymentsArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Maximum number of deployments to return.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_list_deploymentsArguments
+    k8s_list_servicesArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Maximum number of services to return.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_list_servicesArguments
+    k8s_get_rollout_statusArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        deployment:
+          type: string
+          description: Deployment name. Use 'workload' as an alias if preferred.
+        workload:
+          type: string
+          description: Alias for 'deployment'. Provide one or the other, not both.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required:
+      - namespace
+      additionalProperties: false
+      title: k8s_get_rollout_statusArguments
+    k8s_show_unhealthy_podsArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        include_memory_context:
+          type: boolean
+          default: false
+          description: Attach semantic memory/runbook context. Off by default for this status/list tool
+            to keep routine output focused.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required: []
+      additionalProperties: false
+      title: k8s_show_unhealthy_podsArguments
+    k8s_analyze_workloadArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        workload:
+          type: string
+          description: Deployment or Pod name to inspect, for example checkout-api or checkout-api-7f9c6d7d8b-abcde.
+            Do not include kind/ prefixes.
+        tail_lines:
+          type: integer
+          default: 100
+          minimum: 1
+          maximum: 1000
+        include_memory_context:
+          type: boolean
+          default: true
+          description: Attach relevant runbook/RCA/postmortem context when the workload looks unhealthy.
+            Enabled by default for investigation workflows.
+        include_raw_logs:
+          type: boolean
+          default: false
+          description: Include compact raw log lines under data.raw_logs. Off by default; the tool normally
+            returns log_analysis only.
+        exclude_loggers:
+          type: array
+          items:
+            type: string
+          description: Additional logger or substring patterns to classify as internal_debug and hide
+            from top application patterns, for example httpcore.*.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required:
+      - namespace
+      - workload
+      additionalProperties: false
+      title: k8s_analyze_workloadArguments
+    k8s_describe_podArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        pod:
+          type: string
+        include_details:
+          type: boolean
+          default: false
+          description: Include lower-level pod details such as node, pod IP, probes, and resource requests/limits.
+            Off by default for compact output.
+        include_memory_context:
+          type: boolean
+          default: false
+          description: Attach relevant runbook/RCA/postmortem context when current pod issues are detected.
+            Off by default for compact inspect calls.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required:
+      - namespace
+      - pod
+      additionalProperties: false
+      title: k8s_describe_podArguments
+    k8s_debug_podArguments:
+      type: object
+      properties:
+        environment:
+          type: string
+          description: Optional environment selector, e.g. production, staging, or dev.
+        cluster_name:
+          type: string
+          description: Optional cluster name or alias selector.
+        cluster_id:
+          type: string
+          description: Internal/debug override. Usually omit this.
+        namespace:
+          type: string
+        pod:
+          type: string
+        tail_lines:
+          type: integer
+          default: 100
+          minimum: 1
+          maximum: 500
+          description: Log lines to fetch for diagnosis.
+        include_memory_context:
+          type: boolean
+          default: true
+          description: Attach relevant runbook/RCA/postmortem context when current pod issues are detected.
+            Enabled by default for debug workflows.
+        timeout_seconds:
+          type: integer
+          default: 30
+          minimum: 1
+          maximum: 60
+      required:
+      - namespace
+      - pod
+      additionalProperties: false
+      title: k8s_debug_podArguments
+    grafana_list_dashboardsArguments:
+      type: object
+      properties:
+        workspace_id:
+          type: string
+          description: Workspace scope. Optional when the token has workspace scope or INCIDENTFLOW_WORKSPACE_ID
+            is configured.
+      required: []
+      title: grafana_list_dashboardsArguments
+    grafana_get_dashboardArguments:
+      type: object
+      properties:
+        dashboard_uid:
+          type: string
+          description: Grafana dashboard UID, URL slug, or exact allow-listed title.
+        workspace_id:
+          type: string
+          description: Optional workspace scope.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims dashboard panels; full returns API payload.
+        panel_limit:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+          description: Maximum panels returned in compact mode.
+      required:
+      - dashboard_uid
+      title: grafana_get_dashboardArguments
+    grafana_extract_panel_queriesArguments:
+      type: object
+      properties:
+        dashboard_uid:
+          type: string
+          description: Grafana dashboard UID, URL slug, or exact allow-listed title.
+        workspace_id:
+          type: string
+          description: Optional workspace scope.
+      required:
+      - dashboard_uid
+      title: grafana_extract_panel_queriesArguments
+    grafana_metrics_queryArguments:
+      type: object
+      properties:
+        datasource_uid:
+          type: string
+          description: Grafana datasource uid.
+        query:
+          type: string
+          description: PromQL expression.
+        time:
+          type: string
+          description: Optional evaluation time (RFC3339 or unix seconds).
+        workspace_id:
+          type: string
+          description: Optional workspace scope.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims series/samples; full returns API payload.
+        max_series:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+          description: Maximum metric series in compact mode.
+        max_points:
+          type: integer
+          default: 120
+          minimum: 1
+          maximum: 1000
+          description: Maximum samples per series in compact mode.
+      required:
+      - datasource_uid
+      - query
+      title: grafana_metrics_queryArguments
+    grafana_metrics_query_rangeArguments:
+      type: object
+      properties:
+        datasource_uid:
+          type: string
+          description: Grafana datasource uid.
+        query:
+          type: string
+          description: PromQL expression.
+        start:
+          type: string
+          description: Range start (RFC3339/unix/now-6h).
+        end:
+          type: string
+          description: Range end (RFC3339/unix/now).
+        step:
+          type: string
+          description: Step, e.g. '30s' or seconds.
+        workspace_id:
+          type: string
+          description: Optional workspace scope.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims series/samples; full returns API payload.
+        max_series:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+          description: Maximum metric series in compact mode.
+        max_points:
+          type: integer
+          default: 120
+          minimum: 1
+          maximum: 1000
+          description: Maximum samples per series in compact mode.
+      required:
+      - datasource_uid
+      - query
+      - start
+      - end
+      - step
+      title: grafana_metrics_query_rangeArguments
+    analyze_dashboard_healthArguments:
+      type: object
+      properties:
+        dashboard_uid:
+          type: string
+          description: Grafana dashboard UID, URL slug, or exact allow-listed title.
+        start:
+          type: string
+          default: now-6h
+          description: Window start (default now-6h).
+        end:
+          type: string
+          default: now
+          description: Window end (default now).
+        step:
+          type: string
+          description: Optional step; server picks a default.
+        workspace_id:
+          type: string
+          description: Optional workspace scope.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims panel series; full returns API payload.
+        panel_limit:
+          type: integer
+          default: 10
+          minimum: 1
+          maximum: 50
+          description: Maximum panels returned in compact mode.
+        max_series:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+          description: Maximum series per panel in compact mode.
+        max_points:
+          type: integer
+          default: 120
+          minimum: 1
+          maximum: 1000
+          description: Maximum samples per series in compact mode.
+      required:
+      - dashboard_uid
+      title: analyze_dashboard_healthArguments
+    grafana_get_panel_viewArguments:
+      type: object
+      properties:
+        dashboard_uid:
+          type: string
+          description: Grafana dashboard UID, URL slug, or exact allow-listed title.
+        panel_id:
+          type: integer
+          minimum: 1
+          description: Grafana panel id.
+        start:
+          type: string
+          default: now-1h
+          description: Window start (default now-1h).
+        end:
+          type: string
+          default: now
+          description: Window end (default now).
+        variables:
+          type: object
+          additionalProperties:
+            anyOf:
+            - type: string
+            - type: array
+              items:
+                type: string
+          description: Grafana dashboard variables to apply.
+        max_points:
+          type: integer
+          default: 300
+          minimum: 1
+          maximum: 500
+          description: Maximum points per rendered series.
+        workspace_id:
+          type: string
+          description: Optional workspace scope.
+      required:
+      - dashboard_uid
+      - panel_id
+      title: grafana_get_panel_viewArguments
+    argocd_connection_healthArguments:
+      type: object
+      properties:
+        integration_id:
+          type: string
+          description: Optional Argo CD integration id. Omit when only one is connected.
+      required: []
+      title: argocd_connection_healthArguments
+    argocd_list_applicationsArguments:
+      type: object
+      properties:
+        integration_id:
+          type: string
+          description: Optional integration id.
+        search:
+          type: string
+          description: Case-insensitive app search text.
+        project:
+          type: string
+          description: Argo CD project filter.
+        namespace:
+          type: string
+          description: Destination namespace filter.
+        destination_cluster:
+          type: string
+          description: Destination cluster name or server filter.
+        health_status:
+          type: string
+          description: Health status filter.
+        sync_status:
+          type: string
+          description: Sync status filter.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+      required: []
+      title: argocd_list_applicationsArguments
+    argocd_get_applicationArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims large nested lists; full returns API payload.
+        history_limit:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 20
+          description: Maximum history entries in compact mode.
+      required:
+      - name
+      title: argocd_get_applicationArguments
+    argocd_get_application_resourcesArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+          description: Maximum resources returned in compact mode.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims large resource trees; full returns API payload.
+      required:
+      - name
+      title: argocd_get_application_resourcesArguments
+    argocd_get_sync_historyArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+        limit:
+          type: integer
+          default: 20
+          minimum: 1
+          maximum: 100
+      required:
+      - name
+      title: argocd_get_sync_historyArguments
+    argocd_get_last_operationArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+      required:
+      - name
+      title: argocd_get_last_operationArguments
+    argocd_find_recent_deploymentsArguments:
+      type: object
+      properties:
+        integration_id:
+          type: string
+          description: Optional integration id.
+        project:
+          type: string
+          description: Argo CD project filter.
+        namespace:
+          type: string
+          description: Destination namespace filter.
+        limit:
+          type: integer
+          default: 50
+          minimum: 1
+          maximum: 200
+      required: []
+      title: argocd_find_recent_deploymentsArguments
+    argocd_analyze_applicationArguments:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Argo CD application name.
+        integration_id:
+          type: string
+          description: Optional integration id.
+        response_mode:
+          type: string
+          enum:
+          - compact
+          - full
+          default: compact
+          description: compact trims large nested lists; full returns API payload.
+        history_limit:
+          type: integer
+          default: 5
+          minimum: 1
+          maximum: 20
+          description: Maximum history entries in compact mode.
+      required:
+      - name
+      title: argocd_analyze_applicationArguments
+    knowledge_upsertArguments:
+      type: object
+      properties:
+        document_type:
+          type: string
+          enum:
+          - knowledge
+          - incident
+          - rca
+          - postmortem
+          - runbook
+          description: Kind of private knowledge document to save.
+        title:
+          type: string
+        text:
+          type: string
+          description: Markdown or plain text body to store.
+        id:
+          type: string
+          description: Stable document id. Required for incidents; generated from title for other document
+            types when omitted.
+        service:
+          type: string
+          description: Optional service name.
+        cluster:
+          type: string
+          description: Optional cluster name.
+        namespace:
+          type: string
+          description: Optional namespace.
+        severity:
+          type: string
+          enum:
+          - critical
+          - high
+          - medium
+          - low
+          - info
+        status:
+          type: string
+          description: Optional status, e.g. active, draft, open, or resolved.
+        started_at:
+          type: string
+          format: date-time
+        tags:
+          type: array
+          items:
+            type: string
+          description: Keyword tags for filtering, e.g. ['kubernetes', 'startupProbe'].
+        dry_run:
+          type: boolean
+          default: false
+          description: If true, validate and return what would be stored without writing.
+      required:
+      - document_type
+      - title
+      - text
+      title: knowledge_upsertArguments
     InitializeParams:
       type: object
       properties:
@@ -615,6 +2226,105 @@ components:
           name:
             type: string
             enum:
+            - analyze_dashboard_health
+          arguments:
+            $ref: '#/components/schemas/analyze_dashboard_healthArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_analyze_application
+          arguments:
+            $ref: '#/components/schemas/argocd_analyze_applicationArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_connection_health
+          arguments:
+            $ref: '#/components/schemas/argocd_connection_healthArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_find_recent_deployments
+          arguments:
+            $ref: '#/components/schemas/argocd_find_recent_deploymentsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_get_application
+          arguments:
+            $ref: '#/components/schemas/argocd_get_applicationArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_get_application_resources
+          arguments:
+            $ref: '#/components/schemas/argocd_get_application_resourcesArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_get_last_operation
+          arguments:
+            $ref: '#/components/schemas/argocd_get_last_operationArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_get_sync_history
+          arguments:
+            $ref: '#/components/schemas/argocd_get_sync_historyArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - argocd_list_applications
+          arguments:
+            $ref: '#/components/schemas/argocd_list_applicationsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
             - correlate_alerts
           arguments:
             $ref: '#/components/schemas/correlate_alertsArguments'
@@ -637,9 +2347,383 @@ components:
           name:
             type: string
             enum:
+            - grafana_extract_panel_queries
+          arguments:
+            $ref: '#/components/schemas/grafana_extract_panel_queriesArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - grafana_get_dashboard
+          arguments:
+            $ref: '#/components/schemas/grafana_get_dashboardArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - grafana_get_panel_view
+          arguments:
+            $ref: '#/components/schemas/grafana_get_panel_viewArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - grafana_list_dashboards
+          arguments:
+            $ref: '#/components/schemas/grafana_list_dashboardsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - grafana_metrics_query
+          arguments:
+            $ref: '#/components/schemas/grafana_metrics_queryArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - grafana_metrics_query_range
+          arguments:
+            $ref: '#/components/schemas/grafana_metrics_query_rangeArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
             - incident_summary
           arguments:
             $ref: '#/components/schemas/incident_summaryArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - incident_thread_summary
+          arguments:
+            $ref: '#/components/schemas/incident_thread_summaryArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - incidentflow_auth_status
+          arguments:
+            $ref: '#/components/schemas/incidentflow_auth_statusArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - incidentflow_capabilities
+          arguments:
+            $ref: '#/components/schemas/incidentflow_capabilitiesArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - incidentflow_integrations_status
+          arguments:
+            $ref: '#/components/schemas/incidentflow_integrations_statusArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_agent_status
+          arguments:
+            $ref: '#/components/schemas/k8s_agent_statusArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_analyze_workload
+          arguments:
+            $ref: '#/components/schemas/k8s_analyze_workloadArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_cluster_overview
+          arguments:
+            $ref: '#/components/schemas/k8s_cluster_overviewArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_connection_health
+          arguments:
+            $ref: '#/components/schemas/k8s_connection_healthArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_debug_pod
+          arguments:
+            $ref: '#/components/schemas/k8s_debug_podArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_describe_pod
+          arguments:
+            $ref: '#/components/schemas/k8s_describe_podArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_get_pod
+          arguments:
+            $ref: '#/components/schemas/k8s_get_podArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_get_pod_logs
+          arguments:
+            $ref: '#/components/schemas/k8s_get_pod_logsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_get_rollout_status
+          arguments:
+            $ref: '#/components/schemas/k8s_get_rollout_statusArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_list_deployments
+          arguments:
+            $ref: '#/components/schemas/k8s_list_deploymentsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_list_events
+          arguments:
+            $ref: '#/components/schemas/k8s_list_eventsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_list_namespaces
+          arguments:
+            $ref: '#/components/schemas/k8s_list_namespacesArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_list_pods
+          arguments:
+            $ref: '#/components/schemas/k8s_list_podsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_list_services
+          arguments:
+            $ref: '#/components/schemas/k8s_list_servicesArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_namespace_overview
+          arguments:
+            $ref: '#/components/schemas/k8s_namespace_overviewArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_rbac_check
+          arguments:
+            $ref: '#/components/schemas/k8s_rbac_checkArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - k8s_show_unhealthy_pods
+          arguments:
+            $ref: '#/components/schemas/k8s_show_unhealthy_podsArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - knowledge_get
+          arguments:
+            $ref: '#/components/schemas/knowledge_getArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - knowledge_upsert
+          arguments:
+            $ref: '#/components/schemas/knowledge_upsertArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - mcp_version
+          arguments:
+            $ref: '#/components/schemas/mcp_versionArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - private_knowledge_search
+          arguments:
+            $ref: '#/components/schemas/private_knowledge_searchArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - public_knowledge_search
+          arguments:
+            $ref: '#/components/schemas/public_knowledge_searchArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - slack_alert_thread_get
+          arguments:
+            $ref: '#/components/schemas/slack_alert_thread_getArguments'
+      - type: object
+        required:
+        - name
+        - arguments
+        properties:
+          name:
+            type: string
+            enum:
+            - slack_alerts_list
+          arguments:
+            $ref: '#/components/schemas/slack_alerts_listArguments'
       description: Tool invocation envelope. `arguments` schema is selected by `name`.
     JsonRpcInitializeRequest:
       type: object
@@ -857,3 +2941,8 @@ components:
       type: http
       scheme: bearer
       description: Bearer token auth. In development with no auth provider configured, /mcp may run unprotected.
+tags:
+- name: ops
+  description: Operational/public endpoints
+- name: mcp
+  description: MCP Streamable HTTP transport endpoint

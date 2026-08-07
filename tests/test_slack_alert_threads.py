@@ -574,8 +574,11 @@ async def test_slack_alerts_list_rejects_zero_limit_before_slack_access(
     finally:
         clear_current_auth_context()
 
-    assert result["status"] == "failed"
-    assert result["error"]["message"] == "limit must be between 1 and 200"
+    assert result.isError is True
+    envelope = result.structuredContent
+    assert envelope["status"] == "error"
+    assert envelope["error"]["code"] == "INVALID_ARGUMENT"
+    assert envelope["error"]["message"] == "limit must be between 1 and 200"
 
 
 # ──────────────────────────────────────────────

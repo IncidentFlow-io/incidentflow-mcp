@@ -12,6 +12,8 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.http.install_script import render_install_script
 from incidentflow_mcp.observability.metrics import METRICS_CONTENT_TYPE, render_prometheus_metrics
+from incidentflow_mcp.tools import contracts
+from incidentflow_mcp.version import resolve_service_version
 
 
 def _oauth_authority_base(settings: Settings, request: Request) -> str:
@@ -119,8 +121,8 @@ def create_ops_router(settings: Settings) -> APIRouter:
             content={
                 "status": "ok",
                 "service": settings.mcp_server_name,
-                "version": settings.mcp_server_version,
-                "environment": settings.environment,
+                "version": resolve_service_version(settings),
+                "environment": settings.resolved_environment(),
             }
         )
 
@@ -134,6 +136,36 @@ def create_ops_router(settings: Settings) -> APIRouter:
         """Prometheus metrics endpoint."""
         payload = render_prometheus_metrics()
         return Response(content=payload, media_type=METRICS_CONTENT_TYPE)
+
+    @router.get("/version", summary="Service + contract version")
+    async def version() -> JSONResponse:
+        """Unauthenticated version/contract block — no secrets. Mirrors mcp_version."""
+        return JSONResponse(
+            content={
+                "service": settings.mcp_server_name,
+                "service_version": resolve_service_version(settings),
+                "api_version": contracts.API_VERSION,
+                "contract_version": contracts.CONTRACT_VERSION,
+                "supported_api_versions": list(contracts.SUPPORTED_API_VERSIONS),
+                "supported_schema_versions": list(contracts.SUPPORTED_SCHEMA_VERSIONS),
+                "deprecated_api_versions": list(contracts.DEPRECATED_API_VERSIONS),
+                "environment": settings.resolved_environment(),
+            }
+        )
+
+    @router.get("/schemas", summary="JSON Schema catalog")
+    async def schemas(request: Request) -> JSONResponse:
+        """Catalog of published JSON Schemas (envelope, error, per-tool responses)."""
+        base = str(request.base_url).rstrip("/")
+        return JSONResponse(content=contracts.schema_catalog(base_url=base))
+
+    @router.get("/schemas/{schema_id}", summary="One JSON Schema by id")
+    async def schema_by_id(schema_id: str) -> JSONResponse:
+        """Return one generated Draft 2020-12 JSON Schema, or 404 if unknown."""
+        schema = contracts.get_schema(schema_id)
+        if schema is None:
+            raise HTTPException(status_code=404, detail=f"Unknown schema_id: {schema_id}")
+        return JSONResponse(content=schema, media_type="application/schema+json")
 
     @router.get(
         "/.well-known/oauth-protected-resource",

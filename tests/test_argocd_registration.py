@@ -55,18 +55,16 @@ async def test_server_registers_argocd_tools() -> None:
 
     assert tools["argocd_list_applications"].inputSchema["properties"]["limit"]["maximum"] == 200
     assert (
-        tools["argocd_find_recent_deployments"].inputSchema["properties"]["limit"]["maximum"]
-        == 200
+        tools["argocd_find_recent_deployments"].inputSchema["properties"]["limit"]["maximum"] == 200
     )
     assert tools["argocd_get_sync_history"].inputSchema["properties"]["limit"]["maximum"] == 100
     assert tools["argocd_get_application"].inputSchema["properties"]["name"]["minLength"] == 1
+    assert tools["argocd_get_application"].inputSchema["properties"]["response_mode"]["enum"] == [
+        "compact",
+        "full",
+    ]
     assert (
-        tools["argocd_get_application"].inputSchema["properties"]["response_mode"]["enum"]
-        == ["compact", "full"]
-    )
-    assert (
-        tools["argocd_get_application"].inputSchema["properties"]["history_limit"]["maximum"]
-        == 20
+        tools["argocd_get_application"].inputSchema["properties"]["history_limit"]["maximum"] == 20
     )
     assert (
         tools["argocd_get_application_resources"].inputSchema["properties"]["limit"]["maximum"]

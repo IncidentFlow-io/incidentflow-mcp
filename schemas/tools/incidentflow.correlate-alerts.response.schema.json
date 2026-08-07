@@ -1,0 +1,250 @@
+{
+  "$defs": {
+    "AlertCluster": {
+      "description": "A group of correlated alerts.",
+      "properties": {
+        "alert_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cluster_id": {
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        "confidence_level": {
+          "default": "possible",
+          "type": "string"
+        },
+        "dominant_severity": {
+          "$ref": "#/$defs/Severity"
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "human_context": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "likely_root_cause": {
+          "type": "string"
+        },
+        "missing_evidence": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cluster_id",
+        "alert_ids",
+        "services",
+        "dominant_severity",
+        "likely_root_cause",
+        "confidence"
+      ],
+      "type": "object"
+    },
+    "Severity": {
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "warning",
+        "low",
+        "info"
+      ],
+      "type": "string"
+    }
+  },
+  "$id": "https://incidentflow.io/schemas/tools/incidentflow.correlate-alerts.response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "enum": [
+        "v1"
+      ],
+      "type": "string"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "analysis_window_minutes": {
+              "type": "integer"
+            },
+            "clusters": {
+              "items": {
+                "$ref": "#/$defs/AlertCluster"
+              },
+              "type": "array"
+            },
+            "memory_context": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "summary": {
+              "type": "string"
+            },
+            "total_alerts": {
+              "type": "integer"
+            },
+            "uncorrelated_alert_ids": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "total_alerts",
+            "clusters",
+            "uncorrelated_alert_ids",
+            "analysis_window_minutes",
+            "summary"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "INVALID_ARGUMENT",
+                "UNAUTHENTICATED",
+                "PERMISSION_DENIED",
+                "NOT_FOUND",
+                "CONFLICT",
+                "RATE_LIMITED",
+                "INTEGRATION_UNAVAILABLE",
+                "UPSTREAM_ERROR",
+                "TIMEOUT",
+                "INTERNAL_ERROR"
+              ],
+              "type": "string"
+            },
+            "details": {
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "meta": {
+      "additionalProperties": false,
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "generated_at",
+        "truncated",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "incidentflow.correlate-alerts.response",
+      "type": "string"
+    },
+    "schema_version": {
+      "enum": [
+        "1.0"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "api_version",
+    "schema_version",
+    "schema_id",
+    "status",
+    "request_id",
+    "data",
+    "error",
+    "meta"
+  ],
+  "type": "object"
+}
