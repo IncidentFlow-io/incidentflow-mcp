@@ -1,4 +1,32 @@
 {
+  "$defs": {
+    "ArgoCDCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "failed",
+            "skipped",
+            "warning"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.argocd-connection-health.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -13,48 +41,34 @@
       "anyOf": [
         {
           "additionalProperties": true,
+          "description": "`argocd_connection_health` \u2014 owned `healthy` + typed `checks`, upstream tolerant.",
           "properties": {
-            "application_count": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "argocd_version": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "checked_at": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "checks": {
+              "items": {
+                "$ref": "#/$defs/ArgoCDCheck"
+              },
+              "type": "array"
             },
             "healthy": {
               "type": "boolean"
             },
-            "server_url": {
-              "type": [
-                "string",
-                "null"
-              ]
+            "message": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "source": {
-              "type": [
-                "object",
-                "string",
-                "null"
-              ]
-            },
-            "status": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "additionalProperties": true,
+              "type": "object"
             },
             "truncated": {
+              "default": false,
               "type": "boolean"
             },
             "warnings": {
@@ -65,6 +79,7 @@
             }
           },
           "required": [
+            "source",
             "healthy"
           ],
           "type": "object"
@@ -177,6 +192,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.argocd-connection-health.response)",
   "type": "object"
 }

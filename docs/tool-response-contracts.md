@@ -102,15 +102,61 @@ Codes are defined once in `incidentflow_mcp.tools.contracts.ErrorCode`. Exceptio
   name such as `check_status`, never `execution_status` overloaded against `status`.
 - Tool-specific payload is always inside `data`, never at the top level.
 
-## Data schemas
+## Data schemas — Pydantic-first, 100% coverage
 
-Per-tool `data` schemas live in `incidentflow_mcp.tools.data_schemas`. Each tool has
-its **own** schema — there is no single blanket `additionalProperties: true` schema
-shared across tools. Tools whose payload we fully own are strict
-(`additionalProperties: false`, e.g. `mcp_version`, `k8s_agent_status`); tools that
-pass an upstream payload through (`argocd_connection_health`,
-`public_knowledge_search`, `external_status_check`) declare their known fields but
-tolerate upstream additions so a live response never fails output validation.
+Every operational and meta tool has its **own** `data` schema; there is no shared
+blanket schema and no silent generic fallback (a coverage test,
+`tests/test_schema_coverage.py`, fails if a tool is added without a model).
+
+Schemas are generated from Pydantic v2 models in
+`incidentflow_mcp.tools.output_models` via `model_json_schema(mode="serialization")`
+— so `format: date-time`, `additionalProperties: false`, nullable `anyOf`, and
+`required` are derived from the model, never hand-maintained. `TOOL_OUTPUT_MODELS`
+is the registry; a raw `oneOf` schema is used for the one polymorphic tool
+(`external_status_check`).
+
+Two strictness modes (reported per tool as `schema_mode` in
+`incidentflow_capabilities`, and aggregated there as `contract_coverage`):
+
+- **strict** (`extra="forbid"` → `additionalProperties: false`): fully-owned,
+  stable payloads — `mcp_version`, `k8s_agent_status`, `k8s_rbac_check`,
+  `knowledge_upsert`, `incident_thread_summary`.
+- **permissive** (`extra="allow"` → `additionalProperties: true`): payloads that
+  pass an upstream platform-api / agent body through. Known fields are typed;
+  upstream additions are tolerated so a live response never fails validation.
+
+`mcp_version.data` names its versions distinctly from the envelope
+(`current_api_version`, `contract_version`, `supported_api_versions`,
+`supported_schema_versions`) so `data` never duplicates or drifts from the
+envelope's `api_version` / `schema_version`. `external_status_check.data` uses
+`job_status` (job lifecycle) and `check_status` (provider outcome) with a `mode`
+discriminator — never a bare `status` colliding with the envelope.
+
+## Runtime output validation
+
+- `format: date-time` is **not** enforced by the MCP SDK's structured-output
+  validation (the low-level server validates without a format checker). It is
+  enforced by our own validators: the dev/CI runtime check and the contract tests.
+- Setting `MCP_STRICT_OUTPUT_VALIDATION` (default: on outside production, off in
+  production) makes the tool wrapper validate every success envelope against its
+  published schema with a date-time format checker and fail loud on drift. Prod
+  stays permissive so a schema lag never breaks a live response.
+
+## Publication + verification
+
+Schemas and the version/contract block are served over HTTP (unauthenticated,
+no secrets):
+
+- `GET /version` — service/contract version block.
+- `GET /schemas` — catalog of `{schema_id, url}`.
+- `GET /schemas/{schema_id}` — one Draft 2020-12 schema.
+
+Verify a build three ways (version → schemas → real responses validate):
+
+```bash
+uv run python scripts/contract_check.py     # in-process, CI-friendly
+MCP_URL=… MCP_TOKEN=… bash scripts/contract_check.sh   # curl smoke vs a live server
+```
 
 ## Regenerating schema files
 

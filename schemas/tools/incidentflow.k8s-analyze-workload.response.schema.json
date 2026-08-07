@@ -12,14 +12,87 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "description": "show_unhealthy_pods / analyze_workload / describe_pod / debug_pod / get_pod.",
+          "properties": {
+            "data": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "findings": {
+              "items": {},
+              "type": "array"
+            },
+            "health": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "memory_context": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "recommendations": {
+              "items": {},
+              "type": "array"
+            },
+            "severity": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "summary": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +202,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.k8s-analyze-workload.response)",
   "type": "object"
 }

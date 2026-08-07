@@ -1,4 +1,98 @@
 {
+  "$defs": {
+    "MetricSample": {
+      "properties": {
+        "timestamp": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "timestamp",
+        "value"
+      ],
+      "type": "object"
+    },
+    "MetricSeries": {
+      "additionalProperties": true,
+      "properties": {
+        "metric": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "samples": {
+          "items": {
+            "$ref": "#/$defs/MetricSample"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "PanelAnalysis": {
+      "additionalProperties": true,
+      "properties": {
+        "anomalies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "datasource_uid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expr": {
+          "default": "",
+          "type": "string"
+        },
+        "panel_title": {
+          "default": "",
+          "type": "string"
+        },
+        "result_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "series": {
+          "items": {
+            "$ref": "#/$defs/MetricSeries"
+          },
+          "type": "array"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.analyze-dashboard-health.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -12,14 +106,36 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "properties": {
+            "dashboard_title": {
+              "default": "",
+              "type": "string"
+            },
+            "dashboard_uid": {
+              "type": "string"
+            },
+            "panels": {
+              "items": {
+                "$ref": "#/$defs/PanelAnalysis"
+              },
+              "type": "array"
+            },
+            "summary_hints": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "time_range": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "required": [
+            "dashboard_uid"
+          ],
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +245,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.analyze-dashboard-health.response)",
   "type": "object"
 }

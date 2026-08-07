@@ -1,4 +1,46 @@
 {
+  "$defs": {
+    "ClusterConnection": {
+      "additionalProperties": true,
+      "description": "Shared-dev connection context injected by _with_integration_context.",
+      "properties": {
+        "cluster": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.k8s-agent-status.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -13,80 +55,121 @@
       "anyOf": [
         {
           "additionalProperties": false,
+          "description": "`k8s_agent_status` \u2014 strict. `status` is the integration lifecycle;\n`healthy` the aggregate boolean. `offline` is a valid observed result, not an\nerror, so it stays in `data` (only action-tool failures are hoisted).",
           "properties": {
             "agent_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "agent_status": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "agent_version": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "checked_at": {
+              "format": "date-time",
               "type": "string"
             },
             "cluster_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "cluster_name": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "clusters": {
-              "type": "array"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "connection": {
-              "type": "object"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ClusterConnection"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "environment": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "error": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "healthy": {
               "type": "boolean"
             },
-            "integration": {
-              "type": "object"
-            },
             "last_heartbeat_at": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "last_seen_at": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "status": {
               "enum": [
                 "connected",
-                "offline"
+                "degraded",
+                "offline",
+                "not_configured",
+                "unknown"
               ],
               "type": "string"
             },
@@ -212,6 +295,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.k8s-agent-status.response)",
   "type": "object"
 }

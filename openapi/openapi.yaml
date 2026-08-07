@@ -72,6 +72,64 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
       security: []
+  /version:
+    get:
+      tags:
+      - ops
+      summary: Service + contract version
+      description: "Unauthenticated version/contract block \u2014 no secrets. Mirrors mcp_version."
+      operationId: version_version_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /schemas:
+    get:
+      tags:
+      - ops
+      summary: JSON Schema catalog
+      description: Catalog of published JSON Schemas (envelope, error, per-tool responses).
+      operationId: schemas_schemas_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+  /schemas/{schema_id}:
+    get:
+      tags:
+      - ops
+      summary: One JSON Schema by id
+      description: Return one generated Draft 2020-12 JSON Schema, or 404 if unknown.
+      operationId: schema_by_id_schemas__schema_id__get
+      parameters:
+      - name: schema_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schema Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /.well-known/oauth-protected-resource:
     get:
       tags:

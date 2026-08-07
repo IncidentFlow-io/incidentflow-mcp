@@ -8,6 +8,34 @@ All settings can be overridden via real environment variables without a file.
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Canonical runtime lanes. Inbound aliases (ENVIRONMENT / INCIDENTFLOW_ENV /
+# MCP_BUILD_ENVIRONMENT) are normalized to exactly one of these so every surface
+# — /version, /healthz, mcp_version, telemetry — reports the same value.
+_ENVIRONMENT_ALIASES = {
+    "dev": "dev",
+    "development": "dev",
+    "local": "dev",
+    "test": "dev",
+    "stage": "staging",
+    "stg": "staging",
+    "staging": "staging",
+    "prod": "production",
+    "production": "production",
+}
+
+
+def normalize_environment(raw: str | None, *, default: str = "dev") -> str:
+    """Normalize an environment string to a canonical lane (dev|staging|production).
+
+    Unknown values pass through unchanged (lower-cased) rather than raising, so a
+    novel lane name is surfaced verbatim instead of being silently coerced.
+    """
+
+    key = (raw or "").strip().lower()
+    if not key:
+        return default
+    return _ENVIRONMENT_ALIASES.get(key, key)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -150,14 +178,28 @@ class Settings(BaseSettings):
         return self.environment == "production"
 
     def runtime_environment(self) -> str:
-        raw = (self.incidentflow_env or self.environment or "development").strip().lower()
-        aliases = {
-            "development": "dev",
-            "local": "dev",
-            "test": "dev",
-            "prod": "production",
-        }
-        return aliases.get(raw, raw)
+        """Canonical lane from INCIDENTFLOW_ENV / ENVIRONMENT (ignores build metadata)."""
+        return normalize_environment(self.incidentflow_env or self.environment)
+
+    def resolved_environment(self) -> str:
+        """Single source of truth for the reported runtime lane.
+
+        Honors build metadata so a built image reports its true lane, and is used
+        by every externally-visible surface (/version, /healthz, mcp_version) so
+        the environment reported over HTTP and MCP can never disagree.
+
+        Precedence: explicit MCP_BUILD_ENVIRONMENT → build-tag prefix
+        (``dev-*`` → dev, ``v*`` → production) → INCIDENTFLOW_ENV / ENVIRONMENT.
+        """
+        explicit = (self.mcp_build_environment or "").strip()
+        if explicit:
+            return normalize_environment(explicit)
+        tag = (self.mcp_build_tag or "").strip().lower()
+        if tag.startswith("dev-"):
+            return "dev"
+        if tag.startswith("v"):
+            return "production"
+        return self.runtime_environment()
 
     def shared_dev_kubernetes_allowed(self) -> bool:
         return (
@@ -334,14 +376,29 @@ class Settings(BaseSettings):
         ge=1,
         description="Emit a warning when an MCP tool call is slower than this threshold.",
     )
-    service_version: str = Field(
-        default="0.0.0",
-        description="Service version attached to OTEL resource.",
-    )
+    # service_version is intentionally NOT a setting: it is resolved in exactly one
+    # place — incidentflow_mcp.version.resolve_service_version(settings) — and passed
+    # to the OTEL resource, logs and the FastAPI app from there. See docs/api-versioning.md.
     k8s_namespace_name: str | None = Field(
         default=None,
         description="Kubernetes namespace attached to OTEL resource.",
     )
+    mcp_strict_output_validation: bool | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MCP_STRICT_OUTPUT_VALIDATION"),
+        description=(
+            "Validate every tool response envelope against its published JSON "
+            "Schema (with a date-time format checker) at runtime. When unset, "
+            "defaults on outside production and off in production so a schema lag "
+            "never breaks a live response."
+        ),
+    )
+
+    def strict_output_validation_enabled(self) -> bool:
+        """Whether runtime output-contract validation is active."""
+        if self.mcp_strict_output_validation is not None:
+            return self.mcp_strict_output_validation
+        return self.runtime_environment() != "production"
 
     # -----------------------------------------------------------------------
     # Rate limiting / Redis

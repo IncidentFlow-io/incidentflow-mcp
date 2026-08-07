@@ -12,14 +12,97 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "description": "cluster_overview / namespace_overview \u2014 owned scalars, opaque event lists.",
+          "properties": {
+            "checked_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "cluster_health": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "cluster_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "cluster_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "findings": {
+              "items": {},
+              "type": "array"
+            },
+            "namespace": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "recommendations": {
+              "items": {},
+              "type": "array"
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "summary": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +212,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.k8s-namespace-overview.response)",
   "type": "object"
 }

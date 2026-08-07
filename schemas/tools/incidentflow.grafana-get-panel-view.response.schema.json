@@ -1,4 +1,18 @@
 {
+  "$defs": {
+    "PanelViewDataPoint": {
+      "additionalProperties": true,
+      "properties": {
+        "timestamp": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "timestamp"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.grafana-get-panel-view.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -12,14 +26,90 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "properties": {
+            "annotations": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "dashboard": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "data": {
+              "items": {
+                "$ref": "#/$defs/PanelViewDataPoint"
+              },
+              "type": "array"
+            },
+            "links": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "panel": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "series": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "source": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "timeRange": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "variables": {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                ]
+              },
+              "type": "object"
+            },
+            "version": {
+              "default": "1",
+              "type": "string"
+            },
+            "visualization": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "panel",
+            "dashboard",
+            "source",
+            "visualization",
+            "timeRange",
+            "links"
+          ],
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +219,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.grafana-get-panel-view.response)",
   "type": "object"
 }

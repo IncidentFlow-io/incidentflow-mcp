@@ -1,4 +1,44 @@
 {
+  "$defs": {
+    "Severity": {
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "warning",
+        "low",
+        "info"
+      ],
+      "type": "string"
+    },
+    "TimelineEvent": {
+      "properties": {
+        "actor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "timestamp",
+        "description"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.incident-summary.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -12,14 +52,77 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "properties": {
+            "affected_services": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "human_context_from_slack_thread": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "incident_id": {
+              "type": "string"
+            },
+            "memory_context": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "recommendations": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "severity": {
+              "$ref": "#/$defs/Severity"
+            },
+            "status": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "timeline": {
+              "items": {
+                "$ref": "#/$defs/TimelineEvent"
+              },
+              "type": "array"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "incident_id",
+            "title",
+            "severity",
+            "status",
+            "summary",
+            "affected_services",
+            "timeline",
+            "recommendations"
+          ],
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +232,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.incident-summary.response)",
   "type": "object"
 }

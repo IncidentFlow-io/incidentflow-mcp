@@ -20,6 +20,26 @@ from incidentflow_mcp.tools.memory_tools import MemoryAPIError
 TokenWorkspaceResolver = Callable[[], str | None]
 
 
+def _normalize_search_response(payload: Any, *, query: str, scope: str) -> dict[str, Any]:
+    """Adapter (review #9): surface a normalized {query, scope, results, total}
+    view over the platform-api search payload while keeping upstream fields."""
+    if not isinstance(payload, dict):
+        return {"query": query, "scope": scope, "results": [], "total": 0}
+    results = (
+        payload.get("results")
+        or (payload.get("publicResults") if scope == "public" else payload.get("workspaceResults"))
+        or payload.get("items")
+        or []
+    )
+    normalized = dict(payload)
+    normalized.setdefault("query", query)
+    normalized.setdefault("scope", scope)
+    normalized["results"] = results if isinstance(results, list) else []
+    if not isinstance(normalized.get("total"), int):
+        normalized["total"] = len(normalized["results"])
+    return normalized
+
+
 def register_knowledge_tools(
     ctx: ToolRegistrationContext,
     *,
@@ -42,13 +62,14 @@ def register_knowledge_tools(
         limit: int = 8,
     ) -> dict[str, Any]:
         try:
-            return await public_knowledge_search(
+            payload = await public_knowledge_search(
                 settings=ctx.settings,
                 query=query,
                 document_type=document_type,
                 response_mode=response_mode,
                 limit=limit,
             )
+            return _normalize_search_response(payload, query=query, scope="public")
         except KnowledgeSearchAPIError as exc:
             return structured_tool_exception(exc, code=ErrorCode.UPSTREAM_ERROR)
 
@@ -62,7 +83,7 @@ def register_knowledge_tools(
         limit: int = 8,
     ) -> dict[str, Any]:
         try:
-            return await private_knowledge_search(
+            payload = await private_knowledge_search(
                 settings=ctx.settings,
                 workspace_id=_workspace(),
                 query=query,
@@ -72,6 +93,7 @@ def register_knowledge_tools(
                 response_mode=response_mode,
                 limit=limit,
             )
+            return _normalize_search_response(payload, query=query, scope="workspace")
         except (KnowledgeSearchAPIError, ValueError) as exc:
             return structured_tool_exception(
                 exc,

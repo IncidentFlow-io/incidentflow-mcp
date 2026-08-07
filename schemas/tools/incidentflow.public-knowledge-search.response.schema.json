@@ -1,4 +1,56 @@
 {
+  "$defs": {
+    "KnowledgeResult": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.public-knowledge-search.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -13,30 +65,59 @@
       "anyOf": [
         {
           "additionalProperties": true,
+          "description": "Normalized public search response (review #9).\n\nPermissive until the platform-api search payload is pinned: the handler adapter\nalways surfaces the normalized fields, while upstream extras are tolerated so a\nlive response never fails validation.",
           "properties": {
-            "items": {
-              "type": "array"
-            },
-            "publicResults": {
-              "type": "array"
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "query": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "results": {
+              "items": {
+                "$ref": "#/$defs/KnowledgeResult"
+              },
               "type": "array"
+            },
+            "scope": {
+              "anyOf": [
+                {
+                  "const": "public",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "total": {
-              "type": [
-                "integer",
-                "null"
-              ]
-            },
-            "workspaceResults": {
-              "type": "array"
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "type": "object"
@@ -149,6 +230,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.public-knowledge-search.response)",
   "type": "object"
 }

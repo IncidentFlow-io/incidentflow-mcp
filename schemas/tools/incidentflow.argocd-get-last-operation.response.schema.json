@@ -12,14 +12,27 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "properties": {
+            "source": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "truncated": {
+              "default": false,
+              "type": "boolean"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "source"
+          ],
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +142,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.argocd-get-last-operation.response)",
   "type": "object"
 }

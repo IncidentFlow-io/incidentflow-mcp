@@ -27,6 +27,8 @@ _PUBLIC_PATHS: frozenset[str] = frozenset(
     {
         "/healthz",
         "/readyz",
+        "/version",
+        "/schemas",
         "/install.sh",
         "/docs",
         "/openapi.json",
@@ -123,8 +125,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             if request.url.path == "/mcp" and request.method.upper() not in _MCP_ALLOWED_METHODS:
                 return await call_next(request)
 
-            if request.url.path in _PUBLIC_PATHS or _is_openai_domain_verification_path(
-                request.url.path
+            if (
+                request.url.path in _PUBLIC_PATHS
+                or request.url.path.startswith("/schemas/")
+                or _is_openai_domain_verification_path(request.url.path)
             ):
                 return await call_next(request)
 

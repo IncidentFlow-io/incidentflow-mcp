@@ -1,4 +1,86 @@
 {
+  "$defs": {
+    "MCPVersionImage": {
+      "additionalProperties": false,
+      "properties": {
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "signature_identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "signature_issuer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "signature_verified": {
+          "type": "boolean"
+        },
+        "signed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "signed",
+        "signature_verified"
+      ],
+      "type": "object"
+    },
+    "MCPVersionTools": {
+      "additionalProperties": false,
+      "properties": {
+        "meta": {
+          "type": "integer"
+        },
+        "operational": {
+          "type": "integer"
+        },
+        "registered": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "registered",
+        "operational",
+        "meta"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.mcp-version.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -13,23 +95,34 @@
       "anyOf": [
         {
           "additionalProperties": false,
+          "description": "`mcp_version` \u2014 fully owned, strict.\n\nVersion fields are named distinctly from the envelope (`current_api_version`,\n`contract_version`) so `data` never duplicates `envelope.api_version` /\n`envelope.schema_version` (review #3, #4).",
           "properties": {
-            "api_version": {
-              "type": "string"
-            },
             "built_at": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "commit": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "contract_version": {
+              "type": "string"
+            },
+            "current_api_version": {
               "type": "string"
             },
             "deprecated_api_versions": {
@@ -42,10 +135,7 @@
               "type": "string"
             },
             "image": {
-              "type": "object"
-            },
-            "schema_version": {
-              "type": "string"
+              "$ref": "#/$defs/MCPVersionImage"
             },
             "service": {
               "type": "string"
@@ -66,36 +156,31 @@
               "type": "array"
             },
             "tag": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "tools": {
-              "additionalProperties": false,
-              "properties": {
-                "meta": {
-                  "type": "integer"
-                },
-                "operational": {
-                  "type": "integer"
-                },
-                "registered": {
-                  "type": "integer"
-                }
-              },
-              "type": "object"
+              "$ref": "#/$defs/MCPVersionTools"
             }
           },
           "required": [
             "service",
             "service_version",
-            "api_version",
+            "current_api_version",
             "contract_version",
             "supported_api_versions",
             "supported_schema_versions",
             "deprecated_api_versions",
-            "environment"
+            "environment",
+            "tools",
+            "image"
           ],
           "type": "object"
         },
@@ -207,6 +292,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.mcp-version.response)",
   "type": "object"
 }

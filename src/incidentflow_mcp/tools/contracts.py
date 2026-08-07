@@ -22,6 +22,7 @@ schema.
 
 from __future__ import annotations
 
+import copy
 import json
 import uuid
 from datetime import UTC, datetime
@@ -29,7 +30,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from incidentflow_mcp.tools.data_schemas import TOOL_DATA_SCHEMAS
+from pydantic import BaseModel
+
+from incidentflow_mcp.tools.output_models import TOOL_OUTPUT_MODELS, schema_mode_for
 from incidentflow_mcp.tools.registry import ToolSpec
 
 # --- contract-level constants ----------------------------------------------
@@ -229,21 +232,63 @@ def _meta_schema() -> dict[str, Any]:
 
 
 def _generic_data_schema() -> dict[str, Any]:
-    # Per-tool schemas live in data_schemas.TOOL_DATA_SCHEMAS; tools without a
-    # dedicated schema get this nullable-any placeholder (still one-per-tool via
-    # the enveloped schema_id — never a shared blanket payload schema).
+    # Last-resort placeholder for a tool with no registered model. A coverage
+    # test (tests/test_schema_coverage.py) fails if any operational tool relies
+    # on this, so it never silently masks a missing schema.
     return {"type": ["object", "array", "string", "number", "boolean", "null"]}
+
+
+def _strip_titles(node: Any) -> Any:
+    """Recursively drop Pydantic-generated ``title`` *annotations* (schema noise).
+
+    Only removes ``title`` when its value is a string (a JSON Schema annotation).
+    A property literally named ``title`` (whose value is a subschema dict) is left
+    intact — otherwise fields like ``knowledge_upsert.title`` would vanish.
+    """
+
+    if isinstance(node, dict):
+        if isinstance(node.get("title"), str):
+            node.pop("title", None)
+        for value in node.values():
+            _strip_titles(value)
+    elif isinstance(node, list):
+        for item in node:
+            _strip_titles(item)
+    return node
+
+
+def data_schema_for(tool_name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return ``(data_schema, defs)`` for one tool from its registered model.
+
+    ``defs`` are the nested-model definitions to be lifted onto the envelope's
+    top-level ``$defs`` so local ``$ref`` targets resolve (self-contained; no
+    external references — review #6).
+    """
+
+    entry = TOOL_OUTPUT_MODELS.get(tool_name)
+    if entry is None:
+        return _generic_data_schema(), {}
+    if isinstance(entry, dict):
+        raw = copy.deepcopy(entry)
+    elif isinstance(entry, type) and issubclass(entry, BaseModel):
+        raw = entry.model_json_schema(mode="serialization")
+    else:  # pragma: no cover - registry misuse
+        raise TypeError(f"Unsupported output model entry for {tool_name}: {type(entry)!r}")
+    defs = raw.pop("$defs", {})
+    return _strip_titles(raw), _strip_titles(defs)
 
 
 def envelope_schema(
     *,
     tool_name: str | None = None,
     data_schema: dict[str, Any] | None = None,
+    defs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build an inline Draft 2020-12 envelope schema.
 
     When ``tool_name`` is given the tool-specific ``data`` schema is inlined and
     the ``schema_id`` is pinned; otherwise a generic envelope schema is returned.
+    Nested-model ``defs`` are lifted onto the envelope's top-level ``$defs``.
     """
 
     resolved_data = data_schema if data_schema is not None else _generic_data_schema()
@@ -253,10 +298,9 @@ def envelope_schema(
         schema_ref = response_schema_id(tool_name)
         schema_id_const = {"const": schema_ref}
 
-    return {
+    schema: dict[str, Any] = {
         "$schema": JSON_SCHEMA_DIALECT,
         "$id": schema_url(f"{schema_ref}.schema.json"),
-        "title": f"IncidentFlow response envelope ({schema_ref})",
         "type": "object",
         "additionalProperties": False,
         "required": [
@@ -275,7 +319,7 @@ def envelope_schema(
             "schema_id": {"type": "string", **schema_id_const},
             "status": {"type": "string", "enum": ["success", "error"]},
             "request_id": {"type": "string"},
-            # data is present (object) on success and null on error
+            # data is present on success and null on error
             "data": {"anyOf": [resolved_data, {"type": "null"}]},
             "error": {
                 "anyOf": [
@@ -305,15 +349,22 @@ def envelope_schema(
             "meta": _meta_schema(),
         },
     }
+    if defs:
+        schema["$defs"] = defs
+    return schema
 
 
 def build_output_schema(tool_name: str) -> dict[str, Any]:
     """Return the inline output schema registered with the MCP framework for one tool."""
 
-    return envelope_schema(
-        tool_name=tool_name,
-        data_schema=TOOL_DATA_SCHEMAS.get(tool_name),
-    )
+    data_schema, defs = data_schema_for(tool_name)
+    return envelope_schema(tool_name=tool_name, data_schema=data_schema, defs=defs)
+
+
+def schema_mode(tool_name: str) -> str:
+    """Return ``"strict"`` or ``"permissive"`` for one tool's data schema."""
+
+    return schema_mode_for(tool_name)
 
 
 def schema_url(schema_name: str) -> str:
@@ -331,6 +382,42 @@ def capability_schema_metadata(tool_name: str) -> dict[str, str]:
         "input_schema_id": request_schema_id(tool_name),
         "output_schema_id": response_schema_id(tool_name),
         "error_schema_id": ERROR_SCHEMA_ID,
+    }
+
+
+# --- schema catalog (served over HTTP) -------------------------------------
+def all_schema_ids() -> list[str]:
+    """Every published schema id: common envelope + error + one per tool."""
+
+    ids = [ENVELOPE_SCHEMA_ID, ERROR_SCHEMA_ID]
+    ids.extend(sorted(response_schema_id(name) for name in TOOL_OUTPUT_MODELS))
+    return ids
+
+
+def get_schema(schema_id: str) -> dict[str, Any] | None:
+    """Return one generated JSON Schema by id, or ``None`` if unknown."""
+
+    if schema_id == ENVELOPE_SCHEMA_ID:
+        return envelope_schema()
+    if schema_id == ERROR_SCHEMA_ID:
+        return error_schema()
+    for name in TOOL_OUTPUT_MODELS:
+        if response_schema_id(name) == schema_id:
+            return build_output_schema(name)
+    return None
+
+
+def schema_catalog(base_url: str = "") -> dict[str, Any]:
+    """Catalog document for ``GET /schemas``."""
+
+    base = base_url.rstrip("/")
+    return {
+        "api_version": API_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "schemas": [
+            {"schema_id": sid, "url": f"{base}/schemas/{sid}" if base else f"/schemas/{sid}"}
+            for sid in all_schema_ids()
+        ],
     }
 
 

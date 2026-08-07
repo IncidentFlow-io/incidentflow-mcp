@@ -29,6 +29,10 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.5.0",
     "fakeredis[lua]>=2.31.3",
+    # Contract verification: rfc3339-validator makes jsonschema FormatChecker
+    # actually enforce `format: date-time`; check-jsonschema powers the curl harness.
+    "jsonschema[format-nongpl]>=4.20.0",
+    "check-jsonschema>=0.28.0",
 ]
 
 [project.scripts]
@@ -59,4 +63,6 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "jsonschema[format-nongpl]>=4.20.0",
+    "check-jsonschema>=0.28.0",
 ]

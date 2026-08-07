@@ -12,14 +12,9 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "properties": {},
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +124,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.incidentflow-integrations-status.response)",
   "type": "object"
 }

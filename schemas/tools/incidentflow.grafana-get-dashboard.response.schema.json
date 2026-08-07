@@ -12,14 +12,29 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "properties": {
+            "folder": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "title": {
+              "default": "",
+              "type": "string"
+            },
+            "uid": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +144,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.grafana-get-dashboard.response)",
   "type": "object"
 }

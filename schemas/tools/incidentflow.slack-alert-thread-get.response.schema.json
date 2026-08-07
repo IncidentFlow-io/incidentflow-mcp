@@ -1,4 +1,630 @@
 {
+  "$defs": {
+    "NormalizedLink": {
+      "properties": {
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "default": "generic",
+          "enum": [
+            "grafana",
+            "runbook",
+            "logs",
+            "kibana",
+            "notion",
+            "confluence",
+            "github",
+            "generic"
+          ],
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "SlackAlertContext": {
+      "properties": {
+        "channel_id": {
+          "type": "string"
+        },
+        "channel_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message_ts": {
+          "type": "string"
+        },
+        "permalink": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "thread_permalink": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "thread_ts": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "channel_id",
+        "message_ts",
+        "thread_ts"
+      ],
+      "type": "object"
+    },
+    "SlackAlertMessage": {
+      "properties": {
+        "alert_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "alert_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "alert_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "alertmanager_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "business_service": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "channel_id": {
+          "type": "string"
+        },
+        "channel_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "cluster": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "datetime_utc": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "deduplicated": {
+          "default": false,
+          "type": "boolean"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "extracted_commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fingerprint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fired_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "first_seen": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "last_seen": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "monitoring_job": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "namespace": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "occurrences": {
+          "default": 1,
+          "type": "integer"
+        },
+        "permalink": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pod": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "raw_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "service": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "severity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "slack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlackAlertContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "summary": {
+          "type": "string"
+        },
+        "thread": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlackThreadContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ts": {
+          "type": "string"
+        },
+        "workload": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "ts",
+        "channel_id",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "SlackThreadContext": {
+      "properties": {
+        "analysis": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThreadAggregateAnalysis"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "last_reply_ts": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "participants": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "replies": {
+          "items": {
+            "$ref": "#/$defs/ThreadReplyAnalysis"
+          },
+          "type": "array"
+        },
+        "reply_count": {
+          "default": 0,
+          "type": "integer"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "ThreadAggregateAnalysis": {
+      "properties": {
+        "commands_found": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "confidence": {
+          "default": "low",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "engineer_hypotheses": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/NormalizedLink"
+          },
+          "type": "array"
+        },
+        "mentioned_services": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "possible_resolution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resolution_confidence": {
+          "default": "low",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "resolution_signal": {
+          "default": false,
+          "type": "boolean"
+        },
+        "runbook_links": {
+          "items": {
+            "$ref": "#/$defs/NormalizedLink"
+          },
+          "type": "array"
+        },
+        "suggested_actions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary"
+      ],
+      "type": "object"
+    },
+    "ThreadReplyAnalysis": {
+      "properties": {
+        "commands": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contains_command": {
+          "default": false,
+          "type": "boolean"
+        },
+        "contains_hypothesis": {
+          "default": false,
+          "type": "boolean"
+        },
+        "contains_resolution": {
+          "default": false,
+          "type": "boolean"
+        },
+        "contains_runbook_link": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hypotheses": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/NormalizedLink"
+          },
+          "type": "array"
+        },
+        "permalink": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resolutions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "text": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "username": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "ts",
+        "text"
+      ],
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.slack-alert-thread-get.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -12,14 +638,30 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "properties": {
+            "analysis": {
+              "$ref": "#/$defs/ThreadAggregateAnalysis"
+            },
+            "root_alert": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SlackAlertMessage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "thread": {
+              "$ref": "#/$defs/SlackThreadContext"
+            }
+          },
+          "required": [
+            "thread",
+            "analysis"
+          ],
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +771,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.slack-alert-thread-get.response)",
   "type": "object"
 }

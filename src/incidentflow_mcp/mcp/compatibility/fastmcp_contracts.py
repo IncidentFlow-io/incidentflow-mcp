@@ -18,6 +18,7 @@ import json
 from types import MethodType
 from typing import Any
 
+from jsonschema import Draft202012Validator, FormatChecker
 from mcp.server.fastmcp import FastMCP
 from mcp.shared.exceptions import UrlElicitationRequiredError
 from mcp.types import CallToolResult, TextContent
@@ -44,7 +45,10 @@ class UnsupportedFastMCPVersionError(RuntimeError):
 def _error_result(tool_name: str, fields: dict[str, Any], request_id: str) -> CallToolResult:
     """Build an MCP CallToolResult carrying the error envelope with isError=True."""
 
-    code: ErrorCode = fields["code"]
+    # `code` may arrive as an ErrorCode or as a plain string (e.g. after a JSON
+    # round-trip through _with_integration_context); coerce defensively.
+    raw_code = fields["code"]
+    code = raw_code if isinstance(raw_code, ErrorCode) else ErrorCode(str(raw_code))
     envelope = error_envelope(
         tool_name=tool_name,
         code=code,
@@ -95,11 +99,35 @@ async def run_tool_with_structured_errors(
 
     # Success: wrap the raw payload as `data`. Returned as a plain dict so the
     # lowlevel server validates it against the registered outputSchema.
-    return success_envelope(result, tool_name=tool.name, request_id=request_id)
+    envelope = success_envelope(result, tool_name=tool.name, request_id=request_id)
+
+    # Dev/CI runtime contract enforcement (prod stays off): validate the envelope
+    # against its published schema with a date-time format checker so schema drift
+    # fails loud instead of shipping silently.
+    validator = getattr(tool, "_if_output_validator", None)
+    if validator is not None:
+        errors = sorted(validator.iter_errors(envelope), key=str)
+        if errors:
+            return _error_result(
+                tool.name,
+                {
+                    "code": ErrorCode.INTERNAL_ERROR,
+                    "message": f"Output contract violation in {tool.name}: {errors[0].message}",
+                    "retryable": False,
+                    "details": {"path": list(errors[0].absolute_path), "schema_id": tool.name},
+                },
+                request_id,
+            )
+    return envelope
 
 
-def harden_fastmcp_tool_contracts(mcp: FastMCP) -> None:
-    """Make FastMCP argument validation strict, wrap results, and publish output schemas."""
+def harden_fastmcp_tool_contracts(mcp: FastMCP, *, strict_validation: bool = False) -> None:
+    """Make FastMCP argument validation strict, wrap results, and publish output schemas.
+
+    When ``strict_validation`` is on, each tool also gets a Draft 2020-12 validator
+    (with a date-time format checker) that the wrapper runs against every success
+    envelope.
+    """
     tool_manager = getattr(mcp, "_tool_manager", None)
     if tool_manager is None or not hasattr(tool_manager, "list_tools"):
         raise UnsupportedFastMCPVersionError(
@@ -118,7 +146,14 @@ def harden_fastmcp_tool_contracts(mcp: FastMCP) -> None:
         tool.fn_metadata.arg_model.model_rebuild(force=True)
         tool.parameters = tool.fn_metadata.arg_model.model_json_schema(by_alias=True)
         # Publish the precise inline envelope+data output schema to clients (req #5).
-        tool.fn_metadata.output_schema = build_output_schema(tool.name)
+        output_schema = build_output_schema(tool.name)
+        tool.fn_metadata.output_schema = output_schema
+        if strict_validation:
+            object.__setattr__(
+                tool,
+                "_if_output_validator",
+                Draft202012Validator(output_schema, format_checker=FormatChecker()),
+            )
         object.__setattr__(
             tool,
             "run",

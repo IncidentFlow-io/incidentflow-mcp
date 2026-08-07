@@ -1,4 +1,117 @@
 {
+  "$defs": {
+    "K8sPermissionResult": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "K8sRbacPermissions": {
+      "additionalProperties": false,
+      "properties": {
+        "get_logs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/K8sPermissionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "list_deployments": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/K8sPermissionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "list_events": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/K8sPermissionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "list_namespaces": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/K8sPermissionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "list_pods": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/K8sPermissionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "list_services": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/K8sPermissionResult"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.k8s-rbac-check.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -12,14 +125,37 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": false,
+          "description": "`k8s_rbac_check` \u2014 strict.",
+          "properties": {
+            "checked_at": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "cluster_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "permissions": {
+              "$ref": "#/$defs/K8sRbacPermissions"
+            },
+            "read_only": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "read_only",
+            "checked_at",
+            "permissions"
+          ],
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +265,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.k8s-rbac-check.response)",
   "type": "object"
 }

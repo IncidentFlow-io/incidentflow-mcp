@@ -12,14 +12,27 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "properties": {
+            "authenticated": {
+              "type": "boolean"
+            },
+            "environment": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "authenticated"
+          ],
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +142,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.incidentflow-auth-status.response)",
   "type": "object"
 }

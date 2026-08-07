@@ -28,7 +28,21 @@ concept and is **not** mixed with any IncidentFlow version.
 
 Logs, the OTEL resource, the FastAPI app version, the ops-health endpoint and the
 `mcp_version` tool all read from this function. The legacy `service_version=0.0.0`
-telemetry default is no longer hardcoded separately.
+telemetry default is no longer a setting at all — it is only ever the resolver's
+output.
+
+### Single source of truth for `environment`
+
+The reported runtime lane is resolved in exactly one place —
+`Settings.resolved_environment()` — and normalized to a canonical lane
+(`dev` | `staging` | `production`). Precedence: explicit `MCP_BUILD_ENVIRONMENT`
+→ build-tag prefix (`dev-*` → `dev`, `v*` → `production`) →
+`INCIDENTFLOW_ENV` / `ENVIRONMENT`. `GET /version`, `GET /healthz` and the
+`mcp_version` tool all read from this method, so the environment reported over
+HTTP and MCP can never disagree (previously `/version` returned `dev` while
+`mcp_version` returned `development`/`prod`).
+`tests/test_schema_endpoints.py::test_http_and_mcp_version_use_same_environment`
+guards the cross-surface equality.
 
 ## 2. Change classification
 
@@ -91,9 +105,26 @@ The five tools covered by the first rollout:
 `incidentflow_capabilities` reports, per tool: `api_version`, `schema_version`,
 `input_schema_id`, `output_schema_id`, `error_schema_id`.
 
-Generated JSON Schema files live in `schemas/tools/` (Draft 2020-12, inline — no
-external `$ref`, so a client that cannot resolve remote references still gets a
-complete schema).
+Generated JSON Schema files live in `schemas/tools/` (Draft 2020-12, self-contained
+— nested-model definitions are lifted to a top-level `$defs` with local `$ref`, and
+there are no external references, so a client that cannot resolve remote references
+still gets a complete schema).
+
+### Coverage
+
+Every operational **and** meta tool has a registered Pydantic model
+(`incidentflow_mcp.tools.output_models.TOOL_OUTPUT_MODELS`); there is no silent
+generic-fallback schema. `incidentflow_capabilities` reports overall
+`contract_coverage` (`total_operational_tools`, `strict_schema_tools`,
+`permissive_schema_tools`, `coverage_percent`) and a per-tool `schema_mode`
+(`strict` | `permissive`). `tests/test_schema_coverage.py` fails if a new tool
+skips a schema or a tool's strictness regresses.
+
+### Serving schemas over HTTP
+
+- `GET /version` — service/contract version block (unauthenticated, no secrets).
+- `GET /schemas` — schema catalog.
+- `GET /schemas/{schema_id}` — one generated schema.
 
 ## 6. Before / after examples
 
@@ -121,7 +152,7 @@ complete schema).
   "data": {
     "service": "incidentflow-mcp",
     "service_version": "1.0.54",
-    "api_version": "v1",
+    "current_api_version": "v1",
     "contract_version": "1.0",
     "supported_api_versions": ["v1"],
     "supported_schema_versions": ["1.0"],

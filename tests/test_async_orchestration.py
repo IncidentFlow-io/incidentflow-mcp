@@ -1482,7 +1482,7 @@ def test_normalize_polled_incident_summary_job_running_returns_async() -> None:
 
     assert payload["mode"] == "async"
     assert payload["job_id"] == "sum_1"
-    assert payload["status"] == "running"
+    assert payload["job_status"] == "running"
     assert payload["poll_after_seconds"] == 2
 
 
@@ -1502,7 +1502,7 @@ def test_normalize_polled_incident_summary_job_terminal_returns_completed_payloa
 
     assert payload["mode"] == "completed"
     assert payload["job_id"] == "sum_2"
-    assert payload["status"] == "succeeded"
+    assert payload["job_status"] == "succeeded"
     assert payload["result"] == {"title": "DB outage", "severity": "sev1"}
     assert payload["artifact_refs"] == ["artifact_1"]
     assert payload["usage"] == {"tokens": 42}
@@ -1524,7 +1524,7 @@ def test_normalize_polled_incident_summary_job_rejects_external_status_result() 
     )
     payload = _payload(output)
 
-    assert payload["status"] == "failed"
+    assert payload["job_status"] == "failed"
     assert payload["error"]["code"] == "JOB_OPERATION_MISMATCH"
     assert "result" not in payload
     assert "artifact_refs" not in payload
@@ -1542,7 +1542,7 @@ def test_normalize_polled_incident_summary_job_rejects_wrong_job_type() -> None:
     )
     payload = _payload(output)
 
-    assert payload["status"] == "failed"
+    assert payload["job_status"] == "failed"
     assert payload["error"]["expected_job_type"] == "incident.summary.generate"
     assert "Should not leak" not in json.dumps(payload)
 
@@ -1556,7 +1556,7 @@ def test_normalize_polled_incident_summary_job_failed_returns_error() -> None:
     payload = _payload(output)
 
     assert payload["mode"] == "completed"
-    assert payload["status"] == "failed"
+    assert payload["job_status"] == "failed"
     assert payload["error"] == "runner crashed"
 
 
@@ -1571,7 +1571,7 @@ def test_normalize_polled_external_status_job_running_returns_async() -> None:
 
     assert payload["mode"] == "async"
     assert payload["job_id"] == "job_1"
-    assert payload["status"] == "running"
+    assert payload["job_status"] == "running"
     assert payload["poll_after_seconds"] == 2
 
 
@@ -1754,7 +1754,7 @@ async def test_external_status_check_starts_new_job_when_check_id_missing() -> N
     assert fake_client.get_calls == 0
     assert payload["mode"] == "async"
     assert payload["job_id"] == "new_job"
-    assert payload["status"] == "queued"
+    assert payload["job_status"] == "queued"
 
 
 @pytest.mark.asyncio
@@ -1798,7 +1798,7 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
     assert fake_client.get_calls == 1
     assert payload["mode"] == "completed"
     assert payload["job_id"] == "c1742dce-8fe1-41c1-88e1-0ba455edd5cc"
-    assert payload["status"] == "failed"
+    assert payload["job_status"] == "failed"
     assert payload["error"]["reason"] == "provider timeout"
     assert payload["response_mode"] == "compact"
 

@@ -283,7 +283,7 @@ async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatc
 
     assert payload["service"] == "incidentflow-mcp"
     assert payload["service_version"] == "1.0.0"
-    assert payload["api_version"] == "v1"
+    assert payload["current_api_version"] == "v1"
     assert payload["contract_version"] == "1.0"
     assert payload["supported_api_versions"] == ["v1"]
     assert payload["supported_schema_versions"] == ["1.0"]
@@ -329,7 +329,8 @@ async def test_mcp_version_normalizes_prod_tag(monkeypatch: pytest.MonkeyPatch) 
     payload = _payload(result)
 
     assert payload["service_version"] == "1.0.0"
-    assert payload["environment"] == "prod"
+    # Canonical lane is production (not the old "prod"), matching GET /version.
+    assert payload["environment"] == "production"
 
 
 @pytest.mark.asyncio

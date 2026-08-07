@@ -138,17 +138,19 @@ def test_success_and_error_validate_against_generated_schema(tool_name: str) -> 
         "mcp_version": {
             "service": "incidentflow-mcp",
             "service_version": "1.0.54",
-            "api_version": "v1",
+            "current_api_version": "v1",
             "contract_version": "1.0",
             "supported_api_versions": ["v1"],
             "supported_schema_versions": ["1.0"],
             "deprecated_api_versions": [],
             "environment": "dev",
+            "tools": {"registered": 46, "operational": 42, "meta": 4},
+            "image": {"signed": False, "signature_verified": False},
         },
         "external_status_check": {
             "mode": "async",
             "job_id": "job_123",
-            "status": "queued",
+            "job_status": "queued",
             "poll_after_seconds": 2,
         },
         "k8s_agent_status": {
@@ -156,8 +158,13 @@ def test_success_and_error_validate_against_generated_schema(tool_name: str) -> 
             "healthy": True,
             "checked_at": "2026-08-07T09:29:30Z",
         },
-        "argocd_connection_health": {"healthy": True, "status": "ok"},
-        "public_knowledge_search": {"results": [], "total": 0},
+        "argocd_connection_health": {"source": {}, "healthy": True, "status": "ok"},
+        "public_knowledge_search": {
+            "query": "IncidentFlow API",
+            "scope": "public",
+            "results": [],
+            "total": 0,
+        },
     }
     success = success_envelope(data_by_tool[tool_name], tool_name=tool_name)
     jsonschema.validate(success, schema)
@@ -221,7 +228,7 @@ async def test_mcp_version_end_to_end_is_enveloped_and_valid(
 
     data = result["data"]
     assert data["service"] == "incidentflow-mcp"
-    assert data["api_version"] == "v1"
+    assert data["current_api_version"] == "v1"
     assert data["supported_api_versions"] == ["v1"]
     assert data["supported_schema_versions"] == ["1.0"]
     assert data["deprecated_api_versions"] == []

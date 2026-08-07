@@ -1,4 +1,39 @@
 {
+  "$defs": {
+    "MetricSample": {
+      "properties": {
+        "timestamp": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "timestamp",
+        "value"
+      ],
+      "type": "object"
+    },
+    "MetricSeries": {
+      "additionalProperties": true,
+      "properties": {
+        "metric": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "samples": {
+          "items": {
+            "$ref": "#/$defs/MetricSample"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
   "$id": "https://incidentflow.io/schemas/tools/incidentflow.grafana-metrics-query.response.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
@@ -12,14 +47,39 @@
     "data": {
       "anyOf": [
         {
-          "type": [
-            "object",
-            "array",
-            "string",
-            "number",
-            "boolean",
-            "null"
-          ]
+          "additionalProperties": true,
+          "properties": {
+            "datasource_uid": {
+              "default": "",
+              "type": "string"
+            },
+            "query": {
+              "default": "",
+              "type": "string"
+            },
+            "result_type": {
+              "default": "",
+              "type": "string"
+            },
+            "series": {
+              "items": {
+                "$ref": "#/$defs/MetricSeries"
+              },
+              "type": "array"
+            },
+            "warning": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "type": "object"
         },
         {
           "type": "null"
@@ -129,6 +189,5 @@
     "error",
     "meta"
   ],
-  "title": "IncidentFlow response envelope (incidentflow.grafana-metrics-query.response)",
   "type": "object"
 }

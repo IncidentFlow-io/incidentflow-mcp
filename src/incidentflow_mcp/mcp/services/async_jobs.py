@@ -163,7 +163,9 @@ def build_async_result(
     payload: dict[str, Any] = {
         "mode": "async",
         "job_id": job_id,
-        "status": status,
+        # Job lifecycle status, named distinctly from the envelope-level `status`
+        # (review #10). The envelope carries the call outcome; this is the job's.
+        "job_status": status,
         "poll_after_seconds": poll_after_seconds,
     }
     if extra:
@@ -301,7 +303,8 @@ def compact_external_status_result(result: Any) -> Any:
     elif errors_list and not compact_statuses:
         check_status = "failed"
     elif str(result.get("status") or "").lower() not in {"success", "ok"}:
-        check_status = str(result.get("status") or "unknown")
+        # Bounded to a known vocabulary so the response validates (review #10).
+        check_status = "unknown"
 
     provider_names = {
         str(provider_status.get("provider") or "").lower()
@@ -331,6 +334,7 @@ def compact_external_status_result(result: Any) -> Any:
         provider_names.add(provider)
 
     compact_result = {
+        "mode": "completed",
         "check_status": check_status,
         "checked_at": checked_at,
         "providers": compact_statuses,
@@ -377,12 +381,12 @@ def normalize_polled_external_status_job(
             return (
                 normalized_result
                 if isinstance(normalized_result, dict)
-                else {"status": status, "result": normalized_result}
+                else {"mode": "completed", "job_status": status, "result": normalized_result}
             )
         payload: dict[str, Any] = {
             "mode": "completed",
             "job_id": job_id,
-            "status": status,
+            "job_status": status,
             "result": normalized_result,
             "error": job.get("error"),
             "artifact_refs": safe_artifact_refs(job.get("artifact_refs", [])),
@@ -418,7 +422,7 @@ def normalize_polled_incident_summary_job(
         payload: dict[str, Any] = {
             "mode": "completed",
             "job_id": job_id,
-            "status": status,
+            "job_status": status,
             "result": job.get("result"),
             "error": job.get("error"),
             "artifact_refs": safe_artifact_refs(job.get("artifact_refs", [])),
@@ -470,7 +474,7 @@ def polled_job_mismatch_result(
     return {
         "mode": "completed",
         "job_id": job_id,
-        "status": "failed",
+        "job_status": "failed",
         "error": {
             "code": "JOB_OPERATION_MISMATCH",
             "message": (
