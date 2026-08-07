@@ -1,0 +1,84 @@
+# Tested safe examples
+
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
+These examples use placeholder values and operations that do not mutate an external source. Their
+payloads are checked against the generated OpenAPI contract in the repository test suite. Replace
+the URL and token through environment variables rather than editing a token into the command.
+
+```bash
+export INCIDENTFLOW_MCP_URL="https://mcp.incidentflow.io/mcp"
+export INCIDENTFLOW_ACCESS_TOKEN="<access-token>"
+```
+
+## Initialize an MCP session
+
+```bash
+curl --request POST "$INCIDENTFLOW_MCP_URL" \
+  --header "Authorization: Bearer $INCIDENTFLOW_ACCESS_TOKEN" \
+  --header "Content-Type: application/json" \
+  --header "Accept: application/json, text/event-stream" \
+  --data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": {"name": "incidentflow-docs-check", "version": "0.1.0"}
+    }
+  }'
+```
+
+If the response returns an `Mcp-Session-Id` header, send that value on subsequent requests in the
+same session.
+
+## Discover the deployed tool surface
+
+Discovery is the authority for the environment being called. Do not assume a source-only or draft
+tool is enabled.
+
+```bash
+curl --request POST "$INCIDENTFLOW_MCP_URL" \
+  --header "Authorization: Bearer $INCIDENTFLOW_ACCESS_TOKEN" \
+  --header "Content-Type: application/json" \
+  --header "Accept: application/json, text/event-stream" \
+  --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+```
+
+## Correlate supplied alerts
+
+`correlate_alerts` computes from the supplied payload and does not write to Slack, Kubernetes, or
+another external provider. The example uses `sync` explicitly.
+
+```bash
+curl --request POST "$INCIDENTFLOW_MCP_URL" \
+  --header "Authorization: Bearer $INCIDENTFLOW_ACCESS_TOKEN" \
+  --header "Content-Type: application/json" \
+  --header "Accept: application/json, text/event-stream" \
+  --data '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "correlate_alerts",
+      "arguments": {
+        "alerts": [{
+          "alert_id": "juniper-qa-001",
+          "name": "CheckoutLatencyHigh",
+          "service": "checkout-api",
+          "severity": "high",
+          "status": "firing",
+          "fired_at": "2026-08-02T09:00:00Z",
+          "labels": {"environment": "qa", "tenant": "junipercart"}
+        }],
+        "window_minutes": 30,
+        "min_cluster_size": 1,
+        "execution_mode": "sync"
+      }
+    }
+  }'
+```
+
+The JuniperCart names above are synthetic QA fixtures. Do not replace them with production tenant
+identifiers in documentation or bug reports.

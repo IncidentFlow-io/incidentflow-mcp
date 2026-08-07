@@ -6,10 +6,20 @@ from typing import Any
 import httpx
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.tracing import inject_trace_headers
 
 logger = logging.getLogger(__name__)
 
 _BASE_PATH = "/internal/integrations/grafana"
+
+
+class PlatformGrafanaAPIError(RuntimeError):
+    """Structured platform-api Grafana error exposed to MCP tool callers."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.message = message or code
 
 
 class PlatformGrafanaClient:
@@ -39,13 +49,38 @@ class PlatformGrafanaClient:
         self._transport = transport
         self._headers = {
             "X-Internal-Api-Key": token.get_secret_value(),
+            "X-Internal-Caller": "incidentflow-mcp",
             "X-MCP-Client-Id": "incidentflow-mcp",
         }
+
+    def _raise_for_platform_error(self, response: httpx.Response) -> None:
+        if not response.is_error:
+            return
+        try:
+            payload = response.json()
+        except ValueError:
+            response.raise_for_status()
+        if isinstance(payload, dict):
+            code = payload.get("code")
+            if isinstance(code, str) and code:
+                message = payload.get("message")
+                raise PlatformGrafanaAPIError(
+                    code,
+                    str(message) if message is not None else None,
+                )
+        response.raise_for_status()
+
+    def _outbound_headers(self) -> dict[str, str]:
+        headers = dict(self._headers)
+        inject_trace_headers(headers)
+        return headers
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
             response = await client.get(
-                f"{self._base_url}{path}", params=params, headers=self._headers
+                f"{self._base_url}{path}",
+                params=params,
+                headers=self._outbound_headers(),
             )
         _raise_for_status_with_body(response)
         return dict(response.json())
@@ -53,7 +88,9 @@ class PlatformGrafanaClient:
     async def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client:
             response = await client.post(
-                f"{self._base_url}{path}", json=payload, headers=self._headers
+                f"{self._base_url}{path}",
+                json=payload,
+                headers=self._outbound_headers(),
             )
         _raise_for_status_with_body(response)
         return dict(response.json())

@@ -27,6 +27,55 @@ from incidentflow_mcp.tools.schemas import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_PATH = REPO_ROOT / "openapi" / "openapi.yaml"
+DOCS_DOWNLOAD_DIR = REPO_ROOT / "fern" / "assets" / "downloads"
+
+_RELEASE_BLOCKED_TOOLS = {
+    "memory_search_similar_incidents",
+    "memory_get_service_context",
+    "memory_upsert_incident_summary",
+    "memory_find_runbook",
+}
+_CONDITIONAL_TOOLS = {
+    "external_status_check",
+    "slack_alerts_list",
+    "slack_alert_thread_get",
+    "incident_thread_summary",
+    "k8s_connection_health",
+    "k8s_cluster_overview",
+    "k8s_namespace_overview",
+    "k8s_rbac_check",
+    "k8s_agent_status",
+    "k8s_list_namespaces",
+    "k8s_list_pods",
+    "k8s_get_pod",
+    "k8s_get_pod_logs",
+    "k8s_list_events",
+    "k8s_list_deployments",
+    "k8s_list_services",
+    "k8s_get_rollout_status",
+    "k8s_show_unhealthy_pods",
+    "k8s_analyze_workload",
+    "k8s_describe_pod",
+    "k8s_debug_pod",
+    "grafana_list_dashboards",
+    "grafana_get_dashboard",
+    "grafana_extract_panel_queries",
+    "grafana_metrics_query",
+    "grafana_metrics_query_range",
+    "analyze_dashboard_health",
+    "grafana_get_panel_view",
+    "argocd_connection_health",
+    "argocd_list_applications",
+    "argocd_get_application",
+    "argocd_get_application_resources",
+    "argocd_get_sync_history",
+    "argocd_get_last_operation",
+    "argocd_find_recent_deployments",
+    "argocd_analyze_application",
+    "private_knowledge_search",
+    "knowledge_get",
+    "knowledge_upsert",
+}
 
 
 def _jsonrpc_error_schema() -> dict[str, Any]:
@@ -135,7 +184,7 @@ def _build_mcp_post_request_examples() -> dict[str, Any]:
                         "incident_id": "INC-001",
                         "include_timeline": True,
                         "include_affected_services": True,
-                        "execution_mode": "auto",
+                        "execution_mode": "sync",
                     },
                 },
             },
@@ -156,26 +205,8 @@ def _build_mcp_post_request_examples() -> dict[str, Any]:
                             '"labels":{"env":"prod"}}]'
                         ),
                         "window_minutes": 30,
-                        "min_cluster_size": 2,
-                        "execution_mode": "auto",
-                    },
-                },
-            },
-        },
-        "externalStatusCall": {
-            "summary": "Call external_status_check",
-            "value": {
-                "jsonrpc": "2.0",
-                "id": 5,
-                "method": "tools/call",
-                "params": {
-                    "name": "external_status_check",
-                    "arguments": {
-                        "providers": ["github"],
-                        "days_back": 30,
-                        "wait_for_result": True,
-                        "execution_mode": "async",
-                        "response_mode": "compact",
+                        "min_cluster_size": 1,
+                        "execution_mode": "sync",
                     },
                 },
             },
@@ -227,7 +258,20 @@ def _add_components(spec: dict[str, Any]) -> None:
 
     # Tool arguments from canonical registry.
     tool_schemas = _get_tool_specs_map()
+    specs_by_name = {spec.name: spec for spec in get_tool_specs()}
     for tool_name, tool_schema in tool_schemas.items():
+        spec = specs_by_name[tool_name]
+        if not spec.submission_ready:
+            availability = "not-public"
+        elif tool_name in _RELEASE_BLOCKED_TOOLS:
+            availability = "release-blocked"
+        elif tool_name in _CONDITIONAL_TOOLS:
+            availability = "conditional"
+        else:
+            availability = "available"
+        tool_schema["x-incidentflow-title"] = spec.title
+        tool_schema["x-incidentflow-availability"] = availability
+        tool_schema["x-mcp-behavior"] = copy.deepcopy(spec.annotations)
         schemas[f"{tool_name}Arguments"] = tool_schema
 
     schemas["InitializeParams"] = {
@@ -339,6 +383,59 @@ def _add_components(spec: dict[str, Any]) -> None:
         "required": ["detail"],
         "properties": {"detail": {"type": "string", "example": "internal server error"}},
     }
+    schemas["ServiceUnavailableError"] = {
+        "type": "object",
+        "required": ["detail"],
+        "properties": {
+            "detail": {
+                "type": "string",
+                "example": "Token verification service unavailable",
+            }
+        },
+    }
+    schemas["HealthResponse"] = {
+        "type": "object",
+        "required": ["status", "service", "version", "environment"],
+        "properties": {
+            "status": {"type": "string", "enum": ["ok"]},
+            "service": {"type": "string", "example": "incidentflow-mcp"},
+            "version": {"type": "string", "example": "0.1.0"},
+            "environment": {"type": "string", "example": "production"},
+        },
+    }
+    schemas["ReadinessResponse"] = {
+        "type": "object",
+        "required": ["status"],
+        "properties": {"status": {"type": "string", "enum": ["ready"]}},
+    }
+    schemas["OAuthProtectedResourceMetadata"] = {
+        "type": "object",
+        "required": ["resource", "authorization_servers", "scopes_supported"],
+        "properties": {
+            "resource": {
+                "type": "string",
+                "format": "uri",
+                "example": "https://mcp.incidentflow.io/mcp",
+            },
+            "authorization_servers": {
+                "type": "array",
+                "items": {"type": "string", "format": "uri"},
+                "minItems": 1,
+            },
+            "scopes_supported": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": ["mcp:read", "mcp:tools:run", "admin"],
+                },
+            },
+        },
+    }
+    schemas["NotFoundError"] = {
+        "type": "object",
+        "required": ["detail"],
+        "properties": {"detail": {"type": "string", "example": "Not found"}},
+    }
 
     components["securitySchemes"] = {
         "bearerAuth": {
@@ -395,6 +492,15 @@ def _add_components(spec: dict[str, Any]) -> None:
             }
         },
     }
+    responses["ServiceUnavailableError"] = {
+        "description": "Required token-verification service unavailable; verification fails closed",
+        "headers": {"Retry-After": {"schema": {"type": "integer"}}},
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/ServiceUnavailableError"},
+            }
+        },
+    }
 
 
 def _inject_mcp_path(spec: dict[str, Any]) -> None:
@@ -409,6 +515,8 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
                 "GET is supported by transport and may be used by MCP clients "
                 "for handshake/session semantics."
             ),
+            "x-incidentflow-availability": "candidate",
+            "x-incidentflow-human-review": "pending",
             "security": [{"bearerAuth": []}],
             "responses": {
                 "200": {
@@ -426,6 +534,7 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
                 "401": {"$ref": "#/components/responses/UnauthorizedError"},
                 "403": {"$ref": "#/components/responses/ForbiddenError"},
                 "429": {"$ref": "#/components/responses/RateLimitError"},
+                "503": {"$ref": "#/components/responses/ServiceUnavailableError"},
                 "500": {"$ref": "#/components/responses/InternalServerError"},
             },
         },
@@ -444,6 +553,7 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
                 "401": {"$ref": "#/components/responses/UnauthorizedError"},
                 "403": {"$ref": "#/components/responses/ForbiddenError"},
                 "429": {"$ref": "#/components/responses/RateLimitError"},
+                "503": {"$ref": "#/components/responses/ServiceUnavailableError"},
                 "500": {"$ref": "#/components/responses/InternalServerError"},
             },
         },
@@ -456,6 +566,8 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
                 "`initialize`, `tools/list`, and `tools/call`. "
                 "Some responses may stream over SSE depending on client transport/session flow."
             ),
+            "x-incidentflow-availability": "candidate",
+            "x-incidentflow-human-review": "pending",
             "security": [{"bearerAuth": []}],
             "requestBody": {
                 "required": True,
@@ -504,6 +616,7 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
                 "401": {"$ref": "#/components/responses/UnauthorizedError"},
                 "403": {"$ref": "#/components/responses/ForbiddenError"},
                 "429": {"$ref": "#/components/responses/RateLimitError"},
+                "503": {"$ref": "#/components/responses/ServiceUnavailableError"},
                 "500": {"$ref": "#/components/responses/InternalServerError"},
             },
         },
@@ -513,12 +626,30 @@ def _inject_mcp_path(spec: dict[str, Any]) -> None:
 def _annotate_existing_paths(spec: dict[str, Any]) -> None:
     paths = spec.get("paths", {})
 
-    public_paths = {"/install.sh", "/healthz", "/readyz", "/metrics"}
+    public_paths = {
+        "/install.sh",
+        "/healthz",
+        "/readyz",
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+        "/.well-known/oauth-authorization-server",
+        "/.well-known/openid-configuration",
+        "/.well-known/jwks.json",
+        "/.well-known/{challenge_path}",
+        "/authorize",
+        "/token",
+        "/register",
+        "/oauth/register",
+        "/revoke",
+    }
     ops_tags = {
         "/install.sh": "ops",
         "/healthz": "ops",
         "/readyz": "ops",
         "/metrics": "ops",
+        "/.well-known/oauth-protected-resource": "ops",
+        "/.well-known/oauth-protected-resource/mcp": "ops",
+        "/.well-known/{challenge_path}": "ops",
     }
 
     for path, path_item in paths.items():
@@ -531,19 +662,110 @@ def _annotate_existing_paths(spec: dict[str, Any]) -> None:
                     f"{method}_{path.strip('/').replace('/', '_').replace('.', '_')}"
                 )
 
+            operation.setdefault(
+                "description",
+                operation.get("summary") or f"{method.upper()} {path} endpoint.",
+            )
+            operation.setdefault("tags", [ops_tags.get(path, "ops")])
+
             if path in public_paths:
                 operation["security"] = []
-                operation["tags"] = [ops_tags[path]]
+            else:
+                operation.setdefault("security", [{"bearerAuth": []}])
+
+            if path == "/metrics":
+                operation["security"] = [{"bearerAuth": []}]
+                operation["description"] = (
+                    "Prometheus text exposition. A production deployment requires bearer "
+                    "authentication unless the caller is in a configured trusted monitoring CIDR."
+                )
+
+            operation["x-incidentflow-availability"] = "candidate"
+            operation["x-incidentflow-human-review"] = "pending"
 
             responses = operation.setdefault("responses", {})
             if "500" not in responses:
                 responses["500"] = {"$ref": "#/components/responses/InternalServerError"}
 
-            if path == "/metrics":
-                resp_200 = responses.get("200")
-                if isinstance(resp_200, dict):
-                    content = resp_200.setdefault("content", {})
-                    content.setdefault("text/plain", {"schema": {"type": "string"}})
+    paths["/install.sh"]["get"]["responses"]["200"] = {
+        "description": "Installer shell script generated for the current MCP origin",
+        "headers": {
+            "Content-Disposition": {
+                "schema": {"type": "string"},
+                "example": 'inline; filename="install.sh"',
+            },
+            "Cache-Control": {"schema": {"type": "string"}, "example": "no-store"},
+        },
+        "content": {
+            "text/x-shellscript": {
+                "schema": {"type": "string"},
+                "example": "#!/usr/bin/env bash\n# Inspect before execution.\n",
+            }
+        },
+    }
+    paths["/healthz"]["get"]["responses"]["200"] = {
+        "description": "Service process is alive",
+        "content": {
+            "application/json": {"schema": {"$ref": "#/components/schemas/HealthResponse"}}
+        },
+    }
+    paths["/readyz"]["get"]["responses"]["200"] = {
+        "description": "Service is ready to receive requests",
+        "content": {
+            "application/json": {"schema": {"$ref": "#/components/schemas/ReadinessResponse"}}
+        },
+    }
+    paths["/metrics"]["get"]["responses"]["200"] = {
+        "description": "Prometheus text exposition",
+        "content": {
+            "text/plain": {
+                "schema": {"type": "string"},
+                "example": "# HELP mcp_tool_requests_total MCP tool requests\n",
+            }
+        },
+    }
+
+    metadata_paths = (
+        "/.well-known/oauth-protected-resource",
+        "/.well-known/oauth-protected-resource/mcp",
+    )
+    for path in metadata_paths:
+        paths[path]["get"]["description"] = (
+            "Discover the authorization server, canonical MCP resource, and supported scopes."
+        )
+        paths[path]["get"]["responses"]["200"] = {
+            "description": "OAuth protected-resource metadata",
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "$ref": "#/components/schemas/OAuthProtectedResourceMetadata"
+                    },
+                    "example": {
+                        "resource": "https://mcp.incidentflow.io/mcp",
+                        "authorization_servers": ["https://api.incidentflow.io"],
+                        "scopes_supported": ["mcp:read", "mcp:tools:run", "admin"],
+                    },
+                }
+            },
+        }
+
+    verification = paths["/.well-known/{challenge_path}"]["get"]
+    verification["description"] = (
+        "Return a configured OpenAI Apps domain-verification token only for the exact configured "
+        "challenge path. This is service verification, not a customer API operation."
+    )
+    verification["responses"]["200"] = {
+        "description": "Configured domain-verification token",
+        "content": {"text/plain": {"schema": {"type": "string"}}},
+    }
+    verification["responses"]["404"] = {
+        "description": "Challenge path is not configured",
+        "content": {
+            "application/json": {
+                "schema": {"$ref": "#/components/schemas/NotFoundError"}
+            }
+        },
+    }
 
 
 def generate_openapi() -> dict[str, Any]:
@@ -552,13 +774,32 @@ def generate_openapi() -> dict[str, Any]:
 
     spec["info"]["title"] = "IncidentFlow MCP API"
     spec["info"]["description"] = (
-        "Canonical API specification for IncidentFlow MCP. "
-        "Generated from FastAPI routes and MCP tool metadata."
+        "Canonical customer-facing contract for the IncidentFlow MCP Streamable HTTP service. "
+        "Generated from FastAPI routes and canonical MCP tool metadata. Tool schemas carry "
+        "availability and behavior extensions; source presence does not imply public availability."
     )
+    spec["info"]["x-incidentflow-release-status"] = "candidate"
+    spec["info"]["x-incidentflow-human-review"] = "pending"
+    spec["servers"] = [
+        {
+            "url": "https://mcp.incidentflow.io",
+            "description": "IncidentFlow MCP production origin",
+        }
+    ]
+    spec["externalDocs"] = {
+        "description": "IncidentFlow MCP documentation",
+        "url": "https://docs.incidentflow.io",
+    }
 
     spec["tags"] = [
-        {"name": "ops", "description": "Operational/public endpoints"},
-        {"name": "mcp", "description": "MCP Streamable HTTP transport endpoint"},
+        {
+            "name": "mcp",
+            "description": "Authenticated MCP Streamable HTTP transport and JSON-RPC operations",
+        },
+        {
+            "name": "ops",
+            "description": "Public service discovery, health, installer, and metrics endpoints",
+        },
     ]
 
     _add_components(spec)
@@ -570,12 +811,18 @@ def generate_openapi() -> dict[str, Any]:
 
 def main() -> None:
     spec = generate_openapi()
+    rendered = yaml.safe_dump(spec, sort_keys=False, allow_unicode=False, width=100)
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_PATH.write_text(
-        yaml.safe_dump(spec, sort_keys=False, allow_unicode=False, width=100),
-        encoding="utf-8",
-    )
+    OUTPUT_PATH.write_text(rendered, encoding="utf-8")
+
+    version = str(spec["info"]["version"])
+    if not version or any(character in version for character in "/\\"):
+        raise ValueError(f"Unsafe OpenAPI version for download filename: {version!r}")
+    download_path = DOCS_DOWNLOAD_DIR / f"incidentflow-mcp-openapi-{version}.yaml"
+    download_path.parent.mkdir(parents=True, exist_ok=True)
+    download_path.write_text(rendered, encoding="utf-8")
     print(f"Wrote {OUTPUT_PATH}")
+    print(f"Wrote {download_path}")
 
 
 if __name__ == "__main__":

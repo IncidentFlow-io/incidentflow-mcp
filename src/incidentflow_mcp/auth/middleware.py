@@ -243,6 +243,9 @@ async def _attempt_oauth_validation(
 
     if result.ok:
         claims = result.claims or {}
+        revocation_check = await introspect_oauth_access_token(token=token)
+        if revocation_check is not None and revocation_check.status_code != 200:
+            return revocation_check
         _record_auth_success(
             client_id=claims.get("client_id") or "oauth_client",
             auth_method="oauth",
@@ -283,6 +286,53 @@ async def _attempt_oauth_validation(
 
     # not_oauth -> continue with PAT fallback.
     return None
+
+
+async def introspect_oauth_access_token(*, token: str) -> JSONResponse | None:
+    """Apply the authorization server's persisted access-token deny-list.
+
+    A locally valid JWT is checked online on every request. Active responses
+    are deliberately not cached, so a successful /revoke takes effect on the
+    next MCP request. Authority errors fail closed with 503 rather than
+    silently accepting a potentially revoked token.
+    """
+    settings = get_settings()
+    if not settings.oauth_revocation_check_enabled():
+        if settings.oauth_revocation_check_required():
+            logger.error(
+                "auth: OAuth revocation check requires PLATFORM_API_BASE_URL in production"
+            )
+            return _service_unavailable("Token revocation service is not configured")
+        return None
+
+    url = f"{settings.platform_api_base_url.rstrip('/')}{settings.oauth_introspection_path}"
+    headers: dict[str, str] = {}
+    introspection_key = (
+        settings.oauth_introspection_api_key or settings.platform_api_internal_api_key
+    )
+    if introspection_key is not None:
+        headers["X-Internal-Api-Key"] = (
+            introspection_key.get_secret_value()
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.platform_api_timeout_seconds) as client:
+            response = await client.post(url, headers=headers, data={"token": token})
+    except httpx.HTTPError as exc:
+        logger.warning("auth: OAuth introspection unavailable (%s): %s", url, str(exc))
+        return _service_unavailable("Token revocation service unavailable")
+
+    if response.status_code == 200:
+        try:
+            active = response.json().get("active") is True
+        except (TypeError, ValueError):
+            active = False
+        if active:
+            return JSONResponse(status_code=200, content={})
+        return _unauthorized("OAuth access token is inactive or revoked")
+
+    logger.warning("auth: OAuth introspection returned status=%s", response.status_code)
+    return _service_unavailable("Token revocation service error")
 
 
 async def introspect_managed_pat(

@@ -6,22 +6,32 @@ on:
       - 'openapi/**'
       - 'fern/**'
       - 'scripts/**'
+      - 'docs/**'
       - 'src/**'
+      - 'tests/test_docs_governance.py'
+      - 'tests/test_public_docs.py'
+      - 'tests/test_tool_metadata.py'
       - 'Makefile'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docs.yml'
+      - '.github/CODEOWNERS'
   push:
     branches: [main]
     paths:
       - 'openapi/**'
       - 'fern/**'
       - 'scripts/**'
+      - 'docs/**'
       - 'src/**'
+      - 'tests/test_docs_governance.py'
+      - 'tests/test_public_docs.py'
+      - 'tests/test_tool_metadata.py'
       - 'Makefile'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/docs.yml'
+      - '.github/CODEOWNERS'
   workflow_dispatch:
     inputs:
       publish_production:
@@ -59,10 +69,19 @@ jobs:
         run: make openapi-generate
 
       - name: Ensure OpenAPI is committed
-        run: git diff --exit-code -- openapi/openapi.yaml
+        run: >-
+          git diff --exit-code --
+          openapi/openapi.yaml
+          fern/assets/downloads/
 
       - name: Validate OpenAPI
         run: make openapi-validate
+
+      - name: Execute public documentation contracts and examples
+        run: make docs-contract-check
+
+      - name: Validate documentation governance
+        run: make docs-governance-check
 
       - name: Check Fern
         run: make fern-check
@@ -98,6 +117,9 @@ jobs:
 
       - name: Generate OpenAPI
         run: make openapi-generate
+
+      - name: Require current human approval for public narratives
+        run: make docs-publish-check
 
       - name: Publish preview docs
         env:
@@ -135,6 +157,9 @@ jobs:
 
       - name: Generate OpenAPI
         run: make openapi-generate
+
+      - name: Require current human approval for public narratives
+        run: make docs-publish-check
 
       - name: Publish production docs
         env:

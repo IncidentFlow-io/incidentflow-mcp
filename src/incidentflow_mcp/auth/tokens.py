@@ -6,7 +6,9 @@ Example:       if_pat_local_a1b2c3d4.Nx8K3mQp7Wz2Rk9Ls1Vf0Yt6AbCdEfGh
 
 The token_id is a short public identifier used for fast DB lookup.
 The secret is the high-entropy part that proves possession.
-Only the token_hash (SHA-256) of the full token string is ever persisted.
+Only a SHA-256 digest of the full token string is ever persisted. When a
+pepper is configured, the stored value includes its non-secret version so the
+hash format can be rotated safely.
 
 Future OAuth resource-server integration point
 ----------------------------------------------
@@ -20,11 +22,14 @@ import hashlib
 import hmac
 import secrets
 
+from incidentflow_mcp.config import get_settings
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 PREFIX = "if_pat_local_"
+PEPPERED_HASH_SEPARATOR = ":"
 
 
 # ---------------------------------------------------------------------------
@@ -56,17 +61,36 @@ def generate_pat() -> tuple[str, str, str]:
 
 def _hash_token(token: str) -> str:
     """
-    Hash a token for at-rest storage using SHA-256.
+    Hash a token for at-rest storage using SHA-256 and the configured pepper.
 
-    Extension point — to add a pepper:
-        pepper = os.environ.get("INCIDENTFLOW_TOKEN_PEPPER", "")
-        value = (pepper + token).encode("utf-8")
-        return hashlib.sha256(value).hexdigest()
+    Peppered hashes are stored as ``<pepper-version>:<sha256>``. If no pepper
+    is configured, the legacy unversioned SHA-256 format is retained.
 
     Future: swap for Argon2id / bcrypt for multi-user hosted deployments.
     """
-    # TODO: add INCIDENTFLOW_TOKEN_PEPPER support when moving to hosted mode
+    settings = get_settings()
+    pepper = settings.incidentflow_token_pepper
+    if pepper is None or not pepper.get_secret_value():
+        return _legacy_hash_token(token)
+
+    digest = _peppered_digest(token, pepper.get_secret_value())
+    return PEPPERED_HASH_SEPARATOR.join(
+        (settings.incidentflow_token_pepper_version, digest)
+    )
+
+
+def _legacy_hash_token(token: str) -> str:
+    """Return the pre-pepper token hash for records created before migration."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _peppered_digest(token: str, pepper: str) -> str:
+    """Return an HMAC-SHA-256 digest using the pepper as the secret key."""
+    return hmac.new(
+        pepper.encode("utf-8"),
+        token.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -85,8 +109,25 @@ def verify_token(token: str, expected_hash: str) -> bool:
         Replace this function body with an introspection call when
         switching from local PATs to OAuth access tokens.
     """
-    actual_hash = _hash_token(token)
-    return hmac.compare_digest(actual_hash, expected_hash)
+    if PEPPERED_HASH_SEPARATOR not in expected_hash:
+        actual_hash = _legacy_hash_token(token)
+        return hmac.compare_digest(actual_hash, expected_hash)
+
+    version, separator, digest = expected_hash.partition(PEPPERED_HASH_SEPARATOR)
+    if not separator or not version or not digest:
+        return False
+
+    settings = get_settings()
+    pepper = settings.incidentflow_token_pepper
+    if (
+        pepper is None
+        or not pepper.get_secret_value()
+        or version != settings.incidentflow_token_pepper_version
+    ):
+        return False
+
+    actual_hash = _peppered_digest(token, pepper.get_secret_value())
+    return hmac.compare_digest(actual_hash, digest)
 
 
 # ---------------------------------------------------------------------------

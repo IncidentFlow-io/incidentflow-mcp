@@ -1,3 +1,5 @@
+<!-- incidentflow:internal-only -->
+
 # MCP Observability (Prometheus + Grafana)
 
 See also: [Logging](logging.md) and

@@ -82,7 +82,8 @@ def map_exception(exc: Exception) -> dict[str, Any]:
             "code": ErrorCode.INVALID_ARGUMENT,
             "message": "Invalid tool arguments",
             "retryable": False,
-            "details": {"errors": exc.errors()},
+            # Validation input may contain model instances; omit full input for serializability.
+            "details": {"errors": exc.errors(include_input=False)},
         }
 
     # plain argument errors raised by handlers

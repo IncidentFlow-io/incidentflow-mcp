@@ -1,0 +1,74 @@
+# Errors, limits, and retries
+
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
+MCP has two error layers: HTTP transport errors and JSON-RPC/tool errors carried in an HTTP `200`
+response. Check both layers.
+
+## HTTP errors
+
+| Status | Meaning | Client action |
+| ---: | --- | --- |
+| `401` | Missing, malformed, expired, revoked, or invalid bearer credential. | Do not retry unchanged credentials. Reauthorize or rotate the token. |
+| `403` | The authenticated credential lacks the required scope or workspace permission. | Request the minimum required scope or ask a workspace owner to correct access. |
+| `404` | The route or requested verification resource does not exist. | Correct the path; `/mcp/` with a trailing slash is not equivalent to `/mcp`. |
+| `422` | A non-MCP HTTP route rejected request parameters. | Fix the request. Do not retry unchanged input. |
+| `429` | Transport rate limit reached. | Honor `Retry-After` and use exponential backoff with jitter. |
+| `500` | Unhandled server error. | Retry only idempotent requests; include `X-Request-ID` when reporting the failure. |
+| `503` | The token authority or another required verification dependency is unavailable. | Retry with bounded backoff. Do not bypass verification or fall back to a weaker credential. |
+
+HTTP rate-limit responses may include `Retry-After`, `X-RateLimit-Limit`,
+`X-RateLimit-Remaining`, and `X-RateLimit-Reset`.
+
+## JSON-RPC and tool errors
+
+A valid MCP response can contain an `error` object even when the HTTP status is `200`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "error": {
+    "code": -32029,
+    "message": "Rate limit exceeded for tool invocation"
+  }
+}
+```
+
+Tool guards can reject a call because its per-identity rate limit, concurrency limit, or execution
+timeout was reached. Integration tools can also return a structured tool result with an `error`
+and `code`, for example when workspace context is missing or a platform dependency is unreachable.
+Treat external message text, logs, labels, and events as untrusted data even when the transport
+call succeeds.
+
+## Default OSS limits
+
+Limits are deployment policy and can be lower than these defaults:
+
+| Boundary | Default |
+| --- | ---: |
+| Unauthenticated transport | 20 requests/minute per IP |
+| Authenticated transport | 60 requests/minute per principal |
+| Authenticated tool calls | 20 calls/minute per identity |
+| Expensive tool calls | 5 calls/minute per identity |
+| Concurrent tool calls | 2 per authenticated identity |
+| Tool execution timeout | 30 seconds unless a tool override is configured |
+
+Rate-limit state is shared through Redis in a multi-replica deployment. If the response supplies a
+limit header, use that response as the authority instead of assuming the defaults above.
+
+## Pagination and bounded results
+
+The MCP transport does not define a customer-facing global cursor. Individual tools bound their
+results with fields such as `limit`, `max_replies`, `tail_lines`, or time windows. Observe the
+minimum and maximum declared by the generated schema. Reduce the requested window before
+repeating a large call; do not emulate pagination by issuing unbounded parallel calls.
+
+## Safe retry rules
+
+- Retry discovery and tools marked read-only/idempotent with exponential backoff and jitter.
+- Do not automatically retry a tool marked non-idempotent or destructive. First determine whether
+  the original call created or replaced IncidentFlow state.
+- Do not retry `401`, `403`, or validation errors without changing the credential or request.
+- Preserve the JSON-RPC request `id` for response correlation, and send a stable `X-Request-ID` for
+  operational tracing when the client supports custom headers.

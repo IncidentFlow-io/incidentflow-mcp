@@ -1,0 +1,63 @@
+# Authentication and scopes
+
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
+Production access to `https://mcp.incidentflow.io/mcp` uses a bearer credential. Send the
+credential only in the `Authorization` header:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+Tokens in `token` or `access_token` query parameters are rejected. Do not put credentials in
+URLs, examples, logs, screenshots, issue reports, or shell history.
+
+## Recommended authorization flow
+
+Use IncidentFlow OAuth when the MCP client supports it. A client can discover the authorization
+server and supported scopes from either protected-resource metadata endpoint:
+
+```text
+GET https://mcp.incidentflow.io/.well-known/oauth-protected-resource
+GET https://mcp.incidentflow.io/.well-known/oauth-protected-resource/mcp
+```
+
+Managed workspace tokens are appropriate for non-interactive automation when they are issued by
+the IncidentFlow platform. A static `INCIDENTFLOW_PAT` and locally stored CLI tokens are development
+fallbacks, not the recommended production customer flow.
+
+## Scopes
+
+| Scope | Purpose |
+| --- | --- |
+| `mcp:read` | Connect to the MCP transport and discover resources and tools. |
+| `mcp:tools:run` | Invoke MCP tools. Request this together with `mcp:read` for a tool-using client. |
+| `admin` | Administrative operations. It is not needed by the documented public MCP workflow. |
+
+Use the smallest scope set that satisfies the client. The current `/mcp` transport authorizes at
+the route boundary with `mcp:read`; clients that invoke tools should still be issued both
+`mcp:read` and `mcp:tools:run` so the credential remains compatible with per-operation enforcement.
+
+## Integration permissions
+
+The bearer credential selects the IncidentFlow workspace. It does not bypass the permissions of a
+connected source:
+
+- Slack tools require a workspace-scoped credential, a connected Slack workspace, and an allowed
+  incident channel. They do not post, edit, or delete Slack messages.
+- Kubernetes tools require an online IncidentFlow Agent and an allowed cluster/namespace. They use
+  read-only inspection actions and do not execute shell commands or mutate workloads.
+- `external_status_check` reads public provider-status data. It does not authorize access to a
+  customer's GitHub organization, repositories, issues, or pull requests.
+- Grafana and memory tools are not in the accepted public release; see the
+  [availability catalog](../reference/tool-catalog.mdx).
+
+## Credential lifecycle
+
+Treat a credential as compromised if it appears outside the approved secret store. Revoke it at
+the issuing IncidentFlow authority, remove it from the client, and issue a replacement. Never test
+revocation with a production credential.
+
+OAuth access-token revocation requires the MCP deployment's online introspection check. That path
+is implemented in the current candidate but still requires coordinated staging acceptance before
+the release is marked accepted.

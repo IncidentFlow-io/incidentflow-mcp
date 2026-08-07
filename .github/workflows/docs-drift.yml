@@ -1,0 +1,100 @@
+name: Documentation drift
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: documentation-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Check code-to-document contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Regenerate OpenAPI
+        run: make openapi-generate
+
+      - name: Validate generated OpenAPI
+        run: make openapi-validate
+
+      - name: Build deterministic drift report
+        id: drift
+        continue-on-error: true
+        run: >-
+          python3 scripts/docs_governance.py report
+          --report-dir "${RUNNER_TEMP}/docs-drift-report"
+
+      - name: Execute public documentation contracts and examples
+        if: always()
+        run: make docs-contract-check
+
+      - name: Build mechanical sync candidate without approval
+        if: steps.drift.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/docs_governance.py sync
+          python3 scripts/docs_governance.py validate
+          git diff --binary -- \
+            openapi/openapi.yaml \
+            fern/assets/downloads/ \
+            docs/docs-governance.json \
+            > "${RUNNER_TEMP}/docs-drift-report/sync-candidate.patch"
+
+      - name: Upload issue and PR-ready evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-drift-${{ github.run_id }}
+          path: ${{ runner.temp }}/docs-drift-report/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create or update one issue per document
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT_PATH: ${{ runner.temp }}/docs-drift-report/report.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_dir="${RUNNER_TEMP}/docs-drift-issues"
+          mkdir -p "$issue_dir"
+
+          while IFS= read -r issue; do
+            doc_id=$(jq -r '.doc_id' <<<"$issue")
+            title=$(jq -r '.title' <<<"$issue")
+            body_file="${issue_dir}/${doc_id}.md"
+            jq -r '.body' <<<"$issue" > "$body_file"
+
+            number=$(gh issue list --state open --limit 200 --json number,title \
+              | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' \
+              | head -n 1)
+            if [[ -n "$number" ]]; then
+              gh issue edit "$number" --title "$title" --body-file "$body_file"
+            else
+              gh issue create --title "$title" --body-file "$body_file"
+            fi
+          done < <(jq -c '.issues[]' "$REPORT_PATH")
+
+      - name: Fail when drift remains
+        if: steps.drift.outcome == 'failure'
+        run: exit 1

@@ -1,0 +1,40 @@
+# Versions and OpenAPI downloads
+
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
+The OpenAPI document is generated from the FastAPI routes and canonical MCP registry. The checked-in
+contract is validated offline and is the machine-readable source for the generated reference.
+
+## Current candidate
+
+| Artifact | Contract version | Download |
+| --- | ---: | --- |
+| IncidentFlow MCP OpenAPI | `0.1.0` | [Download YAML](/assets/downloads/incidentflow-mcp-openapi-0.1.0.yaml) |
+| MCP tool catalog | `0.1.0` | [Availability and tool catalog](../reference/tool-catalog.mdx) |
+
+The package/repository may have deployment tags that do not match the public contract version. Use
+the version inside the downloaded OpenAPI `info.version` field when comparing API schemas.
+
+The download describes the MCP service only. It does not publish internal platform, admin,
+runner, agent-gateway, observability, or integration-management routes.
+
+## Compatibility policy
+
+Contract versions follow semantic-version intent:
+
+- patch — clarification or compatible schema correction;
+- minor — backward-compatible operation, tool, or optional-field addition;
+- major — removal, rename, newly required input, incompatible type change, or changed side effect.
+
+No public compatibility or deprecation SLA has been accepted yet. Until one is approved, the
+changelog and an explicit human-reviewed release decision are required before customers should
+treat a candidate as stable.
+
+## Verify a downloaded specification
+
+```bash
+python -c 'import pathlib, yaml; p=pathlib.Path("incidentflow-mcp-openapi-0.1.0.yaml"); print(yaml.safe_load(p.read_text())["info"])'
+```
+
+Use a local copy of the YAML. Do not send customer tokens or request samples to an online schema
+validator.

@@ -246,6 +246,8 @@ The OpenAPI document intentionally captures the stable HTTP + JSON-RPC contract 
 
 MCP Kubernetes tools resolve the connected cluster automatically through
 `platform-api`, so normal usage does not require copying a `cluster_id`.
+They keep `readOnlyHint=true`: platform command/result rows are transport and audit
+bookkeeping for the read request and do not mutate the connected cluster.
 
 Examples users can ask:
 
@@ -297,7 +299,7 @@ For local end-to-end testing, use OAuth/platform bearer auth for MCP so
 dispatch. A static `INCIDENTFLOW_PAT` is useful for MCP-only auth smoke tests,
 but it may not carry enough platform context for Kubernetes command dispatch.
 
-### Grafana MCP tools (read-only)
+### Grafana release status
 
 The MCP package now ships Grafana read tools over the /mcp transport.
 All tools are read-only and rely on platform-api for allow-lists, PromQL guardrails, and label sanitization.
@@ -557,7 +559,7 @@ Tool guard errors are returned as structured MCP/JSON-RPC errors with safe messa
 Set expensive tools via:
 
 ```bash
-EXPENSIVE_TOOLS=incident_graph_build,large_correlation,slack_thread_mining,github_org_search
+EXPENSIVE_TOOLS=k8s_debug_pod,k8s_get_pod_logs,incident_thread_summary,memory_search_similar_incidents
 ```
 
 ### Redis requirement
@@ -612,6 +614,15 @@ as `last_used_at` is updated in platform-api during introspection.
 Fallback behavior:
 - If `PLATFORM_API_BASE_URL` is not set, MCP uses local auth (`INCIDENTFLOW_PAT` and/or local repo tokens).
 - In production, at least one auth source must be configured (`PLATFORM_API_BASE_URL` or `INCIDENTFLOW_PAT`).
+
+OAuth JWTs keep local signature, issuer, audience, expiry, not-before, and scope
+validation. When both OAuth validation and `PLATFORM_API_BASE_URL` are configured,
+MCP also calls `POST /oauth/introspect` for every locally valid OAuth request.
+Successful status responses are not cached, so `POST /revoke` takes effect on the
+next request. Introspection timeout or authority failure returns `503` (fail closed).
+Outside local development, configure platform-api `OAUTH_INTROSPECTION_API_KEY`
+and set the same value on MCP. `PLATFORM_API_INTERNAL_API_KEY` remains a
+backward-compatible fallback, but a dedicated introspection key is preferred.
 
 ## Thread-aware Slack analysis
 
@@ -712,9 +723,21 @@ Compact output shape:
 ```
 
 Slack commands found in threads are extracted only for display. IncidentFlow MCP never executes
-commands from Slack; remediation must be a separate approved action.
+commands from Slack; remediation must be a separate approved action. Thread summaries are returned
+without an implicit semantic-memory upsert; any future memory write must be a separate explicit
+operation.
+
+## Synthetic summary and memory release contract
+
+`incident_summary` reads synthetic fixtures only in explicit development, demo, or test
+environments. Every execution mode fails before job submission in production. The four
+`memory_*` tools are also excluded from public submission and production `tools/list`; a stale
+production call fails closed as an unknown tool until their backend contract is release-approved.
 
 ## `external_status_check` response modes
+
+This tool reads public provider-status information. It does not connect to a customer's GitHub
+account, organization, repositories, issues, or pull requests and is not a GitHub integration.
 
 `external_status_check` supports two output modes:
 
@@ -722,9 +745,12 @@ commands from Slack; remediation must be a separate approved action.
 - `response_mode=full`: raw platform job payload for deep RCA analysis.
 
 Polling behavior:
-- If `job_id` is provided, MCP polls that existing UUID and does not create a new job.
-- `check_id` remains a deprecated alias for `job_id`.
-- If neither is provided, MCP submits a new async job.
+ - If `job_id` is provided, MCP polls that existing UUID and does not create a new job.
+ - `check_id` is a deprecated alias for `job_id`.
+ - If neither is provided, MCP submits a new async job.
+- OMS storage is caller opt-in. Only `persist_to_oms=true` requests storage, and the runner's
+  deployment policy may still deny it. Omitted or explicit `false` can never be forced to `true`.
+- The result's `persistence` object records `requested`, `effective`, and `stored` decisions.
 
 Example (compact):
 

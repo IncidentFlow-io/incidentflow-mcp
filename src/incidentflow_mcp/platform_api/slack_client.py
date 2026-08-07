@@ -35,6 +35,7 @@ class PlatformSlackClient:
         self._workspace_id = workspace_id
         self._headers = {
             "X-Internal-Api-Key": token.get_secret_value(),
+            "X-Internal-Caller": "incidentflow-mcp",
             "X-MCP-Client-Id": "incidentflow-mcp",
         }
 

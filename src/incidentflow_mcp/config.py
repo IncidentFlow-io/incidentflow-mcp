@@ -81,6 +81,21 @@ class Settings(BaseSettings):
         default=None,
         description="Static Bearer PAT for local dev auth (INCIDENTFLOW_PAT)",
     )
+    incidentflow_token_pepper: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Secret used to pepper newly generated local PAT hashes "
+            "(INCIDENTFLOW_TOKEN_PEPPER)"
+        ),
+    )
+    incidentflow_token_pepper_version: str = Field(
+        default="v1",
+        pattern=r"^[A-Za-z0-9_-]+$",
+        description=(
+            "Version embedded in peppered local PAT hashes "
+            "(INCIDENTFLOW_TOKEN_PEPPER_VERSION)"
+        ),
+    )
 
     # Optional managed-token verification via platform-api.
     # When set, Bearer tokens are introspected remotely via
@@ -105,6 +120,16 @@ class Settings(BaseSettings):
     oauth_jwks_url: str | None = Field(
         default=None,
         description="JWKS URL for OAuth access token signature verification",
+    )
+    oauth_introspection_path: str = Field(
+        default="/oauth/introspect",
+        description=(
+            "Platform API path used for online OAuth access-token revocation checks"
+        ),
+    )
+    oauth_introspection_api_key: SecretStr | None = Field(
+        default=None,
+        description="Dedicated service key for OAuth access-token introspection",
     )
     auth_mode: str = Field(
         default="dual",
@@ -304,7 +329,8 @@ class Settings(BaseSettings):
     mcp_oms_persist_enabled: bool = Field(
         default=False,
         description=(
-            "When true, external status tool requests trigger OMS persistence side-effects."
+            "Deprecated compatibility setting. OMS persistence now requires the caller's "
+            "explicit persist_to_oms=true argument and is never enabled by this default."
         ),
     )
     mcp_memory_consult_enabled: bool = Field(
@@ -499,6 +525,14 @@ class Settings(BaseSettings):
 
     def oauth_validation_enabled(self) -> bool:
         return bool(self.oauth_expected_issuer and self.oauth_jwks_url)
+
+    def oauth_revocation_check_enabled(self) -> bool:
+        """Return true when MCP can ask the OAuth authority for current token status."""
+        return bool(self.oauth_validation_enabled() and self.platform_api_base_url)
+
+    def oauth_revocation_check_required(self) -> bool:
+        """Production OAuth must include an online deny-list check."""
+        return self.environment == "production" and self.oauth_validation_enabled()
 
 
 _settings: Settings | None = None

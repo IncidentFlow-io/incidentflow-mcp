@@ -1,0 +1,47 @@
+# Client and SDK guidance
+
+> Contract version: `0.1.0` · Release status: candidate · Human documentation review: pending
+
+IncidentFlow exposes an MCP Streamable HTTP endpoint. Use a conformant MCP client with bearer
+authentication and OAuth protected-resource discovery when possible.
+
+## Supported integration shape
+
+1. Discover OAuth metadata from the IncidentFlow MCP origin.
+2. Obtain a workspace-scoped bearer credential with `mcp:read` and `mcp:tools:run`.
+3. Initialize the Streamable HTTP session at `/mcp`.
+4. Call `tools/list` and use the deployed result as the availability authority.
+5. Invoke only tools enabled for that workspace and release.
+
+The server is built on the official Python MCP SDK, but IncidentFlow does not currently ship or
+claim a separate customer SDK for Python, TypeScript, Java, Go, or another language. Do not copy
+an internal platform client into a customer application.
+
+## Raw HTTP usage
+
+Raw JSON-RPC over HTTP is useful for contract diagnostics and the
+[safe examples](../guides/safe-examples.mdx). A production integration should prefer an MCP client
+library so session negotiation, protocol versions, SSE responses, and JSON-RPC errors are handled
+consistently.
+
+## Installer
+
+Inspect the installer before using it:
+
+```bash
+curl --fail --show-error --silent https://mcp.incidentflow.io/install.sh --output incidentflow-install.sh
+sed -n '1,160p' incidentflow-install.sh
+bash incidentflow-install.sh --dry-run
+```
+
+The dry run shows the configuration it would write. Do not execute a downloaded script without
+review, and do not embed a bearer credential into a repository-tracked configuration file.
+
+## Client acceptance checklist
+
+- OAuth redirect and resource discovery complete without manually copying an access token.
+- The credential is stored in the client's secret facility and never appears in logs.
+- `tools/list` matches the environment and unavailable integrations are absent or clearly blocked.
+- HTTP and JSON-RPC errors are both surfaced to the user.
+- `Retry-After` and non-idempotent tool annotations are honored.
+- Revoking the credential prevents the next request after the authority confirms revocation.

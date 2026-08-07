@@ -32,18 +32,6 @@
         "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
       }
     },
-    "incident_summary": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "This tool retrieves or computes operational information and returns structured IncidentFlow context without modifying Kubernetes resources, Slack messages, Grafana data, provider status, or any external system.",
-        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace, approved integrations, or IncidentFlow semantic memory and does not take actions outside those boundaries.",
-        "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
-      }
-    },
     "correlate_alerts": {
       "annotations": {
         "readOnlyHint": true,
@@ -58,8 +46,8 @@
     },
     "external_status_check": {
       "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
+        "readOnlyHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -71,7 +59,7 @@
     "slack_alerts_list": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -83,7 +71,7 @@
     "slack_alert_thread_get": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -95,7 +83,7 @@
     "incident_thread_summary": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -107,7 +95,7 @@
     "k8s_connection_health": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -119,7 +107,7 @@
     "k8s_cluster_overview": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -131,7 +119,7 @@
     "k8s_namespace_overview": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -143,7 +131,7 @@
     "k8s_rbac_check": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -155,7 +143,7 @@
     "k8s_agent_status": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -167,7 +155,7 @@
     "k8s_list_namespaces": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -179,7 +167,7 @@
     "k8s_list_pods": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -191,7 +179,7 @@
     "k8s_get_pod": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -203,7 +191,7 @@
     "k8s_get_pod_logs": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -215,7 +203,7 @@
     "k8s_list_events": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -227,7 +215,7 @@
     "k8s_list_deployments": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -239,7 +227,7 @@
     "k8s_list_services": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -251,7 +239,7 @@
     "k8s_get_rollout_status": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -263,7 +251,7 @@
     "k8s_show_unhealthy_pods": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -275,7 +263,7 @@
     "k8s_analyze_workload": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -287,7 +275,7 @@
     "k8s_describe_pod": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -299,7 +287,7 @@
     "k8s_debug_pod": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -311,7 +299,7 @@
     "grafana_list_dashboards": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -323,7 +311,7 @@
     "grafana_get_dashboard": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -335,7 +323,7 @@
     "grafana_extract_panel_queries": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -347,7 +335,7 @@
     "grafana_metrics_query": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -359,7 +347,7 @@
     "grafana_metrics_query_range": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -371,7 +359,7 @@
     "analyze_dashboard_health": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -383,7 +371,7 @@
     "argocd_connection_health": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -395,7 +383,7 @@
     "argocd_list_applications": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -407,7 +395,7 @@
     "argocd_get_application": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -419,7 +407,7 @@
     "argocd_get_application_resources": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -431,7 +419,7 @@
     "argocd_get_sync_history": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -443,7 +431,7 @@
     "argocd_get_last_operation": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -455,7 +443,7 @@
     "argocd_find_recent_deployments": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -467,7 +455,7 @@
     "argocd_analyze_application": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -479,7 +467,7 @@
     "grafana_get_panel_view": {
       "annotations": {
         "readOnlyHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
@@ -563,14 +551,6 @@
   },
   "test_cases": [
     {
-      "description": "Summarize an active IncidentFlow incident for an on-call engineer.",
-      "user_prompt": "Summarize incident inc_123 for me, including severity, current status, timeline, affected services, and recommended next steps.",
-      "file_attachment_urls": null,
-      "tools_triggered": "incident_summary",
-      "expected_output": "A concise incident summary with severity, status, affected services, timeline highlights, and read-only remediation recommendations based on IncidentFlow incident data.",
-      "expected_output_url": null
-    },
-    {
       "description": "Correlate multiple alert objects supplied by the user.",
       "user_prompt": "Correlate these alerts and tell me whether they look related: API 5xx spike for checkout, database connection saturation for payments, and checkout latency p95 breach in the same five-minute window.",
       "file_attachment_urls": null,
@@ -583,7 +563,7 @@
       "user_prompt": "Look at the latest production alert in our Slack alert channel and summarize the related thread for incident context.",
       "file_attachment_urls": null,
       "tools_triggered": "slack_alerts_list, incident_thread_summary",
-      "expected_output": "A read-only summary of the relevant Slack alert and thread, including hypotheses, decisions, links, commands mentioned by engineers, and possible resolution signals.",
+      "expected_output": "A read-only summary of the relevant Slack alert and thread, including hypotheses, decisions, links, commands mentioned by engineers, and possible resolution signals, without implicitly storing the result in semantic memory.",
       "expected_output_url": null
     },
     {
@@ -605,7 +585,7 @@
   ],
   "negative_test_cases": [
     {
-      "description": "Reject Slack write actions because IncidentFlow tools are read-only.",
+      "description": "Reject Slack message mutations because no Slack write tool is available.",
       "user_prompt": "Post a message in the incident Slack channel saying the deployment is fixed.",
       "file_attachment_urls": null,
       "tools_triggered": null,

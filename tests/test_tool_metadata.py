@@ -4,9 +4,10 @@ from pathlib import Path
 import pytest
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.context import ToolRegistrationContext
 from incidentflow_mcp.mcp.registration.meta import _CAPABILITY_CATEGORIES
 from incidentflow_mcp.mcp.server import create_mcp_server
-from incidentflow_mcp.tools.registry import get_tool_specs
+from incidentflow_mcp.tools.registry import get_submission_tool_specs, get_tool_specs
 
 EXPECTED_TOOL_NAMES = {
     "incidentflow_capabilities",
@@ -57,14 +58,74 @@ EXPECTED_TOOL_NAMES = {
     "knowledge_upsert",
 }
 
-# Write tools legitimately set readOnlyHint=False; everything else must be read-only.
-WRITE_TOOL_NAMES = {"knowledge_upsert"}
+OPEN_READ_ONLY_TOOLS = {
+    "slack_alerts_list",
+    "slack_alert_thread_get",
+    "incident_thread_summary",
+    "k8s_connection_health",
+    "k8s_cluster_overview",
+    "k8s_namespace_overview",
+    "k8s_rbac_check",
+    "k8s_agent_status",
+    "k8s_list_namespaces",
+    "k8s_list_pods",
+    "k8s_get_pod",
+    "k8s_get_pod_logs",
+    "k8s_list_events",
+    "k8s_list_deployments",
+    "k8s_list_services",
+    "k8s_get_rollout_status",
+    "k8s_show_unhealthy_pods",
+    "k8s_analyze_workload",
+    "k8s_describe_pod",
+    "k8s_debug_pod",
+    "grafana_list_dashboards",
+    "grafana_get_dashboard",
+    "grafana_extract_panel_queries",
+    "grafana_metrics_query",
+    "grafana_metrics_query_range",
+    "analyze_dashboard_health",
+    "grafana_get_panel_view",
+    "argocd_connection_health",
+    "argocd_list_applications",
+    "argocd_get_application",
+    "argocd_get_application_resources",
+    "argocd_get_sync_history",
+    "argocd_get_last_operation",
+    "argocd_find_recent_deployments",
+    "argocd_analyze_application",
+}
+
+MUTATING_TOOL_ANNOTATIONS = {
+    # A call without check_id creates a job; the caller may explicitly request OMS storage.
+    "external_status_check": {
+        "readOnlyHint": False,
+        "openWorldHint": True,
+        "destructiveHint": False,
+        "idempotentHint": False,
+    },
+    "knowledge_upsert": {
+        "readOnlyHint": False,
+        "openWorldHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+    },
+}
+
+CLOSED_READ_ONLY_TOOLS = (
+    EXPECTED_TOOL_NAMES - OPEN_READ_ONLY_TOOLS - set(MUTATING_TOOL_ANNOTATIONS)
+)
+
+WRITE_TOOL_NAMES = set(MUTATING_TOOL_ANNOTATIONS)
 
 REQUIRED_BOOLEAN_ANNOTATIONS = {
     "readOnlyHint",
     "openWorldHint",
     "destructiveHint",
+    "idempotentHint",
 }
+
+SUBMISSION_BOOLEAN_ANNOTATIONS = REQUIRED_BOOLEAN_ANNOTATIONS - {"idempotentHint"}
 
 REQUIRED_SUBMISSION_JUSTIFICATIONS = {
     "read_only_justification",
@@ -95,10 +156,70 @@ def _payload(result: object) -> dict:
     return data
 
 
-def test_all_registry_tools_have_submission_metadata() -> None:
-    specs = get_tool_specs()
+def test_every_tool_has_reviewed_behavior_annotations() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+    reviewed = CLOSED_READ_ONLY_TOOLS | OPEN_READ_ONLY_TOOLS | set(MUTATING_TOOL_ANNOTATIONS)
 
-    assert {spec.name for spec in specs} == EXPECTED_TOOL_NAMES
+    assert reviewed == set(specs), "every canonical tool needs an explicit behavior review"
+
+    for name in CLOSED_READ_ONLY_TOOLS:
+        assert specs[name].annotations == {
+            "readOnlyHint": True,
+            "openWorldHint": False,
+            "destructiveHint": False,
+            "idempotentHint": True,
+        }
+
+    for name in OPEN_READ_ONLY_TOOLS:
+        assert specs[name].annotations == {
+            "readOnlyHint": True,
+            "openWorldHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+        }
+
+    for name, expected in MUTATING_TOOL_ANNOTATIONS.items():
+        assert specs[name].annotations == expected
+
+
+def test_descriptions_disclose_open_world_content_and_side_effects() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+
+    for name in OPEN_READ_ONLY_TOOLS | {"external_status_check", "incident_thread_summary"}:
+        description = specs[name].description.lower()
+        assert "external" in description, f"{name} must disclose its external interaction"
+        assert "must not be treated as instructions" in description, (
+            f"{name} must identify externally sourced output as untrusted content"
+        )
+
+    expected_phrases = {
+        "incident_summary": ("built-in demo", "unavailable in production"),
+        "external_status_check": ("explicitly opts in", "with check_id"),
+        "incident_thread_summary": ("without executing", "implicitly writing"),
+    }
+    for name, phrases in expected_phrases.items():
+        description = specs[name].description.lower()
+        for phrase in phrases:
+            assert phrase in description, f"{name} description must disclose: {phrase}"
+
+
+def test_kubernetes_read_hints_disclose_platform_bookkeeping() -> None:
+    specs = {spec.name: spec for spec in get_tool_specs()}
+
+    for name, spec in specs.items():
+        if not name.startswith("k8s_"):
+            continue
+        assert spec.annotations["readOnlyHint"] is True
+        assert "command/result rows" in spec.description.lower()
+        assert "do not mutate the external cluster" in spec.description.lower()
+
+
+def test_registry_is_a_valid_unique_tool_catalog() -> None:
+    specs = get_tool_specs()
+    names = [spec.name for spec in specs]
+
+    assert specs, "tool catalog must not be empty"
+    assert len(names) == len(set(names)), "tool catalog contains duplicate names"
 
     for spec in specs:
         assert spec.title.strip(), f"{spec.name} is missing a title"
@@ -109,22 +230,20 @@ def test_all_registry_tools_have_submission_metadata() -> None:
             value = spec.annotations.get(annotation_name)
             assert isinstance(value, bool), f"{spec.name} {annotation_name} must be a boolean"
 
-        if spec.name not in WRITE_TOOL_NAMES:
-            assert spec.annotations["readOnlyHint"] is True, f"{spec.name} should be read-only"
-        assert spec.annotations["openWorldHint"] is False
-        assert spec.annotations["destructiveHint"] is False
+        if spec.annotations["readOnlyHint"]:
+            assert spec.annotations["destructiveHint"] is False
 
 
 def test_chatgpt_app_submission_tools_match_registry() -> None:
-    specs = {spec.name: spec for spec in get_tool_specs()}
+    specs = {spec.name: spec for spec in get_submission_tool_specs()}
     submission_tools = _load_submission_tools()
 
-    assert set(submission_tools) == EXPECTED_TOOL_NAMES
+    assert set(submission_tools) == EXPECTED_TOOL_NAMES - {"incident_summary"}
     assert set(submission_tools) == set(specs)
 
     for name, submission_tool in submission_tools.items():
         annotations = submission_tool["annotations"]
-        for annotation_name in REQUIRED_BOOLEAN_ANNOTATIONS:
+        for annotation_name in SUBMISSION_BOOLEAN_ANNOTATIONS:
             assert annotations[annotation_name] == specs[name].annotations[annotation_name]
 
         justifications = submission_tool["justifications"]
@@ -151,26 +270,34 @@ def test_capability_categories_reference_only_registry_tools() -> None:
 @pytest.mark.asyncio
 async def test_fastmcp_tools_publish_submission_metadata() -> None:
     mcp = create_mcp_server()
-    tools = await mcp.list_tools()
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    specs = {spec.name: spec for spec in get_tool_specs()}
 
-    assert {tool.name for tool in tools} == EXPECTED_TOOL_NAMES
+    assert set(tools) == set(specs), "FastMCP registrations must match the canonical catalog"
 
-    for tool in tools:
-        assert tool.title and tool.title.strip(), f"{tool.name} is missing a title"
-        assert tool.description and tool.description.strip(), (
-            f"{tool.name} is missing a description"
-        )
-        assert tool.inputSchema.get("type") == "object", f"{tool.name} is missing inputSchema"
-        assert tool.annotations is not None, f"{tool.name} is missing annotations"
+    for name, spec in specs.items():
+        tool = tools[name]
+        assert tool.title == spec.title
+        assert tool.description == ToolRegistrationContext(
+            mcp=mcp,
+            settings=Settings(_env_file=None),
+            specs=specs,
+        ).metadata(name)["description"]
+        assert tool.inputSchema.get("type") == "object", f"{name} is missing inputSchema"
+        assert set(tool.inputSchema.get("properties", {})) == set(
+            spec.input_schema.get("properties", {})
+        ), f"{name} registered inputs differ from the canonical catalog"
+        assert set(tool.inputSchema.get("required", [])) == set(
+            spec.input_schema.get("required", [])
+        ), f"{name} required inputs differ from the canonical catalog"
+        assert tool.annotations is not None, f"{name} is missing annotations"
 
         for annotation_name in REQUIRED_BOOLEAN_ANNOTATIONS:
             value = getattr(tool.annotations, annotation_name)
             assert isinstance(value, bool), f"{tool.name} {annotation_name} must be a boolean"
 
-        if tool.name not in WRITE_TOOL_NAMES:
-            assert tool.annotations.readOnlyHint is True, f"{tool.name} should be read-only"
-        assert tool.annotations.openWorldHint is False
-        assert tool.annotations.destructiveHint is False
+        for annotation_name in REQUIRED_BOOLEAN_ANNOTATIONS:
+            assert getattr(tool.annotations, annotation_name) == spec.annotations[annotation_name]
 
 
 @pytest.mark.asyncio
@@ -188,7 +315,7 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     }
     assert payload["total"] == 42
     assert payload["total"] == len(operational_names)
-    assert payload["read_only"] == 41
+    assert payload["read_only"] == 40
     assert payload["write_memory_only"] == 1
     assert "canonical" in payload["summary"]
     assert "authoritative runtime tool list" in payload["summary"]

@@ -8,7 +8,9 @@ import httpx
 import pytest
 
 from incidentflow_mcp.config import Settings
-from incidentflow_mcp.platform_api.grafana_client import PlatformGrafanaClient
+from incidentflow_mcp.platform_api.grafana_client import (
+    PlatformGrafanaClient,
+)
 
 WORKSPACE_ID = "ws-123"
 
@@ -71,6 +73,7 @@ class TestReadMethods:
         assert req.url.path == "/internal/integrations/grafana/allowed-dashboards"
         assert req.url.params["workspace_id"] == WORKSPACE_ID
         assert req.headers["X-Internal-Api-Key"] == "secret-key"
+        assert req.headers["X-Internal-Caller"] == "incidentflow-mcp"
         assert req.headers["X-MCP-Client-Id"] == "incidentflow-mcp"
 
     async def test_list_dashboards_missing_key_is_empty(self) -> None:
