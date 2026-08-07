@@ -144,7 +144,7 @@ def test_success_and_error_validate_against_generated_schema(tool_name: str) -> 
             "supported_schema_versions": ["1.0"],
             "deprecated_api_versions": [],
             "environment": "dev",
-            "tools": {"registered": 46, "operational": 42, "meta": 4},
+            "tools": {"registered": 48, "operational": 44, "meta": 4},
             "image": {"signed": False, "signature_verified": False},
         },
         "external_status_check": {

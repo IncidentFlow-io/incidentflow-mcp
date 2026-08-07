@@ -76,6 +76,7 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "grafana_prometheus",
         "Grafana / Prometheus",
         (
+            "grafana_connection_health",
             "grafana_list_dashboards",
             "grafana_get_dashboard",
             "grafana_extract_panel_queries",
@@ -101,6 +102,7 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         "knowledge",
         "Knowledge",
         (
+            "integration_guide",
             "public_knowledge_search",
             "private_knowledge_search",
             "knowledge_get",

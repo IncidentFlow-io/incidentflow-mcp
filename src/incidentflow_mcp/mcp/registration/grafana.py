@@ -28,6 +28,17 @@ def register_grafana_tools(
         resolved_workspace_id = resolve_workspace_id(current_token_workspace_id())
         return PlatformGrafanaClient(ctx.settings, workspace_id=resolved_workspace_id)
 
+    @ctx.mcp.tool(**ctx.metadata("grafana_connection_health"))
+    async def grafana_connection_health(workspace_id: str | None = None) -> dict[str, Any]:
+        guard = await ctx.resolve_tool_guard("grafana_connection_health")
+        if isinstance(guard, str):
+            return structured_guard_error(guard)
+        try:
+            result = await grafana_tools.grafana_connection_health(_grafana_client(workspace_id))
+        except httpx.HTTPStatusError as exc:
+            return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+        return result.model_dump(mode="json")
+
     @ctx.mcp.tool(**ctx.metadata("grafana_list_dashboards"))
     async def grafana_list_dashboards(workspace_id: str | None = None) -> dict[str, Any]:
         guard = await ctx.resolve_tool_guard("grafana_list_dashboards")

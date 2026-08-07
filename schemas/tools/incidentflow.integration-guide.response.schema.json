@@ -1,0 +1,399 @@
+{
+  "$defs": {
+    "GuideSource": {
+      "additionalProperties": false,
+      "properties": {
+        "docs_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "url"
+      ],
+      "type": "object"
+    },
+    "GuideStep": {
+      "additionalProperties": false,
+      "properties": {
+        "app_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "command_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "number": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "requires_confirmation": {
+          "default": false,
+          "type": "boolean"
+        },
+        "sensitive_inputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "number",
+        "title",
+        "instruction"
+      ],
+      "type": "object"
+    },
+    "Requirement": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "type": "boolean"
+        },
+        "satisfied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "VerificationCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tool_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "enum": [
+            "command",
+            "mcp_tool",
+            "http_request",
+            "manual"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "description"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://incidentflow.io/schemas/tools/incidentflow.integration-guide.response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "enum": [
+        "v1"
+      ],
+      "type": "string"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "goal": {
+              "type": "string"
+            },
+            "integration": {
+              "type": "string"
+            },
+            "method": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "missing_inputs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "requirements": {
+              "items": {
+                "$ref": "#/$defs/Requirement"
+              },
+              "type": "array"
+            },
+            "sources": {
+              "items": {
+                "$ref": "#/$defs/GuideSource"
+              },
+              "type": "array"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/GuideStep"
+              },
+              "type": "array"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "verification": {
+              "items": {
+                "$ref": "#/$defs/VerificationCheck"
+              },
+              "type": "array"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "integration",
+            "goal",
+            "summary"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "INVALID_ARGUMENT",
+                "UNAUTHENTICATED",
+                "PERMISSION_DENIED",
+                "NOT_FOUND",
+                "CONFLICT",
+                "RATE_LIMITED",
+                "INTEGRATION_UNAVAILABLE",
+                "UPSTREAM_ERROR",
+                "TIMEOUT",
+                "INTERNAL_ERROR"
+              ],
+              "type": "string"
+            },
+            "details": {
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "meta": {
+      "additionalProperties": false,
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "generated_at",
+        "truncated",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "incidentflow.integration-guide.response",
+      "type": "string"
+    },
+    "schema_version": {
+      "enum": [
+        "1.0"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "api_version",
+    "schema_version",
+    "schema_id",
+    "status",
+    "request_id",
+    "data",
+    "error",
+    "meta"
+  ],
+  "type": "object"
+}

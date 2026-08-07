@@ -559,6 +559,30 @@
         "open_world_justification": "This tool is limited to the connected IncidentFlow workspace and IncidentFlow semantic memory and does not take actions outside those boundaries.",
         "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
       }
+    },
+    "grafana_connection_health": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "This tool reads the connected Grafana integration status through platform-api and returns a normalized health summary. It is limited to reading and cannot make any changes.",
+        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace and its approved Grafana integration and does not take actions outside those boundaries.",
+        "destructive_justification": "This tool does not delete, overwrite, or modify any Grafana configuration, dashboards, or data; it only reports connection health."
+      }
+    },
+    "integration_guide": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "This tool returns curated, documentation-backed setup guidance and read-only doc sources. It never accepts, returns, or stores secrets and cannot make any changes.",
+        "open_world_justification": "This tool is limited to IncidentFlow public documentation and curated per-integration guidance and does not take actions outside those boundaries.",
+        "destructive_justification": "This tool does not delete, overwrite, or modify anything; command templates are informational and contain only placeholders."
+      }
     }
   },
   "test_cases": [

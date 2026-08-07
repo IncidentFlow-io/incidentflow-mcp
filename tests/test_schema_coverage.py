@@ -44,6 +44,8 @@ EXPECTED_STRICT_TOOLS = {
     "k8s_rbac_check",
     "knowledge_upsert",
     "incident_thread_summary",
+    "grafana_connection_health",
+    "integration_guide",
 }
 
 
