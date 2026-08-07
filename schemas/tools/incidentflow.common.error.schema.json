@@ -1,0 +1,45 @@
+{
+  "$id": "https://incidentflow.io/schemas/tools/incidentflow.common.error.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "enum": [
+        "INVALID_ARGUMENT",
+        "UNAUTHENTICATED",
+        "PERMISSION_DENIED",
+        "NOT_FOUND",
+        "CONFLICT",
+        "RATE_LIMITED",
+        "INTEGRATION_UNAVAILABLE",
+        "UPSTREAM_ERROR",
+        "TIMEOUT",
+        "INTERNAL_ERROR"
+      ],
+      "type": "string"
+    },
+    "details": {
+      "type": [
+        "object",
+        "array",
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ]
+    },
+    "message": {
+      "type": "string"
+    },
+    "retryable": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "code",
+    "message",
+    "retryable"
+  ],
+  "title": "IncidentFlow tool error",
+  "type": "object"
+}

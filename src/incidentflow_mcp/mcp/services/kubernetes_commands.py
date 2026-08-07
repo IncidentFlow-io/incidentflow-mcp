@@ -9,8 +9,10 @@ from typing import Any
 
 import httpx
 
+from incidentflow_mcp.mcp.errors import tool_error
 from incidentflow_mcp.mcp.services import kubernetes_analysis as analysis
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
+from incidentflow_mcp.tools.contracts import ErrorCode
 
 _NO_CONNECTED_CLUSTER_MESSAGE = (
     "No Kubernetes cluster is connected to this workspace. "
@@ -271,12 +273,12 @@ async def _k8s_agent_status_payload(
     try:
         clusters = await client.list_clusters(bearer_token=bearer_token)
     except httpx.HTTPError as exc:
-        return {
-            "status": "offline",
-            "agent_online": False,
-            "checked_at": _checked_at(),
-            "error": str(exc),
-        }
+        # Cannot reach the agent platform → hoist to the envelope error (review #6).
+        return tool_error(
+            ErrorCode.INTEGRATION_UNAVAILABLE,
+            f"Kubernetes agent platform is unavailable: {exc}",
+            details={"cluster_id": cluster_id, "environment": environment},
+        )
     cluster = _select_k8s_cluster_summary(
         clusters,
         cluster_id=cluster_id,
@@ -285,13 +287,15 @@ async def _k8s_agent_status_payload(
         connected_only=False,
     )
     if cluster is None:
-        return {
-            "status": "offline",
-            "agent_online": False,
-            "clusters": clusters,
-            "checked_at": _checked_at(),
-            "error": "No Kubernetes cluster matched the requested selector.",
-        }
+        return tool_error(
+            ErrorCode.NOT_FOUND,
+            "No Kubernetes cluster matched the requested selector.",
+            details={
+                "cluster_id": cluster_id,
+                "environment": environment,
+                "cluster_name": cluster_name,
+            },
+        )
     return {
         "status": "connected" if cluster.get("connected") is True else "offline",
         "cluster_id": cluster.get("cluster_id"),
@@ -300,7 +304,7 @@ async def _k8s_agent_status_payload(
         "agent_id": cluster.get("agent_id"),
         "agent_version": cluster.get("agent_version"),
         "agent_status": cluster.get("agent_status"),
-        "agent_online": cluster.get("connected") is True,
+        "healthy": cluster.get("connected") is True,
         "last_seen_at": cluster.get("last_seen_at"),
         "last_heartbeat_at": cluster.get("last_heartbeat_at"),
         "checked_at": _checked_at(),
@@ -325,7 +329,7 @@ async def _k8s_connection_health_payload(
         cluster_name=cluster_name,
     )
     resolved_cluster_id = status.get("cluster_id")
-    if not resolved_cluster_id or status.get("agent_online") is not True:
+    if not resolved_cluster_id or status.get("healthy") is not True:
         status.update(
             {
                 "latency_ms": None,

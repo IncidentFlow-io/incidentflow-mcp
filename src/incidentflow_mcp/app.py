@@ -27,6 +27,7 @@ from incidentflow_mcp.rate_limit.middleware import TransportRateLimitMiddleware
 from incidentflow_mcp.rate_limit.policy import DefaultPolicyResolver
 from incidentflow_mcp.rate_limit.redis_store import RedisRateLimitStore
 from incidentflow_mcp.rate_limit.tool_guard import ToolInvocationGuard
+from incidentflow_mcp.version import resolve_service_version
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ def create_app() -> FastAPI:
         settings.library_log_level,
         settings.log_format,
         service=settings.mcp_server_name,
-        service_version=settings.mcp_server_version,
+        service_version=resolve_service_version(settings),
         environment=settings.runtime_environment(),
     )
 
@@ -93,7 +94,7 @@ def create_app() -> FastAPI:
     # FastAPIInstrumentor middleware is included in Starlette's middleware stack.
     configure_tracing(
         service_name=settings.mcp_server_name,
-        service_version=settings.service_version,
+        service_version=resolve_service_version(settings),
         environment=settings.environment,
         otlp_endpoint=settings.observability_otlp_endpoint,
         k8s_namespace=settings.k8s_namespace_name,
@@ -157,7 +158,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="IncidentFlow MCP",
-        version=settings.mcp_server_version,
+        version=resolve_service_version(settings),
         description="HTTP-based MCP server for IncidentFlow AI-powered incident management",
         lifespan=_lifespan,
         redirect_slashes=False,

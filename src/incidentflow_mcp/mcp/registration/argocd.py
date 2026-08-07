@@ -16,6 +16,24 @@ from incidentflow_mcp.tools import argocd as argocd_tools
 WorkspaceResolver = Callable[[str | None], str]
 TokenWorkspaceResolver = Callable[[], str | None]
 
+_HEALTHY_STATUS_VALUES = {"ok", "healthy", "connected", "available", "success"}
+
+
+def _argocd_health_is_healthy(payload: dict[str, Any]) -> bool:
+    """Best-effort normalized health boolean derived from the upstream health payload."""
+
+    if isinstance(payload.get("healthy"), bool):
+        return payload["healthy"]
+    if payload.get("connected") is True:
+        return True
+    status = str(payload.get("status") or "").strip().lower()
+    if status in _HEALTHY_STATUS_VALUES:
+        return True
+    if payload.get("error") or payload.get("error_message"):
+        return False
+    # No explicit signal: consider healthy when a server responded with a version.
+    return bool(payload.get("argocd_version") or payload.get("server_url"))
+
 
 def register_argocd_tools(
     ctx: ToolRegistrationContext,
@@ -37,8 +55,12 @@ def register_argocd_tools(
                 _argocd_client(), integration_id=integration_id
             )
         except httpx.HTTPStatusError as exc:
-            return structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")
-        return result.model_dump(mode="json")
+            return structured_tool_exception(exc)
+        payload = result.model_dump(mode="json")
+        # Normalized integration-state boolean (req #9): derive from the upstream
+        # health payload without introducing a second `ok`/`status` field.
+        payload["healthy"] = _argocd_health_is_healthy(payload)
+        return payload
 
     @ctx.mcp.tool(**ctx.metadata("argocd_list_applications"))
     async def argocd_list_applications(

@@ -562,10 +562,14 @@ def _mcp_tool_event_from_body(
 
     structured = result.get("structuredContent")
     structured_payload = structured if isinstance(structured, dict) else {}
-    if structured_payload.get("ok") is False:
+    # Canonical response envelope: status == "error" carries error.{code,message,retryable}.
+    error_block = structured_payload.get("error")
+    envelope_error = structured_payload.get("status") == "error" and isinstance(error_block, dict)
+    if envelope_error or structured_payload.get("ok") is False:
         code = _structured_error_code(structured_payload)
         message = _structured_error_message(structured_payload)
-        if code == "INTEGRATION_NOT_CONNECTED":
+        retryable = bool(error_block.get("retryable")) if isinstance(error_block, dict) else False
+        if code in {"INTEGRATION_UNAVAILABLE", "INTEGRATION_NOT_CONNECTED"}:
             integration = structured_payload.get("integration") or _integration_for_tool(tool_name)
             return {
                 "outcome": "rejected",
@@ -573,7 +577,7 @@ def _mcp_tool_event_from_body(
                 "integration": integration,
                 "error_code": code,
                 "log_message": message,
-                "retryable": False,
+                "retryable": retryable,
                 "remediation": _integration_remediation(integration),
             }
         return {
@@ -581,7 +585,7 @@ def _mcp_tool_event_from_body(
             "error_code": code or "mcp_tool_error",
             "error_type": "MCPToolStructuredError",
             "log_message": message,
-            "retryable": False,
+            "retryable": retryable,
         }
 
     if result.get("isError") is True:

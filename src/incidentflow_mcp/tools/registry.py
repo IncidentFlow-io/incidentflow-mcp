@@ -630,8 +630,7 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "check_id": {
                     "type": "string",
                     "description": (
-                        "Deprecated alias for job_id. Use job_id for polling an existing "
-                        "async job."
+                        "Deprecated alias for job_id. Use job_id for polling an existing async job."
                     ),
                 },
                 "response_mode": {

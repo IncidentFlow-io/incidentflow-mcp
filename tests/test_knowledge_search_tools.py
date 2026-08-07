@@ -184,12 +184,15 @@ async def test_public_private_and_get_wrappers_call_client() -> None:
         AsyncMock(return_value=search_payload),
     ) as search_mock:
         assert await public_knowledge_search(_settings(), query="auth") == search_payload
-        assert await private_knowledge_search(
-            _settings(),
-            workspace_id="ws-1",
-            query="auth",
-            document_type="rca",
-        ) == search_payload
+        assert (
+            await private_knowledge_search(
+                _settings(),
+                workspace_id="ws-1",
+                query="auth",
+                document_type="rca",
+            )
+            == search_payload
+        )
 
     assert search_mock.await_args_list[0].kwargs["scope"] == "public"
     assert search_mock.await_args_list[0].kwargs["workspace_id"] is None
@@ -197,8 +200,11 @@ async def test_public_private_and_get_wrappers_call_client() -> None:
     assert search_mock.await_args_list[1].kwargs["workspace_id"] == "ws-1"
 
     with patch.object(PlatformAPIKnowledgeClient, "get", AsyncMock(return_value=get_payload)):
-        assert await knowledge_get(
-            _settings(),
-            workspace_id="ws-1",
-            id="doc-1",
-        ) == get_payload
+        assert (
+            await knowledge_get(
+                _settings(),
+                workspace_id="ws-1",
+                id="doc-1",
+            )
+            == get_payload
+        )

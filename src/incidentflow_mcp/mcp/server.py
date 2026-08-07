@@ -102,7 +102,10 @@ def create_mcp_server() -> FastMCP:
     )
 
     publish_registered_tools(registered_tool_metric_rows())
-    harden_fastmcp_tool_contracts(mcp)
+    harden_fastmcp_tool_contracts(
+        mcp,
+        strict_validation=settings.strict_output_validation_enabled(),
+    )
     register_resources(mcp)
 
     return mcp
