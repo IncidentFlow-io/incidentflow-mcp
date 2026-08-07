@@ -51,6 +51,27 @@ def test_unknown_schema_id_returns_404(client: TestClient) -> None:
     assert client.get("/schemas/incidentflow.does-not-exist").status_code == 404
 
 
+def test_contract_endpoints_set_caching_and_version_headers(client: TestClient) -> None:
+    for path in ("/version", "/schemas", "/schemas/incidentflow.mcp-version.response"):
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-cache"
+        assert resp.headers["etag"].startswith('"') and resp.headers["etag"].endswith('"')
+        assert resp.headers["x-incidentflow-api-version"] == "v1"
+        assert resp.headers["x-incidentflow-schema-version"] == "1.0"
+        # X-Request-ID is added by RequestIDMiddleware in the full app (create_app),
+        # which this isolated ops-router fixture does not mount.
+
+
+def test_version_honors_if_none_match_304(client: TestClient) -> None:
+    first = client.get("/version")
+    etag = first.headers["etag"]
+    second = client.get("/version", headers={"If-None-Match": etag})
+    assert second.status_code == 304
+    assert second.headers["etag"] == etag
+    assert not second.content  # 304 carries no body
+
+
 def _mcp_version_environment(payload: object) -> str:
     data = payload if isinstance(payload, dict) else {}
     if "schema_id" in data and "data" in data:
