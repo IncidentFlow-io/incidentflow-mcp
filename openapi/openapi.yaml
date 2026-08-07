@@ -1,9 +1,12 @@
 openapi: 3.1.0
 info:
   title: IncidentFlow MCP API
-  description: Canonical API specification for IncidentFlow MCP. Generated from FastAPI routes and MCP
-    tool metadata.
+  description: Canonical customer-facing contract for the IncidentFlow MCP Streamable HTTP service. Generated
+    from FastAPI routes and canonical MCP tool metadata. Tool schemas carry availability and behavior
+    extensions; source presence does not imply public availability.
   version: 0.1.0
+  x-incidentflow-release-status: candidate
+  x-incidentflow-human-review: pending
 paths:
   /install.sh:
     get:
@@ -14,13 +17,30 @@ paths:
       operationId: install_sh_install_sh_get
       responses:
         '200':
-          description: Successful Response
+          description: Installer shell script generated for the current MCP origin
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              example: inline; filename="install.sh"
+            Cache-Control:
+              schema:
+                type: string
+              example: no-store
           content:
-            application/json:
-              schema: {}
+            text/x-shellscript:
+              schema:
+                type: string
+              example: '#!/usr/bin/env bash
+
+                # Inspect before execution.
+
+                '
         '500':
           $ref: '#/components/responses/InternalServerError'
       security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /healthz:
     get:
       tags:
@@ -30,13 +50,16 @@ paths:
       operationId: healthz_healthz_get
       responses:
         '200':
-          description: Successful Response
+          description: Service process is alive
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
       security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /readyz:
     get:
       tags:
@@ -46,32 +69,40 @@ paths:
       operationId: readyz_readyz_get
       responses:
         '200':
-          description: Successful Response
+          description: Service is ready to receive requests
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ReadinessResponse'
         '500':
           $ref: '#/components/responses/InternalServerError'
       security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /metrics:
     get:
       tags:
       - ops
       summary: Prometheus metrics
-      description: Prometheus metrics endpoint.
+      description: Prometheus text exposition. A production deployment requires bearer authentication
+        unless the caller is in a configured trusted monitoring CIDR.
       operationId: metrics_metrics_get
       responses:
         '200':
-          description: Successful Response
+          description: Prometheus text exposition
           content:
-            application/json:
-              schema: {}
             text/plain:
               schema:
                 type: string
+              example: '# HELP mcp_tool_requests_total MCP tool requests
+
+                '
         '500':
           $ref: '#/components/responses/InternalServerError'
-      security: []
+      security:
+      - bearerAuth: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /version:
     get:
       tags:
@@ -87,6 +118,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      security:
+      - bearerAuth: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /schemas:
     get:
       tags:
@@ -102,6 +137,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      security:
+      - bearerAuth: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /schemas/{schema_id}:
     get:
       tags:
@@ -130,6 +169,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '500':
           $ref: '#/components/responses/InternalServerError'
+      security:
+      - bearerAuth: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /.well-known/oauth-protected-resource:
     get:
       tags:
@@ -138,12 +181,25 @@ paths:
       operationId: oauth_protected_resource__well_known_oauth_protected_resource_get
       responses:
         '200':
-          description: Successful Response
+          description: OAuth protected-resource metadata
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/OAuthProtectedResourceMetadata'
+              example:
+                resource: https://mcp.incidentflow.io/mcp
+                authorization_servers:
+                - https://api.incidentflow.io
+                scopes_supported:
+                - mcp:read
+                - mcp:tools:run
+                - admin
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: Discover the authorization server, canonical MCP resource, and supported scopes.
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /.well-known/oauth-protected-resource/mcp:
     get:
       tags:
@@ -152,12 +208,25 @@ paths:
       operationId: oauth_protected_resource_mcp__well_known_oauth_protected_resource_mcp_get
       responses:
         '200':
-          description: Successful Response
+          description: OAuth protected-resource metadata
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/OAuthProtectedResourceMetadata'
+              example:
+                resource: https://mcp.incidentflow.io/mcp
+                authorization_servers:
+                - https://api.incidentflow.io
+                scopes_supported:
+                - mcp:read
+                - mcp:tools:run
+                - admin
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: Discover the authorization server, canonical MCP resource, and supported scopes.
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /.well-known/oauth-authorization-server:
     get:
       tags:
@@ -172,6 +241,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: OAuth authorization server metadata
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /.well-known/openid-configuration:
     get:
       tags:
@@ -186,6 +259,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: OpenID Connect discovery metadata
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /.well-known/jwks.json:
     get:
       tags:
@@ -200,6 +277,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: OAuth JWKS redirect
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /oauth/register:
     post:
       tags:
@@ -214,6 +295,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: OAuth dynamic client registration bridge
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /register:
     post:
       tags:
@@ -228,6 +313,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: OAuth dynamic client registration bridge
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /authorize:
     get:
       tags:
@@ -242,6 +331,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: OAuth authorization redirect
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /token:
     post:
       tags:
@@ -256,6 +349,10 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: OAuth token endpoint bridge
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /revoke:
     post:
       tags:
@@ -270,12 +367,17 @@ paths:
               schema: {}
         '500':
           $ref: '#/components/responses/InternalServerError'
+      description: OAuth token revocation bridge
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /.well-known/{challenge_path}:
     get:
       tags:
       - ops
       summary: OpenAI domain verification
-      description: Return the configured OpenAI Apps domain-verification token.
+      description: Return a configured OpenAI Apps domain-verification token only for the exact configured
+        challenge path. This is service verification, not a customer API operation.
       operationId: openai_domain_verification__well_known__challenge_path__get
       parameters:
       - name: challenge_path
@@ -286,10 +388,11 @@ paths:
           title: Challenge Path
       responses:
         '200':
-          description: Successful Response
+          description: Configured domain-verification token
           content:
-            application/json:
-              schema: {}
+            text/plain:
+              schema:
+                type: string
         '422':
           description: Validation Error
           content:
@@ -298,6 +401,15 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '404':
+          description: Challenge path is not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotFoundError'
+      security: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /mcp:
     get:
       tags:
@@ -306,6 +418,8 @@ paths:
       summary: MCP Streamable HTTP handshake
       description: MCP Streamable HTTP endpoint (custom ASGI proxy route). GET is supported by transport
         and may be used by MCP clients for handshake/session semantics.
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
       security:
       - bearerAuth: []
       responses:
@@ -326,6 +440,8 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '429':
           $ref: '#/components/responses/RateLimitError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableError'
         '500':
           $ref: '#/components/responses/InternalServerError'
     options:
@@ -345,8 +461,12 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '429':
           $ref: '#/components/responses/RateLimitError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableError'
         '500':
           $ref: '#/components/responses/InternalServerError'
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
     post:
       tags:
       - mcp
@@ -354,6 +474,8 @@ paths:
       summary: MCP JSON-RPC endpoint
       description: Primary MCP endpoint. Accepts JSON-RPC requests such as `initialize`, `tools/list`,
         and `tools/call`. Some responses may stream over SSE depending on client transport/session flow.
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
       security:
       - bearerAuth: []
       requestBody:
@@ -394,7 +516,7 @@ paths:
                       incident_id: INC-001
                       include_timeline: true
                       include_affected_services: true
-                      execution_mode: auto
+                      execution_mode: sync
               correlateAlertsCall:
                 summary: Call correlate_alerts
                 value:
@@ -406,23 +528,8 @@ paths:
                     arguments:
                       alerts_json: '[{"alert_id":"a1","name":"HighMemoryUsage","service":"api-gateway","severity":"critical","status":"firing","fired_at":"2024-01-15T10:00:00Z","labels":{"env":"prod"}}]'
                       window_minutes: 30
-                      min_cluster_size: 2
-                      execution_mode: auto
-              externalStatusCall:
-                summary: Call external_status_check
-                value:
-                  jsonrpc: '2.0'
-                  id: 5
-                  method: tools/call
-                  params:
-                    name: external_status_check
-                    arguments:
-                      providers:
-                      - github
-                      days_back: 30
-                      wait_for_result: true
-                      execution_mode: async
-                      response_mode: compact
+                      min_cluster_size: 1
+                      execution_mode: sync
       responses:
         '200':
           description: JSON-RPC success or error payload
@@ -458,6 +565,8 @@ paths:
           $ref: '#/components/responses/ForbiddenError'
         '429':
           $ref: '#/components/responses/RateLimitError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableError'
         '500':
           $ref: '#/components/responses/InternalServerError'
 components:
@@ -787,21 +896,49 @@ components:
             or knowledge.
       required: []
       title: incidentflow_capabilitiesArguments
+      x-incidentflow-title: List IncidentFlow Capabilities
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     mcp_versionArguments:
       type: object
       properties: {}
       required: []
       title: mcp_versionArguments
+      x-incidentflow-title: Show MCP Server Version
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     incidentflow_auth_statusArguments:
       type: object
       properties: {}
       additionalProperties: false
       title: incidentflow_auth_statusArguments
+      x-incidentflow-title: Show IncidentFlow Auth Status
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     incidentflow_integrations_statusArguments:
       type: object
       properties: {}
       additionalProperties: false
       title: incidentflow_integrations_statusArguments
+      x-incidentflow-title: Show IncidentFlow Integrations Status
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     public_knowledge_searchArguments:
       type: object
       properties:
@@ -836,6 +973,13 @@ components:
       required:
       - query
       title: public_knowledge_searchArguments
+      x-incidentflow-title: Search Public Knowledge
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     private_knowledge_searchArguments:
       type: object
       properties:
@@ -874,6 +1018,13 @@ components:
       required:
       - query
       title: private_knowledge_searchArguments
+      x-incidentflow-title: Search Private Knowledge
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     knowledge_getArguments:
       type: object
       properties:
@@ -911,6 +1062,13 @@ components:
       required:
       - id
       title: knowledge_getArguments
+      x-incidentflow-title: Get Knowledge Document
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     incident_summaryArguments:
       type: object
       properties:
@@ -951,6 +1109,13 @@ components:
             scope or MCP_DEFAULT_WORKSPACE_ID is configured.
       required: []
       title: incident_summaryArguments
+      x-incidentflow-title: Summarize Incident
+      x-incidentflow-availability: not-public
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     correlate_alertsArguments:
       type: object
       properties:
@@ -1010,9 +1175,63 @@ components:
           description: Alert objects to correlate. Each alert requires alert_id, name, service, severity,
             status, and fired_at.
         alerts_json:
-          type: string
-          description: Legacy JSON string containing the same array accepted by alerts. Prefer alerts
-            for new calls.
+          oneOf:
+          - type: string
+          - type: array
+            items:
+              type: object
+              properties:
+                alert_id:
+                  type: string
+                  description: Stable alert identifier.
+                name:
+                  type: string
+                  description: Alert name, for example InstanceDown.
+                service:
+                  type: string
+                  description: Affected service name.
+                severity:
+                  type: string
+                  enum:
+                  - critical
+                  - high
+                  - medium
+                  - warning
+                  - low
+                  - info
+                status:
+                  type: string
+                  enum:
+                  - firing
+                  - resolved
+                  - pending
+                fired_at:
+                  type: string
+                  format: date-time
+                  description: Time the alert fired, as an ISO 8601 timestamp.
+                labels:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Optional alert labels such as env, namespace, pod, or deployment.
+                slack:
+                  type: object
+                  description: Optional Slack message metadata for the alert.
+                thread:
+                  type: object
+                  description: Optional Slack thread metadata for the alert.
+              required:
+              - alert_id
+              - name
+              - service
+              - severity
+              - status
+              - fired_at
+            minItems: 1
+            maxItems: 500
+          description: Legacy JSON string containing the same array accepted by alerts. Some MCP clients
+            decode that string into an array before dispatch; both forms are accepted. Prefer alerts for
+            new calls.
         window_minutes:
           type: integer
           default: 60
@@ -1034,6 +1253,13 @@ components:
           type: string
           description: Reserved for future async orchestration; ignored for inline correlation.
       title: correlate_alertsArguments
+      x-incidentflow-title: Correlate Alerts
+      x-incidentflow-availability: available
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     external_status_checkArguments:
       type: object
       properties:
@@ -1085,8 +1311,20 @@ components:
           - full
           default: compact
           description: compact returns chat-safe summary; full returns raw job result payload.
+        persist_to_oms:
+          type: boolean
+          default: false
+          description: Explicitly opt in to storing fetched provider status in IncidentFlow OMS. Omitted
+            or false never authorizes storage; deployment policy may still deny a true request.
       required: []
       title: external_status_checkArguments
+      x-incidentflow-title: Check External Service Status
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: false
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: false
     slack_alerts_listArguments:
       type: object
       properties:
@@ -1138,6 +1376,13 @@ components:
             is configured.
       required: []
       title: slack_alerts_listArguments
+      x-incidentflow-title: Review Slack Alerts
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     slack_alert_thread_getArguments:
       type: object
       properties:
@@ -1170,6 +1415,13 @@ components:
       - channel_id
       - message_ts
       title: slack_alert_thread_getArguments
+      x-incidentflow-title: Read Slack Alert Thread
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     incident_thread_summaryArguments:
       type: object
       properties:
@@ -1214,6 +1466,13 @@ components:
       - channel_id
       - thread_ts
       title: incident_thread_summaryArguments
+      x-incidentflow-title: Summarize Incident Thread
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_connection_healthArguments:
       type: object
       properties:
@@ -1234,6 +1493,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_connection_healthArguments
+      x-incidentflow-title: Check Kubernetes Connection
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_cluster_overviewArguments:
       type: object
       properties:
@@ -1254,6 +1520,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_cluster_overviewArguments
+      x-incidentflow-title: Inspect Kubernetes Cluster Health
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_namespace_overviewArguments:
       type: object
       properties:
@@ -1277,6 +1550,13 @@ components:
       - namespace
       additionalProperties: false
       title: k8s_namespace_overviewArguments
+      x-incidentflow-title: Inspect Kubernetes Namespace
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_rbac_checkArguments:
       type: object
       properties:
@@ -1297,6 +1577,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_rbac_checkArguments
+      x-incidentflow-title: Check Kubernetes Read-Only Permissions
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_agent_statusArguments:
       type: object
       properties:
@@ -1317,6 +1604,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_agent_statusArguments
+      x-incidentflow-title: Check Kubernetes Agent Status
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_list_namespacesArguments:
       type: object
       properties:
@@ -1337,6 +1631,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_list_namespacesArguments
+      x-incidentflow-title: List Kubernetes Namespaces
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_list_podsArguments:
       type: object
       properties:
@@ -1377,6 +1678,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_list_podsArguments
+      x-incidentflow-title: Show Pod Health Status
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_get_podArguments:
       type: object
       properties:
@@ -1424,6 +1732,13 @@ components:
       - pod
       additionalProperties: false
       title: k8s_get_podArguments
+      x-incidentflow-title: Inspect Pod Status
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_get_pod_logsArguments:
       type: object
       properties:
@@ -1486,6 +1801,13 @@ components:
       - pod
       additionalProperties: false
       title: k8s_get_pod_logsArguments
+      x-incidentflow-title: Read Application Logs
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_list_eventsArguments:
       type: object
       properties:
@@ -1517,6 +1839,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_list_eventsArguments
+      x-incidentflow-title: List Kubernetes Events
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_list_deploymentsArguments:
       type: object
       properties:
@@ -1545,6 +1874,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_list_deploymentsArguments
+      x-incidentflow-title: List Kubernetes Deployments
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_list_servicesArguments:
       type: object
       properties:
@@ -1573,6 +1909,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_list_servicesArguments
+      x-incidentflow-title: List Kubernetes Services
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_get_rollout_statusArguments:
       type: object
       properties:
@@ -1602,6 +1945,13 @@ components:
       - namespace
       additionalProperties: false
       title: k8s_get_rollout_statusArguments
+      x-incidentflow-title: Check Deployment Rollout
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_show_unhealthy_podsArguments:
       type: object
       properties:
@@ -1629,6 +1979,13 @@ components:
       required: []
       additionalProperties: false
       title: k8s_show_unhealthy_podsArguments
+      x-incidentflow-title: Find Unhealthy Kubernetes Pods
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_analyze_workloadArguments:
       type: object
       properties:
@@ -1678,6 +2035,13 @@ components:
       - workload
       additionalProperties: false
       title: k8s_analyze_workloadArguments
+      x-incidentflow-title: Analyze Kubernetes Workload
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_describe_podArguments:
       type: object
       properties:
@@ -1714,6 +2078,13 @@ components:
       - pod
       additionalProperties: false
       title: k8s_describe_podArguments
+      x-incidentflow-title: Describe Pod
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     k8s_debug_podArguments:
       type: object
       properties:
@@ -1736,6 +2107,11 @@ components:
           minimum: 1
           maximum: 500
           description: Log lines to fetch for diagnosis.
+        include_evidence_details:
+          type: boolean
+          default: false
+          description: Include bounded highlighted log lines, events, container states, and node evidence
+            in the consolidated report.
         include_memory_context:
           type: boolean
           default: true
@@ -1751,6 +2127,13 @@ components:
       - pod
       additionalProperties: false
       title: k8s_debug_podArguments
+      x-incidentflow-title: Debug Pod
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     grafana_list_dashboardsArguments:
       type: object
       properties:
@@ -1760,6 +2143,13 @@ components:
             is configured.
       required: []
       title: grafana_list_dashboardsArguments
+      x-incidentflow-title: List Grafana Dashboards
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        destructiveHint: false
+        idempotentHint: true
+        openWorldHint: true
     grafana_get_dashboardArguments:
       type: object
       properties:
@@ -1785,6 +2175,13 @@ components:
       required:
       - dashboard_uid
       title: grafana_get_dashboardArguments
+      x-incidentflow-title: Get Grafana Dashboard
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        destructiveHint: false
+        idempotentHint: true
+        openWorldHint: true
     grafana_extract_panel_queriesArguments:
       type: object
       properties:
@@ -1797,6 +2194,13 @@ components:
       required:
       - dashboard_uid
       title: grafana_extract_panel_queriesArguments
+      x-incidentflow-title: Extract Grafana Panel Queries
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        destructiveHint: false
+        idempotentHint: true
+        openWorldHint: true
     grafana_metrics_queryArguments:
       type: object
       properties:
@@ -1835,6 +2239,13 @@ components:
       - datasource_uid
       - query
       title: grafana_metrics_queryArguments
+      x-incidentflow-title: Query Grafana Metrics
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        destructiveHint: false
+        idempotentHint: true
+        openWorldHint: true
     grafana_metrics_query_rangeArguments:
       type: object
       properties:
@@ -1882,6 +2293,13 @@ components:
       - end
       - step
       title: grafana_metrics_query_rangeArguments
+      x-incidentflow-title: Query Grafana Metrics Range
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        destructiveHint: false
+        idempotentHint: true
+        openWorldHint: true
     analyze_dashboard_healthArguments:
       type: object
       properties:
@@ -1930,6 +2348,13 @@ components:
       required:
       - dashboard_uid
       title: analyze_dashboard_healthArguments
+      x-incidentflow-title: Analyze Dashboard Health
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        destructiveHint: false
+        idempotentHint: true
+        openWorldHint: true
     grafana_get_panel_viewArguments:
       type: object
       properties:
@@ -1970,6 +2395,13 @@ components:
       - dashboard_uid
       - panel_id
       title: grafana_get_panel_viewArguments
+      x-incidentflow-title: Get Grafana Panel View
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        destructiveHint: false
+        idempotentHint: true
+        openWorldHint: true
     argocd_connection_healthArguments:
       type: object
       properties:
@@ -1978,6 +2410,13 @@ components:
           description: Optional Argo CD integration id. Omit when only one is connected.
       required: []
       title: argocd_connection_healthArguments
+      x-incidentflow-title: Check Argo CD Connection
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     argocd_list_applicationsArguments:
       type: object
       properties:
@@ -2009,6 +2448,13 @@ components:
           maximum: 200
       required: []
       title: argocd_list_applicationsArguments
+      x-incidentflow-title: List Argo CD Applications
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     argocd_get_applicationArguments:
       type: object
       properties:
@@ -2034,6 +2480,13 @@ components:
       required:
       - name
       title: argocd_get_applicationArguments
+      x-incidentflow-title: Get Argo CD Application
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     argocd_get_application_resourcesArguments:
       type: object
       properties:
@@ -2059,6 +2512,13 @@ components:
       required:
       - name
       title: argocd_get_application_resourcesArguments
+      x-incidentflow-title: Get Argo CD Application Resources
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     argocd_get_sync_historyArguments:
       type: object
       properties:
@@ -2076,6 +2536,13 @@ components:
       required:
       - name
       title: argocd_get_sync_historyArguments
+      x-incidentflow-title: Get Argo CD Sync History
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     argocd_get_last_operationArguments:
       type: object
       properties:
@@ -2088,6 +2555,13 @@ components:
       required:
       - name
       title: argocd_get_last_operationArguments
+      x-incidentflow-title: Get Argo CD Last Operation
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     argocd_find_recent_deploymentsArguments:
       type: object
       properties:
@@ -2107,6 +2581,13 @@ components:
           maximum: 200
       required: []
       title: argocd_find_recent_deploymentsArguments
+      x-incidentflow-title: Find Recent Argo CD Deployments
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     argocd_analyze_applicationArguments:
       type: object
       properties:
@@ -2132,6 +2613,13 @@ components:
       required:
       - name
       title: argocd_analyze_applicationArguments
+      x-incidentflow-title: Analyze Argo CD Application
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: true
+        openWorldHint: true
+        destructiveHint: false
+        idempotentHint: true
     knowledge_upsertArguments:
       type: object
       properties:
@@ -2190,6 +2678,13 @@ components:
       - title
       - text
       title: knowledge_upsertArguments
+      x-incidentflow-title: Save Knowledge Document
+      x-incidentflow-availability: conditional
+      x-mcp-behavior:
+        readOnlyHint: false
+        openWorldHint: false
+        destructiveHint: false
+        idempotentHint: true
     InitializeParams:
       type: object
       properties:
@@ -2891,6 +3386,77 @@ components:
         detail:
           type: string
           example: internal server error
+    ServiceUnavailableError:
+      type: object
+      required:
+      - detail
+      properties:
+        detail:
+          type: string
+          example: Token verification service unavailable
+    HealthResponse:
+      type: object
+      required:
+      - status
+      - service
+      - version
+      - environment
+      properties:
+        status:
+          type: string
+          enum:
+          - ok
+        service:
+          type: string
+          example: incidentflow-mcp
+        version:
+          type: string
+          example: 0.1.0
+        environment:
+          type: string
+          example: production
+    ReadinessResponse:
+      type: object
+      required:
+      - status
+      properties:
+        status:
+          type: string
+          enum:
+          - ready
+    OAuthProtectedResourceMetadata:
+      type: object
+      required:
+      - resource
+      - authorization_servers
+      - scopes_supported
+      properties:
+        resource:
+          type: string
+          format: uri
+          example: https://mcp.incidentflow.io/mcp
+        authorization_servers:
+          type: array
+          items:
+            type: string
+            format: uri
+          minItems: 1
+        scopes_supported:
+          type: array
+          items:
+            type: string
+            enum:
+            - mcp:read
+            - mcp:tools:run
+            - admin
+    NotFoundError:
+      type: object
+      required:
+      - detail
+      properties:
+        detail:
+          type: string
+          example: Not found
   responses:
     UnauthorizedError:
       description: Unauthorized
@@ -2936,13 +3502,29 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/InternalServerError'
+    ServiceUnavailableError:
+      description: Required token-verification service unavailable; verification fails closed
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ServiceUnavailableError'
   securitySchemes:
     bearerAuth:
       type: http
       scheme: bearer
       description: Bearer token auth. In development with no auth provider configured, /mcp may run unprotected.
+servers:
+- url: https://mcp.incidentflow.io
+  description: IncidentFlow MCP production origin
+externalDocs:
+  description: IncidentFlow MCP documentation
+  url: https://docs.incidentflow.io
 tags:
-- name: ops
-  description: Operational/public endpoints
 - name: mcp
-  description: MCP Streamable HTTP transport endpoint
+  description: Authenticated MCP Streamable HTTP transport and JSON-RPC operations
+- name: ops
+  description: Public service discovery, health, installer, and metrics endpoints

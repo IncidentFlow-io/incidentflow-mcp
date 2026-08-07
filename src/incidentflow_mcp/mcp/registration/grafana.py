@@ -41,7 +41,7 @@ def register_grafana_tools(
         try:
             result = await grafana_tools.grafana_list_dashboards(_grafana_client(workspace_id))
         except httpx.HTTPStatusError as exc:
-            return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+            return structured_tool_exception(exc)
         return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("grafana_get_dashboard"))
@@ -62,7 +62,7 @@ def register_grafana_tools(
                 panel_limit=panel_limit,
             )
         except httpx.HTTPStatusError as exc:
-            return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+            return structured_tool_exception(exc)
         return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("grafana_extract_panel_queries"))
@@ -77,7 +77,7 @@ def register_grafana_tools(
                 _grafana_client(workspace_id), dashboard_uid=dashboard_uid
             )
         except httpx.HTTPStatusError as exc:
-            return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+            return structured_tool_exception(exc)
         return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("grafana_metrics_query"))
@@ -104,7 +104,7 @@ def register_grafana_tools(
                 max_points=max_points,
             )
         except httpx.HTTPStatusError as exc:
-            return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+            return structured_tool_exception(exc)
         return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("grafana_metrics_query_range"))
@@ -135,7 +135,7 @@ def register_grafana_tools(
                 max_points=max_points,
             )
         except httpx.HTTPStatusError as exc:
-            return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+            return structured_tool_exception(exc)
         return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("analyze_dashboard_health"))
@@ -166,7 +166,7 @@ def register_grafana_tools(
                 max_points=max_points,
             )
         except httpx.HTTPStatusError as exc:
-            return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+            return structured_tool_exception(exc)
         return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("grafana_get_panel_view"))
@@ -193,7 +193,7 @@ def register_grafana_tools(
                 max_points=max_points,
             )
         except httpx.HTTPStatusError as exc:
-            return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+            return structured_tool_exception(exc)
         panel_view = result.model_dump(mode="json")
         return {
             "structuredContent": panel_view,

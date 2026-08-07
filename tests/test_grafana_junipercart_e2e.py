@@ -789,6 +789,12 @@ class JuniperCartGrafanaMCP:
         assert rpc_response["result"].get("isError") is not True
         value = json.loads(rpc_response["result"]["content"][0]["text"])
         assert isinstance(value, dict)
+        if (
+            "schema_id" in value
+            and "data" in value
+            and value.get("status") == "success"
+        ):
+            return value["data"]
         return value
 
     def assert_error(

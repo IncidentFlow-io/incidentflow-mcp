@@ -413,6 +413,8 @@ def test_every_machine_executable_public_example_runs_offline(
     assert runtime_names == {spec.name for spec in get_tool_specs()}
     assert correlate["result"].get("isError") is not True
     correlation = json.loads(correlate["result"]["content"][0]["text"])
+    if isinstance(correlation, dict) and correlation.get("status") == "success" and "data" in correlation:
+        correlation = correlation["data"]
     assert correlation["total_alerts"] == 1
     assert correlation["clusters"][0]["alert_ids"] == ["juniper-qa-001"]
 

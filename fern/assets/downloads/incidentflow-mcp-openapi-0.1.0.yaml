@@ -103,6 +103,76 @@ paths:
       - bearerAuth: []
       x-incidentflow-availability: candidate
       x-incidentflow-human-review: pending
+  /version:
+    get:
+      tags:
+      - ops
+      summary: Service + contract version
+      description: "Unauthenticated version/contract block \u2014 no secrets. Mirrors mcp_version."
+      operationId: version_version_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security:
+      - bearerAuth: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /schemas:
+    get:
+      tags:
+      - ops
+      summary: JSON Schema catalog
+      description: Catalog of published JSON Schemas (envelope, error, per-tool responses).
+      operationId: schemas_schemas_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security:
+      - bearerAuth: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
+  /schemas/{schema_id}:
+    get:
+      tags:
+      - ops
+      summary: One JSON Schema by id
+      description: Return one generated Draft 2020-12 JSON Schema, or 404 if unknown.
+      operationId: schema_by_id_schemas__schema_id__get
+      parameters:
+      - name: schema_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Schema Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema: {}
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+      security:
+      - bearerAuth: []
+      x-incidentflow-availability: candidate
+      x-incidentflow-human-review: pending
   /.well-known/oauth-protected-resource:
     get:
       tags:
@@ -1227,10 +1297,13 @@ components:
           type: string
           description: Workspace scope for async orchestration. Optional when token has workspace scope
             or MCP_DEFAULT_WORKSPACE_ID is configured.
+        job_id:
+          type: string
+          description: UUID of an existing async job to poll. When provided, MCP polls this job and does
+            not create a new one.
         check_id:
           type: string
-          description: Existing async job_id for polling. When provided, MCP polls this job and does not
-            create a new one.
+          description: Deprecated alias for job_id. Use job_id for polling an existing async job.
         response_mode:
           type: string
           enum:

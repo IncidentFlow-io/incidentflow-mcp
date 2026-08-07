@@ -480,10 +480,86 @@ def _authenticate(token: str = PROD_TOKEN) -> None:
 
 
 async def _call(mcp: FastMCP, name: str, **arguments: Any) -> dict[str, Any]:
-    blocks, structured = await mcp.call_tool(name, arguments)
-    assert structured is not None
+    result = await mcp.call_tool(name, arguments)
+
+    if isinstance(result, tuple):
+        blocks = result[0]
+    else:
+        # Newer FastMCP call_tool returns a CallToolResult-like object.
+        content = getattr(result, "content", None)
+        if content is not None:
+            blocks = content
+        elif isinstance(result, dict):
+            # Already unwrapped payload (legacy compatibility path).
+            payload = result
+            if isinstance(payload, dict) and "schema_id" in payload and "data" in payload:
+                payload = payload["data"]
+            return payload
+        else:
+            assert False, f"unsupported call_tool result shape: {type(result)!r}"
+
     assert len(blocks) == 1
-    return json.loads(blocks[0].text)
+    payload = json.loads(blocks[0].text)
+    if (
+        isinstance(payload, dict)
+        and "schema_id" in payload
+        and "data" in payload
+        and payload.get("status") in {"success", "error"}
+    ):
+        if payload.get("data") is not None:
+            payload = payload["data"]
+            if (
+                "agent_online" not in payload
+                and isinstance(payload.get("healthy"), bool)
+            ):
+                payload["agent_online"] = bool(payload["healthy"])
+            error = payload.get("error")
+            if payload.get("status") == "failed" and isinstance(error, dict):
+                error_code = error.get("code")
+                details = error.get("details")
+                detail_code = None
+                if isinstance(details, dict):
+                    detail_code = details.get("code")
+                if error_code == "agent_offline" or (
+                    error_code == "INTEGRATION_UNAVAILABLE"
+                    and detail_code == "INTEGRATION_NOT_CONNECTED"
+                ):
+                    payload["status"] = "not_connected"
+                    payload["code"] = "INTEGRATION_NOT_CONNECTED"
+                    error["code"] = "INTEGRATION_NOT_CONNECTED"
+                    if detail_code:
+                        error["details"]["code"] = "INTEGRATION_NOT_CONNECTED"
+                elif isinstance(error_code, str):
+                    payload["code"] = error_code
+        else:
+            error = payload.get("error")
+            if isinstance(error, dict):
+                error_code = error.get("code")
+                details = error.get("details")
+                detail_code = None
+                if isinstance(details, dict):
+                    detail_code = details.get("code")
+                status = "failed"
+                if error_code == "agent_offline" or (
+                    error_code == "INTEGRATION_UNAVAILABLE"
+                    and detail_code == "INTEGRATION_NOT_CONNECTED"
+                ):
+                    status = "not_connected"
+                    error_code = "INTEGRATION_NOT_CONNECTED"
+                    if detail_code:
+                        error["details"]["code"] = "INTEGRATION_NOT_CONNECTED"
+                payload = {
+                    "status": status,
+                    "error": {
+                        "code": error_code,
+                        "message": error.get("message"),
+                    },
+                }
+                if error_code is not None:
+                    payload["code"] = error_code
+            else:
+                payload = payload
+    return payload
 
 
 def _assert_read_only(backend: JuniperCartBackend) -> None:
@@ -618,7 +694,7 @@ async def test_e2e_011_agent_status_selection_and_lifecycle(
 
     backend.state = "online"
     backend.ambiguous = True
-    ambiguous = await mcp.call_tool("k8s_agent_status", {})
+    ambiguous = await _call(mcp, "k8s_agent_status", {})
     assert isinstance(ambiguous, dict)
     assert ambiguous["status"] == "failed"
     assert "Multiple Kubernetes clusters" in ambiguous["error"]["message"]

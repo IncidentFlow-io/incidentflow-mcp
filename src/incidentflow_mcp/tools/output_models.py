@@ -42,7 +42,14 @@ _STRICT = ConfigDict(extra="forbid")
 _PERMISSIVE = ConfigDict(extra="allow")
 
 # k8s integration lifecycle values (widened per review #5).
-K8sStatus = Literal["connected", "degraded", "offline", "not_configured", "unknown"]
+K8sStatus = Literal[
+    "connected",
+    "degraded",
+    "offline",
+    "stale",
+    "not_configured",
+    "unknown",
+]
 
 
 # ---------------------------------------------------------------------------
