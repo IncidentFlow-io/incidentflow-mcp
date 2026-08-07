@@ -126,6 +126,12 @@ skips a schema or a tool's strictness regresses.
 - `GET /schemas` — schema catalog.
 - `GET /schemas/{schema_id}` — one generated schema.
 
+These three endpoints return caching + version-mirror headers: `Cache-Control: no-cache`,
+a content-hash `ETag` (a matching `If-None-Match` yields `304 Not Modified`),
+`X-IncidentFlow-API-Version`, `X-IncidentFlow-Schema-Version`, and `X-Request-ID`
+(the last added by `RequestIDMiddleware`). The JSON body remains the primary source
+of contract metadata; the headers are a convenience mirror.
+
 ## 6. Before / after examples
 
 ### `mcp_version` — before

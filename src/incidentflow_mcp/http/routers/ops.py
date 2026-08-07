@@ -5,6 +5,9 @@ Use create_ops_router(settings) to get a fully configured APIRouter that can
 be included into the FastAPI app via app.include_router(...).
 """
 
+import hashlib
+import json
+
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -14,6 +17,35 @@ from incidentflow_mcp.http.install_script import render_install_script
 from incidentflow_mcp.observability.metrics import METRICS_CONTENT_TYPE, render_prometheus_metrics
 from incidentflow_mcp.tools import contracts
 from incidentflow_mcp.version import resolve_service_version
+
+
+def _contract_headers(payload: object) -> tuple[dict[str, str], str]:
+    """Caching + version-mirror headers for the public contract endpoints.
+
+    ETag is a content hash so clients can revalidate cheaply; the X-IncidentFlow-*
+    headers mirror the body's api/schema version (the JSON body stays the primary
+    source of truth). X-Request-ID is already added by RequestIDMiddleware.
+    """
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    etag = f'"{hashlib.sha256(body).hexdigest()[:32]}"'
+    headers = {
+        "Cache-Control": "no-cache",
+        "ETag": etag,
+        "X-IncidentFlow-API-Version": contracts.API_VERSION,
+        "X-IncidentFlow-Schema-Version": contracts.SCHEMA_VERSION,
+    }
+    return headers, etag
+
+
+def _contract_json(request: Request, payload: object, *, media_type: str | None = None) -> Response:
+    """JSON response with contract headers, honoring If-None-Match (304)."""
+    headers, etag = _contract_headers(payload)
+    if_none_match = request.headers.get("if-none-match", "")
+    if etag in [tag.strip() for tag in if_none_match.split(",") if tag.strip()]:
+        return Response(status_code=304, headers=headers)
+    if media_type:
+        return JSONResponse(content=payload, headers=headers, media_type=media_type)
+    return JSONResponse(content=payload, headers=headers)
 
 
 def _oauth_authority_base(settings: Settings, request: Request) -> str:
@@ -138,10 +170,11 @@ def create_ops_router(settings: Settings) -> APIRouter:
         return Response(content=payload, media_type=METRICS_CONTENT_TYPE)
 
     @router.get("/version", summary="Service + contract version")
-    async def version() -> JSONResponse:
+    async def version(request: Request) -> Response:
         """Unauthenticated version/contract block — no secrets. Mirrors mcp_version."""
-        return JSONResponse(
-            content={
+        return _contract_json(
+            request,
+            {
                 "service": settings.mcp_server_name,
                 "service_version": resolve_service_version(settings),
                 "api_version": contracts.API_VERSION,
@@ -150,22 +183,22 @@ def create_ops_router(settings: Settings) -> APIRouter:
                 "supported_schema_versions": list(contracts.SUPPORTED_SCHEMA_VERSIONS),
                 "deprecated_api_versions": list(contracts.DEPRECATED_API_VERSIONS),
                 "environment": settings.resolved_environment(),
-            }
+            },
         )
 
     @router.get("/schemas", summary="JSON Schema catalog")
-    async def schemas(request: Request) -> JSONResponse:
+    async def schemas(request: Request) -> Response:
         """Catalog of published JSON Schemas (envelope, error, per-tool responses)."""
         base = str(request.base_url).rstrip("/")
-        return JSONResponse(content=contracts.schema_catalog(base_url=base))
+        return _contract_json(request, contracts.schema_catalog(base_url=base))
 
     @router.get("/schemas/{schema_id}", summary="One JSON Schema by id")
-    async def schema_by_id(schema_id: str) -> JSONResponse:
+    async def schema_by_id(schema_id: str, request: Request) -> Response:
         """Return one generated Draft 2020-12 JSON Schema, or 404 if unknown."""
         schema = contracts.get_schema(schema_id)
         if schema is None:
             raise HTTPException(status_code=404, detail=f"Unknown schema_id: {schema_id}")
-        return JSONResponse(content=schema, media_type="application/schema+json")
+        return _contract_json(request, schema, media_type="application/schema+json")
 
     @router.get(
         "/.well-known/oauth-protected-resource",
