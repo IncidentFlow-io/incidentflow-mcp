@@ -91,6 +91,7 @@ jobs:
             src/incidentflow_mcp/mcp/compatibility/fastmcp_contracts.py \
             scripts/generate_tool_schemas.py \
             scripts/contract_check.py \
+            scripts/dump_tool_schemas.py \
             tests/test_tool_response_contracts.py \
             tests/test_schema_coverage.py \
             tests/test_schema_endpoints.py \
@@ -111,3 +112,15 @@ jobs:
 
       - name: In-process contract check (version + schemas + responses)
         run: uv run python scripts/contract_check.py
+
+      - name: Publish full tool-schema catalog to the run summary
+        if: always()
+        run: uv run python scripts/dump_tool_schemas.py
+
+      - name: Upload tool schemas (downloadable artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tool-schemas
+          path: schemas/
+          if-no-files-found: error
