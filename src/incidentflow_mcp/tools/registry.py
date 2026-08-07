@@ -677,11 +677,17 @@ _TOOL_SPECS: list[ToolSpec] = [
                         "workspace scope or MCP_DEFAULT_WORKSPACE_ID is configured."
                     ),
                 },
+                "job_id": {
+                    "type": "string",
+                    "description": (
+                        "UUID of an existing async job to poll. When provided, MCP polls this "
+                        "job and does not create a new one."
+                    ),
+                },
                 "check_id": {
                     "type": "string",
                     "description": (
-                        "Existing async job_id for polling. When provided, MCP polls this "
-                        "job and does not create a new one."
+                        "Deprecated alias for job_id. Use job_id for polling an existing async job."
                     ),
                 },
                 "response_mode": {

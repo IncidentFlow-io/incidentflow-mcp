@@ -1,193 +1,169 @@
 # IncidentFlow MCP Tool Response Contracts
 
-IncidentFlow MCP tool responses use an additive v1 response contract. Existing
-tool-specific fields remain at the top level, while every dictionary response is
-stamped with common contract metadata.
+Every IncidentFlow MCP tool returns the **same canonical response envelope**. The
+tool-specific payload always lives inside `data`; versioning, status, correlation
+and metadata live in fixed envelope fields.
+
+> See [api-versioning.md](./api-versioning.md) for the versioning model, the
+> schema-ID catalog and the deprecation policy.
 
 ## Common Envelope
 
-Every dictionary response should include:
+Every tool response — success and error — has exactly these eight keys:
 
 ```json
 {
-  "schemaVersion": "v1",
-  "schemaId": "argocd.get-last-operation",
-  "ok": true,
-  "warnings": []
+  "api_version": "v1",
+  "schema_version": "1.0",
+  "schema_id": "incidentflow.external-status-check.response",
+  "status": "success",
+  "request_id": "req_123",
+  "data": {},
+  "error": null,
+  "meta": {
+    "generated_at": "2026-08-07T09:29:30Z",
+    "truncated": false,
+    "warnings": []
+  }
 }
 ```
 
-Common optional fields:
+| Field | Meaning |
+|---|---|
+| `api_version` | HTTP/MCP API version (`v1`). |
+| `schema_version` | Response-structure version (`1.0`). Independent of `service_version`. |
+| `schema_id` | Stable response schema id for this tool (`incidentflow.<tool>.response`). |
+| `status` | The overall call result: `success` or `error`. |
+| `request_id` | Correlation id (`req_...`), also usable in logs/traces. |
+| `data` | Tool-specific payload on success; `null` on error. |
+| `error` | `null` on success; the error object on error. |
+| `meta` | `generated_at`, `truncated`, and `warnings[]`. |
 
-- `status`: machine-readable status such as `failed`, `permission_denied`, or `ok`.
-- `source`: provenance and freshness metadata for integration-backed tools.
-- `truncated`: whether the payload is partial because of limits or compact mode.
-- `error`: structured error object with `code`, `message`, optional `http_status`,
-  and optional `details`.
-
-## Reserved Keys
-
-The following top-level keys are reserved by the global response contract:
-
-- `schemaVersion`
-- `schemaId`
-- `warnings`
-
-The runtime contract stamping is additive and uses `setdefault`, so it will not
-overwrite an existing value. New tools should not use these keys for any
-tool-specific meaning.
-
-## Recommended Status Values
-
-The v1 model keeps `status` as a string for compatibility, but tools should use
-these values where possible:
-
-- `ok`
-- `failed`
-- `partial`
-- `truncated`
-- `not_connected`
-- `not_found`
-- `permission_denied`
-- `upstream_unavailable`
-
-Future stricter models may convert these into enums for new or migrated tools.
-
-## Preferred Error Shape
-
-The v1 model accepts legacy string and dictionary errors, but new tools should
-return this preferred object shape:
+## Error Object
 
 ```json
 {
-  "ok": false,
-  "status": "permission_denied",
+  "status": "error",
+  "data": null,
   "error": {
-    "code": "integration_permission_denied",
-    "message": "The integration token is missing the required read permission.",
-    "http_status": 403,
-    "details": {
-      "integration": "argocd",
-      "operation": "get_application"
-    }
+    "code": "INVALID_ARGUMENT",
+    "message": "Invalid job_id format",
+    "retryable": false,
+    "details": { "field": "job_id", "expected": "uuid" }
   }
 }
 ```
 
-Use stable machine-readable `error.code` values. Keep `message` safe for users
-and avoid credentials, tokens, or direct secret material in `details`.
+Every error uses one of the ten canonical [error codes](#canonical-error-codes).
+The **same code** appears in:
 
-## Source Guidance
+- `structuredContent.error.code`;
+- the MCP `isError` outcome (`isError=true` for every tool error);
+- application logs (`record_tool_failure`);
+- metrics / traces.
 
-Some legacy meta tools use `source` as a tool-specific string. For that reason,
-the v1 envelope allows `source` to be a string, object, or null.
+There is never a case where the client sees `INVALID_ARGUMENT` while middleware
+records `TOOL_ERROR`.
 
-For integration-backed tools, prefer a structured provenance object:
+## Canonical Error Codes
 
-```json
-{
-  "source": {
-    "type": "argocd",
-    "integration_id": "52b8046c-35f9-48ff-839b-d76d84092b8e",
-    "integration_name": "Production Argo CD",
-    "freshness": "live",
-    "fetched_at": "2026-07-19T18:00:00Z"
-  }
-}
+| Code | Default `retryable` | Typical cause |
+|---|---|---|
+| `INVALID_ARGUMENT` | false | bad/rejected tool arguments (incl. schema validation) |
+| `UNAUTHENTICATED` | false | missing/invalid credentials (401) |
+| `PERMISSION_DENIED` | false | authenticated but not allowed (403) |
+| `NOT_FOUND` | false | resource does not exist (404) |
+| `CONFLICT` | false | state conflict (409) |
+| `RATE_LIMITED` | true | upstream/gateway rate limit (429) |
+| `INTEGRATION_UNAVAILABLE` | true | integration not connected / unreachable |
+| `UPSTREAM_ERROR` | true | upstream 5xx or transport error |
+| `TIMEOUT` | true | upstream timeout |
+| `INTERNAL_ERROR` | false | unexpected server-side failure |
+
+Codes are defined once in `incidentflow_mcp.tools.contracts.ErrorCode`. Exception
+→ code mapping lives in `incidentflow_mcp.mcp.errors.map_exception`.
+
+## Where the contract is enforced
+
+- **Builders** — `success_envelope` / `error_envelope` in `tools/contracts.py`.
+- **Wrapper** — `mcp/compatibility/fastmcp_contracts.py` wraps every tool result
+  (a raw handler dict becomes `data`; exceptions and inline `tool_error` signals
+  become error envelopes with `isError=true`).
+- **Output schemas** — each tool publishes a precise inline JSON Schema
+  (`build_output_schema`) instead of a generic `{additionalProperties: true}`
+  object. The low-level MCP server validates success `structuredContent` against it.
+
+## Field-naming rules (normalization)
+
+- The **call result** is always `status` (`success` / `error`) at the envelope level.
+- **Integration state** is `healthy: bool` inside `data` (e.g. `k8s_agent_status`,
+  `argocd_connection_health`) — never a second `ok` / `agent_online` field.
+- Domain-specific outcomes (e.g. the external-status provider check) use a distinct
+  name such as `check_status`, never `execution_status` overloaded against `status`.
+- Tool-specific payload is always inside `data`, never at the top level.
+
+## Data schemas — Pydantic-first, 100% coverage
+
+Every operational and meta tool has its **own** `data` schema; there is no shared
+blanket schema and no silent generic fallback (a coverage test,
+`tests/test_schema_coverage.py`, fails if a tool is added without a model).
+
+Schemas are generated from Pydantic v2 models in
+`incidentflow_mcp.tools.output_models` via `model_json_schema(mode="serialization")`
+— so `format: date-time`, `additionalProperties: false`, nullable `anyOf`, and
+`required` are derived from the model, never hand-maintained. `TOOL_OUTPUT_MODELS`
+is the registry; a raw `oneOf` schema is used for the one polymorphic tool
+(`external_status_check`).
+
+Two strictness modes (reported per tool as `schema_mode` in
+`incidentflow_capabilities`, and aggregated there as `contract_coverage`):
+
+- **strict** (`extra="forbid"` → `additionalProperties: false`): fully-owned,
+  stable payloads — `mcp_version`, `k8s_agent_status`, `k8s_rbac_check`,
+  `knowledge_upsert`, `incident_thread_summary`.
+- **permissive** (`extra="allow"` → `additionalProperties: true`): payloads that
+  pass an upstream platform-api / agent body through. Known fields are typed;
+  upstream additions are tolerated so a live response never fails validation.
+
+`mcp_version.data` names its versions distinctly from the envelope
+(`current_api_version`, `contract_version`, `supported_api_versions`,
+`supported_schema_versions`) so `data` never duplicates or drifts from the
+envelope's `api_version` / `schema_version`. `external_status_check.data` uses
+`job_status` (job lifecycle) and `check_status` (provider outcome) with a `mode`
+discriminator — never a bare `status` colliding with the envelope.
+
+## Runtime output validation
+
+- `format: date-time` is **not** enforced by the MCP SDK's structured-output
+  validation (the low-level server validates without a format checker). It is
+  enforced by our own validators: the dev/CI runtime check and the contract tests.
+- Setting `MCP_STRICT_OUTPUT_VALIDATION` (default: on outside production, off in
+  production) makes the tool wrapper validate every success envelope against its
+  published schema with a date-time format checker and fail loud on drift. Prod
+  stays permissive so a schema lag never breaks a live response.
+
+## Publication + verification
+
+Schemas and the version/contract block are served over HTTP (unauthenticated,
+no secrets):
+
+- `GET /version` — service/contract version block.
+- `GET /schemas` — catalog of `{schema_id, url}`.
+- `GET /schemas/{schema_id}` — one Draft 2020-12 schema.
+
+Verify a build three ways (version → schemas → real responses validate):
+
+```bash
+uv run python scripts/contract_check.py     # in-process, CI-friendly
+MCP_URL=… MCP_TOKEN=… bash scripts/contract_check.sh   # curl smoke vs a live server
 ```
 
-If the contract moves to v2, `source` should become consistently structured.
-
-## Schema IDs
-
-Schema IDs are derived from tool names:
-
-- `argocd_get_last_operation` -> `argocd.get-last-operation`
-- `grafana_metrics_query` -> `grafana.metrics-query`
-- `k8s_list_pods` -> `kubernetes.list-pods`
-- `slack_alerts_list` -> `slack.alerts-list`
-- `knowledge_upsert` -> `knowledge.upsert`
-
-## Schema Generation
-
-Run:
+## Regenerating schema files
 
 ```bash
 uv run python scripts/generate_tool_schemas.py
 ```
 
-Generated files are written to:
-
-```text
-schemas/tools/
-```
-
-The generated catalog contains:
-
-- `tool-envelope.v1.schema.json`
-- one `*.v1.schema.json` file per registered MCP tool
-
-Each generated schema includes a canonical `$id`, for example:
-
-```json
-{
-  "$id": "https://incidentflow.io/schemas/tools/argocd.get-last-operation.v1.schema.json"
-}
-```
-
-## Validation Strategy
-
-Runtime tests validate real tool responses from the FastMCP tool manager against
-their generated Pydantic response models. Integration-specific payload fields are
-currently allowed as extra top-level fields in v1 so existing clients keep
-working. Individual tool payloads can be tightened gradually by replacing the
-generic per-tool response model with a stricter Pydantic model.
-
-## GitHub Actions Check
-
-The repository includes a dedicated workflow:
-
-```text
-.github/workflows/tool-contracts.yml
-```
-
-The check runs on pull requests and pushes that touch tool contracts, schemas,
-tool code, or related tests. It performs the full v1 contract gate:
-
-1. Generate the schema catalog:
-
-   ```bash
-   uv run python scripts/generate_tool_schemas.py
-   ```
-
-2. Fail if generated schemas are stale or not committed:
-
-   ```bash
-   git diff --exit-code -- schemas/tools
-   ```
-
-3. Lint the contract code and tests:
-
-   ```bash
-   uv run ruff check ...
-   ```
-
-4. Run the runtime response contract tests:
-
-   ```bash
-   uv run pytest tests/test_tool_response_contracts.py ...
-   ```
-
-This means a pull request fails when a tool is added or renamed but its generated
-schema file is not updated, or when a real FastMCP response no longer validates
-against the global `schemaVersion` / `schemaId` contract.
-
-## v2 Direction
-
-For a future stricter contract:
-
-- make `ok` required for every tool response
-- standardize `status` as an enum
-- require the preferred structured `error` object
-- require structured `source` for integration-backed tools
-- keep per-tool payload models strict once the migration risk is low
+Writes `schemas/tools/incidentflow.common.error.schema.json`,
+`schemas/tools/incidentflow.common.envelope.schema.json`, and one
+`incidentflow.<tool>.response.schema.json` per registered tool.

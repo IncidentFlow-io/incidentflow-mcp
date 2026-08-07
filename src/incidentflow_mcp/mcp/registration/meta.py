@@ -11,7 +11,17 @@ from incidentflow_mcp.auth.principal import IncidentFlowPrincipal
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.integrations import IntegrationStatusService, integration_actions
 from incidentflow_mcp.mcp.context import ToolRegistrationContext
+from incidentflow_mcp.tools.contracts import (
+    API_VERSION,
+    CONTRACT_VERSION,
+    DEPRECATED_API_VERSIONS,
+    SUPPORTED_API_VERSIONS,
+    SUPPORTED_SCHEMA_VERSIONS,
+    capability_schema_metadata,
+)
+from incidentflow_mcp.tools.output_models import schema_mode_for
 from incidentflow_mcp.tools.registry import get_tool_specs
+from incidentflow_mcp.version import resolve_service_version
 
 _CAPABILITIES_TOOL_NAME = "incidentflow_capabilities"
 _VERSION_TOOL_NAME = "mcp_version"
@@ -113,6 +123,10 @@ def _capability_tool_entry(spec: Any, *, response_mode: str) -> dict[str, Any]:
         "supports_shared_dev_fallback": bool(getattr(spec, "supports_shared_dev_fallback", False)),
         "read_only": read_only,
         "write_memory_only": spec.name == "knowledge_upsert",
+        # Whether this tool's data schema forbids unknown fields (req #13).
+        "schema_mode": schema_mode_for(spec.name),
+        # Per-tool schema metadata (req #8): input/output/error schema ids + versions.
+        **capability_schema_metadata(spec.name),
     }
     if response_mode == "full":
         entry["description"] = spec.description
@@ -192,9 +206,21 @@ def _incidentflow_capabilities_payload(
         1 for spec in operational_specs.values() if spec.annotations.get("readOnlyHint") is True
     )
     write_memory_only_count = sum(1 for name in operational_specs if name == "knowledge_upsert")
+    total_operational = len(operational_specs)
+    strict_count = sum(1 for name in operational_specs if schema_mode_for(name) == "strict")
+    permissive_count = total_operational - strict_count
+    contract_coverage = {
+        "total_operational_tools": total_operational,
+        "strict_schema_tools": strict_count,
+        "permissive_schema_tools": permissive_count,
+        "coverage_percent": (
+            round(100.0 * strict_count / total_operational, 1) if total_operational else 0.0
+        ),
+    }
     return {
         "name": "incidentflow",
         "source": "incidentflow-mcp",
+        "contract_coverage": contract_coverage,
         "summary": (
             "This inventory is canonical for this IncidentFlow MCP server. Use these "
             "canonical_name values and categories as the authoritative runtime tool list."
@@ -217,49 +243,28 @@ def _incidentflow_capabilities_payload(
     }
 
 
-def _normalize_build_version(raw: str | None, fallback: str) -> str:
-    version = (raw or "").strip() or fallback
-    if version.startswith("dev-v"):
-        return version.removeprefix("dev-v")
-    if version.startswith("v"):
-        return version.removeprefix("v")
-    return version
-
-
-def _environment_from_build_metadata(
-    *,
-    tag: str | None,
-    build_environment: str | None,
-    fallback: str,
-) -> str:
-    explicit_environment = (build_environment or "").strip()
-    if explicit_environment:
-        return explicit_environment
-
-    normalized = (tag or "").strip().lower()
-    if normalized.startswith("dev-"):
-        return "dev"
-    if normalized.startswith("v"):
-        return "prod"
-    return fallback
-
-
 def _mcp_version_payload(settings: Settings) -> dict[str, Any]:
     specs = get_tool_specs()
     meta_count = sum(1 for spec in specs if spec.name in _META_TOOL_NAMES)
     tag = (settings.mcp_build_tag or "").strip() or None
-    version_source = settings.mcp_build_version or tag
+    # Single source of truth shared with GET /version and GET /healthz so the
+    # reported lane can never disagree across HTTP and MCP (review: dev vs development).
+    environment = settings.resolved_environment()
     return {
         "service": settings.mcp_build_service or settings.mcp_server_name,
-        "version": _normalize_build_version(version_source, settings.mcp_server_version),
+        # Single source of truth: same value in logs, OTEL resource and image metadata.
+        "service_version": resolve_service_version(settings),
+        # Named distinctly from the envelope's api_version/schema_version so `data`
+        # never duplicates (and cannot drift from) the envelope (review #3, #4).
+        "current_api_version": API_VERSION,
+        "contract_version": CONTRACT_VERSION,
+        "supported_api_versions": list(SUPPORTED_API_VERSIONS),
+        "supported_schema_versions": list(SUPPORTED_SCHEMA_VERSIONS),
+        "deprecated_api_versions": list(DEPRECATED_API_VERSIONS),
+        "environment": environment,
         "tag": tag,
         "commit": (settings.mcp_build_commit or "").strip() or None,
         "built_at": (settings.mcp_build_built_at or "").strip() or None,
-        "environment": _environment_from_build_metadata(
-            tag=tag,
-            build_environment=settings.mcp_build_environment,
-            fallback=settings.environment,
-        ),
         "tools": {
             "registered": len(specs),
             "operational": len(specs) - meta_count,
@@ -273,7 +278,6 @@ def _mcp_version_payload(settings: Settings) -> dict[str, Any]:
             "signature_issuer": (settings.mcp_image_signature_issuer or "").strip() or None,
             "signature_identity": (settings.mcp_image_signature_identity or "").strip() or None,
         },
-        "description": _SERVER_DESCRIPTION,
     }
 
 

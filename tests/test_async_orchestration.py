@@ -8,6 +8,7 @@ import pytest
 
 from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.compatibility.fastmcp_contracts import run_tool_with_structured_errors
 from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.mcp.server import (
     create_mcp_server,
@@ -21,6 +22,7 @@ from incidentflow_mcp.mcp.services.async_jobs import (
     resolve_correlation_mode,
     resolve_execution_mode,
     resolve_incident_summary_mode,
+    resolve_external_status_job_id,
     resolve_job_workspace_id,
 )
 from incidentflow_mcp.mcp.services.kubernetes_analysis import (
@@ -49,7 +51,11 @@ from incidentflow_mcp.tools.registry import get_tool_specs
 
 
 def _payload(result: object) -> dict:
-    return result if isinstance(result, dict) else json.loads(result)
+    data = result if isinstance(result, dict) else json.loads(result)
+    # Unwrap the canonical response envelope to the tool-specific data payload.
+    if isinstance(data, dict) and "schema_id" in data and "data" in data:
+        return data["data"]
+    return data
 
 
 class FakeAgentClusterClient:
@@ -210,13 +216,26 @@ def test_incident_summary_schema_supports_check_id_polling() -> None:
     assert spec.input_schema["required"] == []
 
 
-def test_external_status_check_schema_contains_response_mode_and_check_id_polling_hint() -> None:
+def test_external_status_check_schema_contains_response_mode_and_job_id_polling_hint() -> None:
     spec = next(s for s in get_tool_specs() if s.name == "external_status_check")
     properties = spec.input_schema["properties"]
 
     assert properties["response_mode"]["default"] == "compact"
     assert properties["response_mode"]["enum"] == ["compact", "full"]
-    assert "polls this job" in properties["check_id"]["description"]
+    assert "job_id" in properties
+    assert "UUID" in properties["job_id"]["description"]
+    assert "Deprecated" in properties["check_id"]["description"]
+
+
+def test_resolve_external_status_job_id_requires_a_uuid() -> None:
+    job_id = "c1742dce-8fe1-41c1-88e1-0ba455edd5cc"
+
+    assert resolve_external_status_job_id(job_id, None) == job_id
+    assert resolve_external_status_job_id(None, job_id) == job_id
+    with pytest.raises(ValueError, match="Invalid job_id format"):
+        resolve_external_status_job_id("qcvjkzcs7j74", None)
+    with pytest.raises(ValueError, match="must match"):
+        resolve_external_status_job_id(job_id, "be4f22c5-2ba3-46c9-8a2a-262df26946ef")
 
 
 def test_resolve_job_workspace_id_prefers_explicit_scope_or_default() -> None:
@@ -472,7 +491,7 @@ async def test_k8s_connection_health_reports_connected_and_permissions() -> None
     payload = await _k8s_connection_health_payload(client=client, bearer_token="token")
 
     assert payload["status"] == "connected"
-    assert payload["agent_online"] is True
+    assert payload["healthy"] is True
     assert payload["agent_version"] == "0.1.0"
     assert payload["namespaces"] == ["incidentflow-prod"]
     assert payload["permissions"]["get_logs"] is True
@@ -851,9 +870,10 @@ async def test_k8s_namespace_overview_returns_namespace_error_before_empty_overv
     finally:
         clear_current_auth_context()
 
-    assert result["status"] == "failed"
-    assert result["error"]["code"] == "NAMESPACE_DENIED"
-    assert result["cluster_id"] == "cluster_prod"
+    payload = _payload(result)
+    assert payload["status"] == "failed"
+    assert payload["error"]["code"] == "NAMESPACE_DENIED"
+    assert payload["cluster_id"] == "cluster_prod"
     assert calls == [("k8s.list_pods", {"namespace": "does-not-exist"})]
 
 
@@ -933,12 +953,13 @@ async def test_k8s_analyze_workload_missing_workload_is_not_healthy(
     finally:
         clear_current_auth_context()
 
-    assert result["status"] == "failed"
-    assert result["health"] == "unknown"
-    assert result["severity"] == "warning"
-    assert result["summary"] == "No matching workload found for does-not-exist"
-    assert result["error"]["code"] == "NOT_FOUND"
-    assert result["data"]["pods_total"] == 0
+    payload = _payload(result)
+    assert payload["status"] == "failed"
+    assert payload["health"] == "unknown"
+    assert payload["severity"] == "warning"
+    assert payload["summary"] == "No matching workload found for does-not-exist"
+    assert payload["error"]["code"] == "NOT_FOUND"
+    assert payload["data"]["pods_total"] == 0
 
 
 def test_compact_log_payload_filters_noise_and_highlights_errors() -> None:
@@ -1297,13 +1318,38 @@ def test_structured_tool_exception_wraps_http_status_body() -> None:
     )
     exc = httpx.HTTPStatusError("forbidden", request=request, response=response)
 
-    payload = structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
+    payload = structured_tool_exception(exc)
+    fields = payload["__tool_error__"]
 
-    assert payload["ok"] is False
-    assert payload["status"] == "failed"
-    assert payload["error"]["code"] == "HTTP_403"
-    assert payload["error"]["http_status"] == 403
-    assert payload["error"]["upstream_response"]["error"]["code"] == "FORBIDDEN"
+    # 403 maps to the canonical PERMISSION_DENIED code.
+    assert fields["code"] == "PERMISSION_DENIED"
+    assert fields["retryable"] is False
+    assert fields["details"]["http_status"] == 403
+    assert fields["details"]["upstream_response"]["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_fastmcp_runtime_error_sets_is_error() -> None:
+    request = httpx.Request("GET", "https://platform.example/api/v1/ai/jobs/missing")
+    response = httpx.Response(404, request=request, json={"detail": "AI job not found"})
+
+    class FakeMetadata:
+        async def call_fn_with_arg_validation(self, *args: object, **kwargs: object) -> object:
+            raise httpx.HTTPStatusError("not found", request=request, response=response)
+
+    class FakeTool:
+        name = "external_status_check"
+        fn_metadata = FakeMetadata()
+        fn = object()
+        is_async = True
+        context_kwarg = None
+
+    result = await run_tool_with_structured_errors(FakeTool(), {})
+
+    assert result.isError is True
+    assert result.structuredContent["status"] == "error"
+    assert result.structuredContent["error"]["code"] == "NOT_FOUND"
+    assert result.structuredContent["error"]["details"]["http_status"] == 404
 
 
 async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error() -> None:
@@ -1315,10 +1361,12 @@ async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error
         {"namespace": "default", "pod": "api-123", "tail_lines_typo": 10},
     )
 
-    assert result["status"] == "failed"
-    assert result["error"]["code"] == "VALIDATION_ERROR"
-    assert result["error"]["details"][0]["type"] == "extra_forbidden"
-    assert result["error"]["details"][0]["loc"] == ("tail_lines_typo",)
+    assert result.isError is True
+    assert result.structuredContent["status"] == "error"
+    assert result.structuredContent["error"]["code"] == "INVALID_ARGUMENT"
+    errors = result.structuredContent["error"]["details"]["errors"]
+    assert errors[0]["type"] == "extra_forbidden"
+    assert list(errors[0]["loc"]) == ["tail_lines_typo"]
 
 
 def test_compact_external_status_includes_failed_provider_entries() -> None:
@@ -1347,9 +1395,9 @@ def test_compact_external_status_includes_failed_provider_entries() -> None:
         }
     )
 
-    assert result["status"] == "partial"
+    assert result["check_status"] == "partial_success"
     assert result["providers"][1]["provider"] == "aws"
-    assert result["providers"][1]["status"] == "error"
+    assert result["providers"][1]["provider_status"] == "error"
     assert result["providers"][1]["source_url"] == "https://status.aws.amazon.com/rss/all.rss"
 
 
@@ -1457,7 +1505,7 @@ def test_normalize_polled_incident_summary_job_running_returns_async() -> None:
 
     assert payload["mode"] == "async"
     assert payload["job_id"] == "sum_1"
-    assert payload["status"] == "running"
+    assert payload["job_status"] == "running"
     assert payload["poll_after_seconds"] == 2
 
 
@@ -1477,7 +1525,7 @@ def test_normalize_polled_incident_summary_job_terminal_returns_completed_payloa
 
     assert payload["mode"] == "completed"
     assert payload["job_id"] == "sum_2"
-    assert payload["status"] == "succeeded"
+    assert payload["job_status"] == "succeeded"
     assert payload["result"] == {"title": "DB outage", "severity": "sev1"}
     assert payload["artifact_refs"] == ["artifact_1"]
     assert payload["usage"] == {"tokens": 42}
@@ -1499,7 +1547,7 @@ def test_normalize_polled_incident_summary_job_rejects_external_status_result() 
     )
     payload = _payload(output)
 
-    assert payload["status"] == "failed"
+    assert payload["job_status"] == "failed"
     assert payload["error"]["code"] == "JOB_OPERATION_MISMATCH"
     assert "result" not in payload
     assert "artifact_refs" not in payload
@@ -1517,7 +1565,7 @@ def test_normalize_polled_incident_summary_job_rejects_wrong_job_type() -> None:
     )
     payload = _payload(output)
 
-    assert payload["status"] == "failed"
+    assert payload["job_status"] == "failed"
     assert payload["error"]["expected_job_type"] == "incident.summary.generate"
     assert "Should not leak" not in json.dumps(payload)
 
@@ -1531,7 +1579,7 @@ def test_normalize_polled_incident_summary_job_failed_returns_error() -> None:
     payload = _payload(output)
 
     assert payload["mode"] == "completed"
-    assert payload["status"] == "failed"
+    assert payload["job_status"] == "failed"
     assert payload["error"] == "runner crashed"
 
 
@@ -1546,7 +1594,7 @@ def test_normalize_polled_external_status_job_running_returns_async() -> None:
 
     assert payload["mode"] == "async"
     assert payload["job_id"] == "job_1"
-    assert payload["status"] == "running"
+    assert payload["job_status"] == "running"
     assert payload["poll_after_seconds"] == 2
 
 
@@ -1599,9 +1647,10 @@ def test_normalize_polled_external_status_job_terminal_returns_compact_payload()
     )
     payload = _payload(output)
 
-    assert payload["status"] == "ok"
+    assert payload["check_status"] == "success"
     assert payload["checked_at"] == "2026-03-17T18:00:00Z"
     provider = payload["providers"][0]
+    assert provider["provider_status"] == "minor"
     compact_incident = provider["active_incidents"][0]
     assert compact_incident["id"] == "inc_1"
     assert compact_incident["updates_count"] == 1
@@ -1729,7 +1778,7 @@ async def test_external_status_check_starts_new_job_when_check_id_missing() -> N
     assert fake_client.get_calls == 0
     assert payload["mode"] == "async"
     assert payload["job_id"] == "new_job"
-    assert payload["status"] == "queued"
+    assert payload["job_status"] == "queued"
     assert payload["persistence"] == {
         "requested": False,
         "effective": None,
@@ -1789,7 +1838,7 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
 
         async def get_job(self, job_id: str) -> dict:
             self.get_calls += 1
-            assert job_id == "existing_job"
+            assert job_id == "c1742dce-8fe1-41c1-88e1-0ba455edd5cc"
             return {
                 "job_id": job_id,
                 "status": "failed",
@@ -1808,7 +1857,7 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
         client=fake_client,
         providers=["aws", "github"],
         workspace_id="ws_1",
-        check_id="existing_job",
+        check_id="c1742dce-8fe1-41c1-88e1-0ba455edd5cc",
         response_mode="compact",
     )
     payload = _payload(output)
@@ -1816,8 +1865,8 @@ async def test_external_status_check_polls_existing_job_when_check_id_present() 
     assert fake_client.submit_calls == 0
     assert fake_client.get_calls == 1
     assert payload["mode"] == "completed"
-    assert payload["job_id"] == "existing_job"
-    assert payload["status"] == "failed"
+    assert payload["job_id"] == "c1742dce-8fe1-41c1-88e1-0ba455edd5cc"
+    assert payload["job_status"] == "failed"
     assert payload["error"]["reason"] == "provider timeout"
     assert payload["response_mode"] == "compact"
 

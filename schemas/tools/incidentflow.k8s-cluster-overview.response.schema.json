@@ -1,0 +1,216 @@
+{
+  "$id": "https://incidentflow.io/schemas/tools/incidentflow.k8s-cluster-overview.response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "enum": [
+        "v1"
+      ],
+      "type": "string"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "description": "cluster_overview / namespace_overview \u2014 owned scalars, opaque event lists.",
+          "properties": {
+            "checked_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "cluster_health": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "cluster_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "cluster_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "findings": {
+              "items": {},
+              "type": "array"
+            },
+            "namespace": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "recommendations": {
+              "items": {},
+              "type": "array"
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "summary": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "INVALID_ARGUMENT",
+                "UNAUTHENTICATED",
+                "PERMISSION_DENIED",
+                "NOT_FOUND",
+                "CONFLICT",
+                "RATE_LIMITED",
+                "INTEGRATION_UNAVAILABLE",
+                "UPSTREAM_ERROR",
+                "TIMEOUT",
+                "INTERNAL_ERROR"
+              ],
+              "type": "string"
+            },
+            "details": {
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "meta": {
+      "additionalProperties": false,
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "generated_at",
+        "truncated",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "incidentflow.k8s-cluster-overview.response",
+      "type": "string"
+    },
+    "schema_version": {
+      "enum": [
+        "1.0"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "api_version",
+    "schema_version",
+    "schema_id",
+    "status",
+    "request_id",
+    "data",
+    "error",
+    "meta"
+  ],
+  "type": "object"
+}

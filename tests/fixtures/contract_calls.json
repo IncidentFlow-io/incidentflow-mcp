@@ -1,0 +1,11 @@
+{
+  "description": "Read-only MCP tool calls safe to exercise for contract verification. Destructive/write tools are intentionally excluded.",
+  "calls": [
+    { "name": "mcp_version", "arguments": {} },
+    { "name": "incidentflow_capabilities", "arguments": { "response_mode": "compact" } },
+    { "name": "k8s_agent_status", "arguments": { "environment": "dev" } },
+    { "name": "argocd_connection_health", "arguments": {} },
+    { "name": "public_knowledge_search", "arguments": { "query": "IncidentFlow API", "limit": 2, "response_mode": "compact" } },
+    { "name": "external_status_check", "arguments": { "providers": ["github"], "days_back": 1, "response_mode": "compact", "wait_for_result": false } }
+  ]
+}

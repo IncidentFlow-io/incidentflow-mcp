@@ -2,6 +2,7 @@ import json
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from mcp.types import CallToolResult
 
 from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.config import Settings
@@ -29,7 +30,10 @@ def _set_context() -> None:
 
 
 def _payload(result: object) -> dict:
-    return result if isinstance(result, dict) else json.loads(result)
+    data = result if isinstance(result, dict) else json.loads(result)
+    if isinstance(data, dict) and "schema_id" in data and "data" in data:
+        return data["data"]
+    return data
 
 
 @pytest.fixture(autouse=True)
@@ -75,11 +79,13 @@ async def test_incidentflow_auth_status_returns_safe_principal(
     _set_context()
 
     result = await create_mcp_server()._tool_manager.call_tool("incidentflow_auth_status", {})
-    payload = _payload(result)
 
-    assert payload["schemaVersion"] == "v1"
-    assert payload["schemaId"] == "platform.incidentflow-auth-status"
-    assert payload["warnings"] == []
+    assert result["api_version"] == "v1"
+    assert result["schema_version"] == "1.0"
+    assert result["schema_id"] == "incidentflow.incidentflow-auth-status.response"
+    assert result["status"] == "success"
+    assert result["meta"]["warnings"] == []
+    payload = _payload(result)
     assert {
         key: payload[key]
         for key in (
@@ -425,13 +431,17 @@ async def test_grafana_tool_returns_standard_not_connected_response(
     _set_context()
 
     result = await create_mcp_server()._tool_manager.call_tool("grafana_list_dashboards", {})
-    payload = _payload(result)
 
-    assert payload["ok"] is False
-    assert payload["code"] == "INTEGRATION_NOT_CONNECTED"
-    assert payload["integration"] == "grafana"
-    assert payload["status"] == "not_connected"
-    assert payload["actions"][0]["url"] == "https://app-dev.incidentflow.io/integrations"
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    envelope = result.structuredContent
+    assert envelope["status"] == "error"
+    assert envelope["error"]["code"] == "INTEGRATION_UNAVAILABLE"
+    assert envelope["error"]["retryable"] is False
+    details = envelope["error"]["details"]
+    assert details["integration"] == "grafana"
+    assert details["status"] == "not_connected"
+    assert details["actions"][0]["url"] == "https://app-dev.incidentflow.io/integrations"
 
 
 @pytest.mark.asyncio
@@ -445,10 +455,13 @@ async def test_argocd_tool_returns_standard_not_connected_response(
     _set_context()
 
     result = await create_mcp_server()._tool_manager.call_tool("argocd_connection_health", {})
-    payload = _payload(result)
 
-    assert payload["ok"] is False
-    assert payload["code"] == "INTEGRATION_NOT_CONNECTED"
-    assert payload["integration"] == "argocd"
-    assert payload["status"] == "not_connected"
-    assert payload["message"] == "Argo CD is not connected for the current workspace."
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+    envelope = result.structuredContent
+    assert envelope["status"] == "error"
+    assert envelope["error"]["code"] == "INTEGRATION_UNAVAILABLE"
+    assert envelope["error"]["message"] == "Argo CD is not connected for the current workspace."
+    details = envelope["error"]["details"]
+    assert details["integration"] == "argocd"
+    assert details["status"] == "not_connected"

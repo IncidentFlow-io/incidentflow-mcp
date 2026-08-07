@@ -1,0 +1,249 @@
+{
+  "$defs": {
+    "MetricSample": {
+      "properties": {
+        "timestamp": {
+          "type": "number"
+        },
+        "value": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "timestamp",
+        "value"
+      ],
+      "type": "object"
+    },
+    "MetricSeries": {
+      "additionalProperties": true,
+      "properties": {
+        "metric": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "samples": {
+          "items": {
+            "$ref": "#/$defs/MetricSample"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "PanelAnalysis": {
+      "additionalProperties": true,
+      "properties": {
+        "anomalies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "datasource_uid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "expr": {
+          "default": "",
+          "type": "string"
+        },
+        "panel_title": {
+          "default": "",
+          "type": "string"
+        },
+        "result_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "series": {
+          "items": {
+            "$ref": "#/$defs/MetricSeries"
+          },
+          "type": "array"
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://incidentflow.io/schemas/tools/incidentflow.analyze-dashboard-health.response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "enum": [
+        "v1"
+      ],
+      "type": "string"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "properties": {
+            "dashboard_title": {
+              "default": "",
+              "type": "string"
+            },
+            "dashboard_uid": {
+              "type": "string"
+            },
+            "panels": {
+              "items": {
+                "$ref": "#/$defs/PanelAnalysis"
+              },
+              "type": "array"
+            },
+            "summary_hints": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "time_range": {
+              "default": "",
+              "type": "string"
+            }
+          },
+          "required": [
+            "dashboard_uid"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "INVALID_ARGUMENT",
+                "UNAUTHENTICATED",
+                "PERMISSION_DENIED",
+                "NOT_FOUND",
+                "CONFLICT",
+                "RATE_LIMITED",
+                "INTEGRATION_UNAVAILABLE",
+                "UPSTREAM_ERROR",
+                "TIMEOUT",
+                "INTERNAL_ERROR"
+              ],
+              "type": "string"
+            },
+            "details": {
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "meta": {
+      "additionalProperties": false,
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "generated_at",
+        "truncated",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "incidentflow.analyze-dashboard-health.response",
+      "type": "string"
+    },
+    "schema_version": {
+      "enum": [
+        "1.0"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "api_version",
+    "schema_version",
+    "schema_id",
+    "status",
+    "request_id",
+    "data",
+    "error",
+    "meta"
+  ],
+  "type": "object"
+}

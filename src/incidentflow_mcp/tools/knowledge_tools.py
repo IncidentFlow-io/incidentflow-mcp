@@ -380,9 +380,7 @@ async def knowledge_upsert(
             tags=tags,
             dry_run=dry_run,
         )
-    raise ValueError(
-        "document_type must be one of: knowledge, runbook, rca, postmortem, incident"
-    )
+    raise ValueError("document_type must be one of: knowledge, runbook, rca, postmortem, incident")
 
 
 # ──────────────────────────────────────────────

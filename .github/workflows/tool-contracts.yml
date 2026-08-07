@@ -5,9 +5,17 @@ on:
     paths:
       - 'schemas/tools/**'
       - 'scripts/generate_tool_schemas.py'
-      - 'src/incidentflow_mcp/mcp/server.py'
+      - 'scripts/contract_check.py'
       - 'src/incidentflow_mcp/tools/**'
+      - 'src/incidentflow_mcp/mcp/**'
+      - 'src/incidentflow_mcp/http/**'
+      - 'src/incidentflow_mcp/version.py'
+      - 'src/incidentflow_mcp/config.py'
+      - 'src/incidentflow_mcp/observability/middleware.py'
       - 'tests/test_tool_response_contracts.py'
+      - 'tests/test_schema_coverage.py'
+      - 'tests/test_schema_endpoints.py'
+      - 'tests/test_all_tools_contract.py'
       - 'tests/test_tool_metadata.py'
       - 'tests/test_integration_status_tools.py'
       - 'tests/test_async_orchestration.py'
@@ -19,9 +27,17 @@ on:
     paths:
       - 'schemas/tools/**'
       - 'scripts/generate_tool_schemas.py'
-      - 'src/incidentflow_mcp/mcp/server.py'
+      - 'scripts/contract_check.py'
       - 'src/incidentflow_mcp/tools/**'
+      - 'src/incidentflow_mcp/mcp/**'
+      - 'src/incidentflow_mcp/http/**'
+      - 'src/incidentflow_mcp/version.py'
+      - 'src/incidentflow_mcp/config.py'
+      - 'src/incidentflow_mcp/observability/middleware.py'
       - 'tests/test_tool_response_contracts.py'
+      - 'tests/test_schema_coverage.py'
+      - 'tests/test_schema_endpoints.py'
+      - 'tests/test_all_tools_contract.py'
       - 'tests/test_tool_metadata.py'
       - 'tests/test_integration_status_tools.py'
       - 'tests/test_async_orchestration.py'
@@ -35,20 +51,20 @@ permissions:
 
 jobs:
   validate:
-    name: Validate schemaVersion contract
+    name: Validate response envelope and schema contracts
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v9.0.0
 
       - name: Install Python dependencies
         run: uv sync --extra dev --group dev
@@ -69,16 +85,42 @@ jobs:
         run: |
           uv run ruff check \
             src/incidentflow_mcp/tools/contracts.py \
+            src/incidentflow_mcp/tools/output_models.py \
             src/incidentflow_mcp/mcp/server.py \
+            src/incidentflow_mcp/mcp/errors.py \
+            src/incidentflow_mcp/mcp/compatibility/fastmcp_contracts.py \
             scripts/generate_tool_schemas.py \
+            scripts/contract_check.py \
+            scripts/dump_tool_schemas.py \
             tests/test_tool_response_contracts.py \
+            tests/test_schema_coverage.py \
+            tests/test_schema_endpoints.py \
+            tests/test_all_tools_contract.py \
             tests/test_integration_status_tools.py
 
       - name: Validate runtime response contracts
         run: |
           uv run pytest \
             tests/test_tool_response_contracts.py \
+            tests/test_schema_coverage.py \
+            tests/test_schema_endpoints.py \
+            tests/test_all_tools_contract.py \
             tests/test_tool_metadata.py \
             tests/test_integration_status_tools.py \
             tests/test_async_orchestration.py::test_structured_tool_exception_wraps_http_status_body \
             tests/test_async_orchestration.py::test_fastmcp_unknown_tool_arguments_return_structured_validation_error
+
+      - name: In-process contract check (version + schemas + responses)
+        run: uv run python scripts/contract_check.py
+
+      - name: Publish full tool-schema catalog to the run summary
+        if: always()
+        run: uv run python scripts/dump_tool_schemas.py
+
+      - name: Upload tool schemas (downloadable artifact)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tool-schemas
+          path: schemas/
+          if-no-files-found: error

@@ -1,0 +1,203 @@
+{
+  "$id": "https://incidentflow.io/schemas/tools/incidentflow.incident-thread-summary.response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "enum": [
+        "v1"
+      ],
+      "type": "string"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "description": "`incident_thread_summary` \u2014 strict; stable owned dict.",
+          "properties": {
+            "actions_taken": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "commands": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "next_actions": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "open_questions": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "probable_root_cause": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "risks": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "runbooks": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "unknown",
+                "investigating",
+                "mitigated"
+              ],
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "what_engineers_said": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "title",
+            "status",
+            "summary"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "INVALID_ARGUMENT",
+                "UNAUTHENTICATED",
+                "PERMISSION_DENIED",
+                "NOT_FOUND",
+                "CONFLICT",
+                "RATE_LIMITED",
+                "INTEGRATION_UNAVAILABLE",
+                "UPSTREAM_ERROR",
+                "TIMEOUT",
+                "INTERNAL_ERROR"
+              ],
+              "type": "string"
+            },
+            "details": {
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "meta": {
+      "additionalProperties": false,
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "generated_at",
+        "truncated",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "incidentflow.incident-thread-summary.response",
+      "type": "string"
+    },
+    "schema_version": {
+      "enum": [
+        "1.0"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "api_version",
+    "schema_version",
+    "schema_id",
+    "status",
+    "request_id",
+    "data",
+    "error",
+    "meta"
+  ],
+  "type": "object"
+}

@@ -109,9 +109,7 @@ class PlatformAPIKnowledgeClient:
                 "workspace_id": workspace_id,
                 "id": id,
                 "id_type": id_type,
-                "response_mode": response_mode
-                if response_mode in {"compact", "full"}
-                else "full",
+                "response_mode": response_mode if response_mode in {"compact", "full"} else "full",
             }
             if document_type:
                 body["document_type"] = document_type

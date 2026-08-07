@@ -8,6 +8,7 @@ import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.tools.schemas import Alert
@@ -96,6 +97,30 @@ def resolve_response_mode(requested_mode: str) -> str:
     return mode
 
 
+def resolve_external_status_job_id(
+    job_id: str | None,
+    check_id: str | None,
+) -> str | None:
+    """Resolve the polling job ID, retaining ``check_id`` as a legacy alias."""
+    normalized_job_id = job_id.strip() if job_id else None
+    normalized_check_id = check_id.strip() if check_id else None
+    if normalized_job_id and normalized_check_id and normalized_job_id != normalized_check_id:
+        raise ValueError("job_id and deprecated check_id must match when both are provided")
+
+    resolved_job_id = normalized_job_id or normalized_check_id
+    if not resolved_job_id:
+        return None
+
+    try:
+        UUID(resolved_job_id)
+    except ValueError as exc:
+        raise ValueError(
+            "Invalid job_id format: expected the UUID returned by a previous "
+            "external_status_check call."
+        ) from exc
+    return resolved_job_id
+
+
 def resolve_job_workspace_id(
     workspace_id: str | None,
     *,
@@ -160,7 +185,9 @@ def build_async_result(
     payload: dict[str, Any] = {
         "mode": "async",
         "job_id": job_id,
-        "status": status,
+        # Job lifecycle status, named distinctly from the envelope-level `status`
+        # (review #10). The envelope carries the call outcome; this is the job's.
+        "job_status": status,
         "poll_after_seconds": poll_after_seconds,
     }
     if extra:
@@ -251,7 +278,7 @@ def compact_provider_status(provider_status: dict[str, Any]) -> dict[str, Any]:
 
     compact: dict[str, Any] = {
         "provider": provider_status.get("provider"),
-        "status": "ok",
+        "provider_status": provider_status.get("indicator"),
         "indicator": provider_status.get("indicator"),
         "description": provider_status.get("description"),
         "active_incidents": active_incidents,
@@ -292,13 +319,14 @@ def compact_external_status_result(result: Any) -> Any:
         if isinstance(fetched_at, str) and (checked_at is None or fetched_at > checked_at):
             checked_at = fetched_at
 
-    status = "ok"
+    check_status = "success"
     if errors_list and compact_statuses:
-        status = "partial"
+        check_status = "partial_success"
     elif errors_list and not compact_statuses:
-        status = "error"
+        check_status = "failed"
     elif str(result.get("status") or "").lower() not in {"success", "ok"}:
-        status = str(result.get("status") or "unknown")
+        # Bounded to a known vocabulary so the response validates (review #10).
+        check_status = "unknown"
 
     provider_names = {
         str(provider_status.get("provider") or "").lower()
@@ -314,7 +342,7 @@ def compact_external_status_result(result: Any) -> Any:
         compact_statuses.append(
             {
                 "provider": provider,
-                "status": "error",
+                "provider_status": "error",
                 "error": error.get("message") or error.get("error") or "provider failed",
                 "error_type": error.get("error_type"),
                 "source_url": error.get("source_url"),
@@ -328,7 +356,8 @@ def compact_external_status_result(result: Any) -> Any:
         provider_names.add(provider)
 
     compact_result = {
-        "status": status,
+        "mode": "completed",
+        "check_status": check_status,
         "checked_at": checked_at,
         "providers": compact_statuses,
     }
@@ -374,12 +403,12 @@ def normalize_polled_external_status_job(
             return (
                 normalized_result
                 if isinstance(normalized_result, dict)
-                else {"status": status, "result": normalized_result}
+                else {"mode": "completed", "job_status": status, "result": normalized_result}
             )
         payload: dict[str, Any] = {
             "mode": "completed",
             "job_id": job_id,
-            "status": status,
+            "job_status": status,
             "result": normalized_result,
             "error": job.get("error"),
             "artifact_refs": safe_artifact_refs(job.get("artifact_refs", [])),
@@ -415,7 +444,7 @@ def normalize_polled_incident_summary_job(
         payload: dict[str, Any] = {
             "mode": "completed",
             "job_id": job_id,
-            "status": status,
+            "job_status": status,
             "result": job.get("result"),
             "error": job.get("error"),
             "artifact_refs": safe_artifact_refs(job.get("artifact_refs", [])),
@@ -467,7 +496,7 @@ def polled_job_mismatch_result(
     return {
         "mode": "completed",
         "job_id": job_id,
-        "status": "failed",
+        "job_status": "failed",
         "error": {
             "code": "JOB_OPERATION_MISMATCH",
             "message": (
@@ -508,7 +537,8 @@ async def execute_external_status_check(
     client: Any,
     providers: list[str] | None,
     workspace_id: str | None,
-    check_id: str | None,
+    job_id: str | None = None,
+    check_id: str | None = None,
     wait_for_result: bool = True,
     days_back: int = 30,
     response_mode: str = "compact",
@@ -527,17 +557,18 @@ async def execute_external_status_check(
     selected_response_mode = resolve_response_mode(response_mode)
     selected_providers = normalize_providers(providers)
 
-    if check_id:
-        job = await client.get_job(check_id)
+    resolved_job_id = resolve_external_status_job_id(job_id, check_id)
+    if resolved_job_id:
+        job = await client.get_job(resolved_job_id)
         if wait_for_result and str(job.get("status", "")) not in TERMINAL_JOB_STATUSES:
             job = await poll_until_done(
                 client=client,
-                job_id=check_id,
+                job_id=resolved_job_id,
                 initial_delay=settings.platform_api_ai_poll_after_seconds,
                 max_wait_seconds=45,
             )
         return normalize_polled_external_status_job(
-            job_id=check_id,
+            job_id=resolved_job_id,
             job=job,
             poll_after_seconds=settings.platform_api_ai_poll_after_seconds,
             response_mode=selected_response_mode,

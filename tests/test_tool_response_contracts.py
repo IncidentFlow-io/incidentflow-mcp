@@ -1,225 +1,273 @@
-"""Tests for global MCP tool response contracts."""
+"""Contract tests for the canonical versioned MCP response envelope.
+
+Covers the five representative tools selected for the first rollout:
+``mcp_version``, ``external_status_check``, ``k8s_agent_status``,
+``argocd_connection_health`` and ``public_knowledge_search``.
+
+Verifies:
+- every response is the same 8-key envelope;
+- success and error payloads validate against the generated JSON Schema;
+- output schemas are published per-tool (not a generic blanket schema);
+- tool errors set ``isError=True`` and carry a canonical error code;
+- the error code in the body matches the one recorded for telemetry.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
+import jsonschema
 import pytest
-from pydantic import ValidationError
+from mcp.types import CallToolResult
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import create_mcp_server
 from incidentflow_mcp.tools.contracts import (
-    RESERVED_CONTRACT_KEYS,
-    TOOL_SCHEMA_VERSION,
-    apply_tool_contract,
+    ENVELOPE_SCHEMA_ID,
+    ERROR_SCHEMA_ID,
+    ErrorCode,
+    build_output_schema,
+    envelope_schema,
+    error_envelope,
+    error_schema,
     export_tool_schemas,
-    schema_id_for_tool,
-    schema_url,
-    tool_response_model,
-    tool_response_models,
+    response_schema_id,
+    success_envelope,
 )
 from incidentflow_mcp.tools.registry import get_tool_specs
 
+ENVELOPE_KEYS = {
+    "api_version",
+    "schema_version",
+    "schema_id",
+    "status",
+    "request_id",
+    "data",
+    "error",
+    "meta",
+}
 
-def test_every_registered_tool_has_response_model() -> None:
-    specs = get_tool_specs()
-    models = tool_response_models(specs)
-
-    assert set(models) == {spec.name for spec in specs}
-    for spec in specs:
-        if spec.name == "argocd_get_last_operation":
-            continue
-        schema_id = schema_id_for_tool(spec.name)
-        model = models[spec.name]
-        payload = model.model_validate(
-            {
-                "schemaVersion": TOOL_SCHEMA_VERSION,
-                "schemaId": schema_id,
-                "ok": True,
-                "warnings": [],
-                "tool_specific_field": "allowed in v1",
-            }
-        )
-
-        assert payload.schemaVersion == TOOL_SCHEMA_VERSION
-        assert payload.schemaId == schema_id
-        assert payload.model_extra == {"tool_specific_field": "allowed in v1"}
+SELECTED_TOOLS = (
+    "mcp_version",
+    "external_status_check",
+    "k8s_agent_status",
+    "argocd_connection_health",
+    "public_knowledge_search",
+)
 
 
-def test_schema_id_conventions_are_stable() -> None:
-    assert schema_id_for_tool("argocd_get_last_operation") == "argocd.get-last-operation"
-    assert schema_id_for_tool("grafana_metrics_query") == "grafana.metrics-query"
-    assert schema_id_for_tool("k8s_list_pods") == "kubernetes.list-pods"
-    assert schema_id_for_tool("slack_alerts_list") == "slack.alerts-list"
-    assert schema_id_for_tool("knowledge_upsert") == "knowledge.upsert"
-    assert schema_id_for_tool("mcp_version") == "platform.mcp-version"
+def _test_settings() -> Settings:
+    return Settings(
+        _env_file=None,
+        incidentflow_pat="test-secret-token",
+        environment="development",
+        redis_url="redis://test-only",
+        mcp_default_workspace_id="ws_dev",
+    )
 
 
-def test_apply_tool_contract_is_additive() -> None:
-    payload = {"ok": True, "total": 3}
+# --- envelope structure -----------------------------------------------------
+def test_success_envelope_has_exactly_the_eight_keys() -> None:
+    env = success_envelope({"x": 1}, tool_name="mcp_version")
+    assert set(env) == ENVELOPE_KEYS
+    assert env["status"] == "success"
+    assert env["api_version"] == "v1"
+    assert env["schema_version"] == "1.0"
+    assert env["schema_id"] == "incidentflow.mcp-version.response"
+    assert env["error"] is None
+    assert env["request_id"].startswith("req_")
+    assert set(env["meta"]) == {"generated_at", "truncated", "warnings"}
 
-    stamped = apply_tool_contract(payload, tool_name="k8s_list_pods")
 
-    assert stamped == {
-        "ok": True,
-        "total": 3,
-        "schemaVersion": "v1",
-        "schemaId": "kubernetes.list-pods",
-        "warnings": [],
+def test_error_envelope_matches_reference_shape() -> None:
+    env = error_envelope(
+        tool_name="external_status_check",
+        code=ErrorCode.INVALID_ARGUMENT,
+        message="Invalid job_id format",
+        details={"field": "job_id", "expected": "uuid"},
+    )
+    assert set(env) == ENVELOPE_KEYS
+    assert env["status"] == "error"
+    assert env["data"] is None
+    assert env["schema_id"] == "incidentflow.external-status-check.response"
+    assert env["error"] == {
+        "code": "INVALID_ARGUMENT",
+        "message": "Invalid job_id format",
+        "retryable": False,
+        "details": {"field": "job_id", "expected": "uuid"},
     }
-    assert payload == {"ok": True, "total": 3}
 
 
-def test_apply_tool_contract_does_not_overwrite_reserved_keys() -> None:
-    payload = {
-        "schemaVersion": "custom",
-        "schemaId": "custom.schema",
-        "warnings": ["already present"],
+@pytest.mark.parametrize(
+    ("code", "expected_retryable"),
+    [
+        (ErrorCode.INVALID_ARGUMENT, False),
+        (ErrorCode.NOT_FOUND, False),
+        (ErrorCode.RATE_LIMITED, True),
+        (ErrorCode.TIMEOUT, True),
+        (ErrorCode.UPSTREAM_ERROR, True),
+        (ErrorCode.INTEGRATION_UNAVAILABLE, True),
+    ],
+)
+def test_error_default_retryability(code: ErrorCode, expected_retryable: bool) -> None:
+    env = error_envelope(tool_name="mcp_version", code=code, message="x")
+    assert env["error"]["retryable"] is expected_retryable
+
+
+def test_all_ten_canonical_error_codes_exist() -> None:
+    assert {c.value for c in ErrorCode} == {
+        "INVALID_ARGUMENT",
+        "UNAUTHENTICATED",
+        "PERMISSION_DENIED",
+        "NOT_FOUND",
+        "CONFLICT",
+        "RATE_LIMITED",
+        "INTEGRATION_UNAVAILABLE",
+        "UPSTREAM_ERROR",
+        "TIMEOUT",
+        "INTERNAL_ERROR",
     }
 
-    stamped = apply_tool_contract(payload, tool_name="k8s_list_pods")
 
-    assert stamped["schemaVersion"] == "custom"
-    assert stamped["schemaId"] == "custom.schema"
-    assert stamped["warnings"] == ["already present"]
+# --- JSON Schema validation -------------------------------------------------
+@pytest.mark.parametrize("tool_name", SELECTED_TOOLS)
+def test_success_and_error_validate_against_generated_schema(tool_name: str) -> None:
+    schema = build_output_schema(tool_name)
+    # A minimal but representative success payload per tool.
+    data_by_tool = {
+        "mcp_version": {
+            "service": "incidentflow-mcp",
+            "service_version": "1.0.54",
+            "current_api_version": "v1",
+            "contract_version": "1.0",
+            "supported_api_versions": ["v1"],
+            "supported_schema_versions": ["1.0"],
+            "deprecated_api_versions": [],
+            "environment": "dev",
+            "tools": {"registered": 46, "operational": 42, "meta": 4},
+            "image": {"signed": False, "signature_verified": False},
+        },
+        "external_status_check": {
+            "mode": "async",
+            "job_id": "job_123",
+            "job_status": "queued",
+            "poll_after_seconds": 2,
+        },
+        "k8s_agent_status": {
+            "status": "connected",
+            "healthy": True,
+            "checked_at": "2026-08-07T09:29:30Z",
+        },
+        "argocd_connection_health": {"source": {}, "healthy": True, "status": "ok"},
+        "public_knowledge_search": {
+            "query": "IncidentFlow API",
+            "scope": "public",
+            "results": [],
+            "total": 0,
+        },
+    }
+    success = success_envelope(data_by_tool[tool_name], tool_name=tool_name)
+    jsonschema.validate(success, schema)
+
+    error = error_envelope(
+        tool_name=tool_name,
+        code=ErrorCode.UPSTREAM_ERROR,
+        message="boom",
+    )
+    jsonschema.validate(error, schema)
 
 
-def test_export_tool_schemas_writes_envelope_and_one_file_per_tool(tmp_path: Path) -> None:
+def test_common_error_schema_is_draft_2020_12() -> None:
+    schema = error_schema()
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert ERROR_SCHEMA_ID in schema["$id"]
+    jsonschema.Draft202012Validator.check_schema(schema)
+    jsonschema.validate(
+        {"code": "TIMEOUT", "message": "x", "retryable": True},
+        schema,
+    )
+
+
+def test_envelope_schema_is_generic_when_no_tool() -> None:
+    schema = envelope_schema()
+    assert ENVELOPE_SCHEMA_ID in schema["$id"]
+    jsonschema.Draft202012Validator.check_schema(schema)
+
+
+def test_per_tool_schema_ids_are_distinct() -> None:
+    ids = {name: response_schema_id(name) for name in SELECTED_TOOLS}
+    assert len(set(ids.values())) == len(SELECTED_TOOLS)
+    assert ids["external_status_check"] == "incidentflow.external-status-check.response"
+
+
+# --- published output schemas ----------------------------------------------
+def test_registered_output_schemas_are_precise_per_tool() -> None:
+    mcp = create_mcp_server()
+    tools = {t.name: t for t in mcp._tool_manager.list_tools()}
+    for name in SELECTED_TOOLS:
+        schema = tools[name].fn_metadata.output_schema
+        assert schema is not None
+        # Not a generic blanket object: schema_id is pinned to this tool.
+        assert schema["properties"]["schema_id"]["const"] == response_schema_id(name)
+        assert schema["additionalProperties"] is False
+
+
+# --- end-to-end through the wrapper -----------------------------------------
+@pytest.mark.asyncio
+async def test_mcp_version_end_to_end_is_enveloped_and_valid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("incidentflow_mcp.config._settings", _test_settings())
+    mcp = create_mcp_server()
+    tools = {t.name: t for t in mcp._tool_manager.list_tools()}
+
+    result = await mcp._tool_manager.call_tool("mcp_version", {})
+    assert set(result) == ENVELOPE_KEYS
+    assert result["status"] == "success"
+    jsonschema.validate(result, tools["mcp_version"].fn_metadata.output_schema)
+
+    data = result["data"]
+    assert data["service"] == "incidentflow-mcp"
+    assert data["current_api_version"] == "v1"
+    assert data["supported_api_versions"] == ["v1"]
+    assert data["supported_schema_versions"] == ["1.0"]
+    assert data["deprecated_api_versions"] == []
+    assert data["service_version"]  # non-empty, single source
+
+
+@pytest.mark.asyncio
+async def test_tool_error_sets_is_error_and_canonical_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("incidentflow_mcp.config._settings", _test_settings())
+    mcp = create_mcp_server()
+
+    # argocd_connection_health with no workspace integration -> guard rejection.
+    result = await mcp._tool_manager.call_tool("argocd_connection_health", {})
+    assert isinstance(result, CallToolResult)
+    assert result.isError is True
+
+    envelope = result.structuredContent
+    assert set(envelope) == ENVELOPE_KEYS
+    assert envelope["status"] == "error"
+    code = envelope["error"]["code"]
+    assert code in {c.value for c in ErrorCode}
+
+    # Same code is echoed in the serialized text content (single source of truth).
+    import json
+
+    text_envelope = json.loads(result.content[0].text)
+    assert text_envelope["error"]["code"] == code
+
+
+# --- offline export ---------------------------------------------------------
+def test_export_writes_common_and_per_tool_schemas(tmp_path: Path) -> None:
     specs = get_tool_specs()
-
     written = export_tool_schemas(specs, tmp_path)
 
-    assert len(written) == len(specs) + 1
-    assert tmp_path.joinpath("tool-envelope.v1.schema.json").exists()
-    assert tmp_path.joinpath("argocd.get-last-operation.v1.schema.json").exists()
-    assert tmp_path.joinpath("kubernetes.list-pods.v1.schema.json").exists()
-
-
-def test_export_tool_schemas_includes_canonical_ids(tmp_path: Path) -> None:
-    export_tool_schemas(get_tool_specs(), tmp_path)
-
-    envelope = tmp_path.joinpath("tool-envelope.v1.schema.json").read_text()
-    argocd = tmp_path.joinpath("argocd.get-last-operation.v1.schema.json").read_text()
-
-    assert schema_url("tool-envelope.v1.schema.json") in envelope
-    assert schema_url("argocd.get-last-operation.v1.schema.json") in argocd
-
-
-def test_reserved_contract_keys_are_documented() -> None:
-    assert RESERVED_CONTRACT_KEYS == {"schemaVersion", "schemaId", "warnings"}
-
-
-def test_argocd_last_operation_requires_application_name() -> None:
-    model = tool_response_model("argocd_get_last_operation")
-
-    valid = model.model_validate(
-        {
-            "schemaVersion": "v1",
-            "schemaId": "argocd.get-last-operation",
-            "ok": True,
-            "warnings": [],
-            "application_name": "incidentflow-mcp-dev",
-            "status": "ok",
-            "operation": {
-                "phase": "Succeeded",
-                "resource_results": [
-                    {
-                        "kind": "Deployment",
-                        "namespace": "incidentflow-dev",
-                        "name": "incidentflow-mcp",
-                        "status": "Synced",
-                    }
-                ],
-            },
-        }
-    )
-
-    assert valid.application_name == "incidentflow-mcp-dev"
-
-
-def test_argocd_last_operation_rejects_app_name_rename() -> None:
-    model = tool_response_model("argocd_get_last_operation")
-
-    with pytest.raises(ValidationError) as exc_info:
-        model.model_validate(
-            {
-                "schemaVersion": "v1",
-                "schemaId": "argocd.get-last-operation",
-                "ok": True,
-                "warnings": [],
-                "app_name": "incidentflow-mcp-dev",
-                "status": "ok",
-                "operation": None,
-            }
-        )
-
-    errors = exc_info.value.errors()
-    assert any(error["loc"] == ("application_name",) for error in errors)
-    assert any(
-        error["loc"] == ("app_name",) and error["type"] == "extra_forbidden" for error in errors
-    )
-
-
-@pytest.mark.asyncio
-async def test_real_meta_tool_outputs_get_reserved_keys_from_contract_layer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "incidentflow_mcp.config._settings",
-        Settings(
-            _env_file=None,
-            incidentflow_pat="test-secret-token",
-            environment="development",
-            redis_url="redis://test-only",
-        ),
-    )
-    mcp = create_mcp_server()
-
-    for tool_name in ("mcp_version", "incidentflow_capabilities"):
-        result = await mcp._tool_manager.call_tool(tool_name, {})
-        for key in RESERVED_CONTRACT_KEYS:
-            assert key in result
-        assert result["schemaVersion"] == TOOL_SCHEMA_VERSION
-        assert result["schemaId"] == schema_id_for_tool(tool_name)
-
-
-@pytest.mark.asyncio
-async def test_real_meta_tool_outputs_validate_against_response_models(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "incidentflow_mcp.config._settings",
-        Settings(
-            _env_file=None,
-            incidentflow_pat="test-secret-token",
-            environment="development",
-            redis_url="redis://test-only",
-        ),
-    )
-    mcp = create_mcp_server()
-
-    for tool_name in ("mcp_version", "incidentflow_capabilities"):
-        result = await mcp._tool_manager.call_tool(tool_name, {})
-        model = tool_response_model(tool_name)
-        payload = model.model_validate(result)
-
-        assert payload.schemaVersion == TOOL_SCHEMA_VERSION
-        assert payload.schemaId == schema_id_for_tool(tool_name)
-
-
-@pytest.mark.asyncio
-async def test_structured_validation_errors_are_stamped_with_tool_schema() -> None:
-    mcp = create_mcp_server()
-
-    result = await mcp._tool_manager.call_tool(
-        "k8s_get_pod",
-        {"namespace": "default", "pod": "api-123", "tail_lines_typo": 10},
-    )
-    payload = tool_response_model("k8s_get_pod").model_validate(result)
-
-    assert payload.schemaVersion == TOOL_SCHEMA_VERSION
-    assert payload.schemaId == "kubernetes.get-pod"
-    assert payload.ok is False
-    assert payload.status == "failed"
-    assert payload.error is not None
+    # common error + common envelope + one file per tool
+    assert len(written) == len(specs) + 2
+    assert (tmp_path / "incidentflow.common.error.schema.json").exists()
+    assert (tmp_path / "incidentflow.common.envelope.schema.json").exists()
+    assert (tmp_path / "incidentflow.mcp-version.response.schema.json").exists()
+    assert (tmp_path / "incidentflow.external-status-check.response.schema.json").exists()

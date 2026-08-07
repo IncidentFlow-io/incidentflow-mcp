@@ -27,6 +27,8 @@ _PUBLIC_PATHS: frozenset[str] = frozenset(
     {
         "/healthz",
         "/readyz",
+        "/version",
+        "/schemas",
         "/install.sh",
         "/docs",
         "/openapi.json",
@@ -123,8 +125,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             if request.url.path == "/mcp" and request.method.upper() not in _MCP_ALLOWED_METHODS:
                 return await call_next(request)
 
-            if request.url.path in _PUBLIC_PATHS or _is_openai_domain_verification_path(
-                request.url.path
+            if (
+                request.url.path in _PUBLIC_PATHS
+                or request.url.path.startswith("/schemas/")
+                or _is_openai_domain_verification_path(request.url.path)
             ):
                 return await call_next(request)
 
@@ -520,8 +524,31 @@ def _client_ip(request: Request) -> str:
     return "unknown"
 
 
+def _metrics_source_ip(request: Request) -> str:
+    """Source IP for the unauthenticated ``/metrics`` allowlist.
+
+    Never trusts the LEFT-most ``X-Forwarded-For`` entry (it is client-supplied
+    and therefore spoofable — sending ``X-Forwarded-For: 127.0.0.1`` must not
+    grant the bypass). A pod-direct Prometheus scrape carries no XFF, so the
+    socket peer is authoritative; a request that reached us through the mesh edge
+    has the real client appended by the trusted gateway, so the RIGHT-most hop is
+    used. The ingress ``AuthorizationPolicy`` that denies ``/metrics`` on public
+    hosts is the primary control — this is defense-in-depth.
+    """
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        hops = [part.strip() for part in forwarded.split(",") if part.strip()]
+        if hops:
+            return hops[-1]
+    if request.client:
+        if request.client.host == "testclient":
+            return "127.0.0.1"
+        return request.client.host
+    return "unknown"
+
+
 def _is_metrics_request_allowed_without_auth(request: Request) -> bool:
-    client_ip = _client_ip(request)
+    client_ip = _metrics_source_ip(request)
     try:
         ip_obj = ipaddress.ip_address(client_ip)
     except ValueError:

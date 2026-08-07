@@ -745,8 +745,9 @@ account, organization, repositories, issues, or pull requests and is not a GitHu
 - `response_mode=full`: raw platform job payload for deep RCA analysis.
 
 Polling behavior:
-- If `check_id` is provided, MCP polls that existing `job_id` and does not create a new job.
-- If `check_id` is omitted, MCP submits a new async job.
+ - If `job_id` is provided, MCP polls that existing UUID and does not create a new job.
+ - `check_id` is a deprecated alias for `job_id`.
+ - If neither is provided, MCP submits a new async job.
 - OMS storage is caller opt-in. Only `persist_to_oms=true` requests storage, and the runner's
   deployment policy may still deny it. Omitted or explicit `false` can never be forced to `true`.
 - The result's `persistence` object records `requested`, `effective`, and `stored` decisions.
