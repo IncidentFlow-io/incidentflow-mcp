@@ -412,6 +412,15 @@ _TOOL_SPECS: list[ToolSpec] = [
                     ],
                     "description": "Optional public document type filter.",
                 },
+                "integration": {
+                    "type": "string",
+                    "enum": ["kubernetes", "slack", "grafana", "argocd"],
+                    "description": "Restrict results to one integration's documentation.",
+                },
+                "component": {
+                    "type": "string",
+                    "description": "Optional component filter, for example k8s-agent.",
+                },
                 "response_mode": {
                     "type": "string",
                     "enum": ["compact", "full"],

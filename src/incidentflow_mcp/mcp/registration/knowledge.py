@@ -29,6 +29,7 @@ def _normalize_search_response(payload: Any, *, query: str, scope: str) -> dict[
     results = (
         payload.get("results")
         or (payload.get("publicResults") if scope == "public" else payload.get("workspaceResults"))
+        or payload.get("matches")
         or payload.get("items")
         or []
     )
@@ -59,6 +60,8 @@ def register_knowledge_tools(
     async def public_knowledge_search_tool(
         query: str,
         document_type: str | None = None,
+        integration: str | None = None,
+        component: str | None = None,
         response_mode: str = "compact",
         limit: int = 8,
     ) -> dict[str, Any]:
@@ -67,6 +70,8 @@ def register_knowledge_tools(
                 settings=ctx.settings,
                 query=query,
                 document_type=document_type,
+                integration=integration,
+                component=component,
                 response_mode=response_mode,
                 limit=limit,
             )

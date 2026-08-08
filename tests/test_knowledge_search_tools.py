@@ -208,3 +208,29 @@ async def test_public_private_and_get_wrappers_call_client() -> None:
             )
             == get_payload
         )
+
+
+@pytest.mark.asyncio
+async def test_public_knowledge_search_uses_docs_filters() -> None:
+    payload = {"matches": [{"title": "Install the Kubernetes Agent"}]}
+    with patch.object(
+        PlatformAPIKnowledgeClient,
+        "search_docs",
+        AsyncMock(return_value=payload),
+    ) as search_mock:
+        result = await public_knowledge_search(
+            _settings(),
+            query="install Kubernetes agent",
+            document_type="installation_guide",
+            integration="kubernetes",
+            component="k8s-agent",
+        )
+
+    assert result == payload
+    assert search_mock.await_args.kwargs == {
+        "query": "install Kubernetes agent",
+        "limit": 8,
+        "document_type": "installation_guide",
+        "integration": "kubernetes",
+        "component": "k8s-agent",
+    }
