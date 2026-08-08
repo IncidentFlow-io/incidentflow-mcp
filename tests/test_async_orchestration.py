@@ -10,6 +10,7 @@ from incidentflow_mcp.auth.context import clear_current_auth_context, set_curren
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.compatibility.fastmcp_contracts import run_tool_with_structured_errors
 from incidentflow_mcp.mcp.errors import structured_tool_exception
+from incidentflow_mcp.mcp.registration.kubernetes import _assess_workload_health
 from incidentflow_mcp.mcp.server import (
     create_mcp_server,
 )
@@ -41,7 +42,9 @@ from incidentflow_mcp.mcp.services.kubernetes_commands import (
     _k8s_connection_health_payload,
     _k8s_rbac_check_payload,
     _overview_payload,
+    _reset_k8s_read_cache_for_tests,
     _resolve_k8s_cluster_id,
+    _send_k8s_command,
 )
 from incidentflow_mcp.mcp.services.slack_access import resolve_slack_tool_access
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
@@ -63,9 +66,14 @@ class FakeAgentClusterClient:
         self.list_calls = 0
 
     async def list_clusters(self, *, bearer_token: str) -> list[dict]:
-        assert bearer_token == "token"
+        _ = bearer_token
         self.list_calls += 1
         return self.clusters
+
+
+@pytest.fixture(autouse=True)
+def reset_k8s_read_cache() -> None:
+    _reset_k8s_read_cache_for_tests()
 
 
 class FakeK8sHealthClient(FakeAgentClusterClient):
@@ -83,7 +91,7 @@ class FakeK8sHealthClient(FakeAgentClusterClient):
         params: dict,
         timeout_seconds: int | None = None,
     ) -> dict:
-        assert bearer_token == "token"
+        _ = bearer_token
         assert cluster_id == "cluster_prod"
         _ = timeout_seconds
         namespace = str(params.get("namespace") or "")
@@ -110,6 +118,60 @@ class FailingK8sDispatchClient(FakeAgentClusterClient):
     ) -> dict:
         _ = bearer_token, cluster_id, action, params, timeout_seconds
         raise httpx.ConnectError("agent gateway unavailable")
+
+
+@pytest.mark.asyncio
+async def test_k8s_read_cache_scopes_by_caller_and_reports_hit() -> None:
+    client = FakeK8sHealthClient(
+        [{"cluster_id": "cluster_prod", "name": "prod", "connected": True}],
+        {
+            ("k8s.list_namespaces", ""): {
+                "status": "succeeded",
+                "data": {"namespaces": [{"name": "incidentflow-prod"}]},
+            }
+        },
+    )
+
+    first = await _send_k8s_command(
+        client=client,
+        bearer_token="token",
+        cluster_id="cluster_prod",
+        action="k8s.list_namespaces",
+    )
+    second = await _send_k8s_command(
+        client=client,
+        bearer_token="token",
+        cluster_id="cluster_prod",
+        action="k8s.list_namespaces",
+    )
+    other_caller = await _send_k8s_command(
+        client=client,
+        bearer_token="different-token",
+        cluster_id="cluster_prod",
+        action="k8s.list_namespaces",
+    )
+
+    assert first["_incidentflow_k8s_cache"]["hit"] is False
+    assert second["_incidentflow_k8s_cache"]["hit"] is True
+    assert other_caller["_incidentflow_k8s_cache"]["hit"] is False
+    assert len(client.dispatch_calls) == 2
+
+
+def test_workload_log_error_is_warning_when_kubernetes_state_is_healthy() -> None:
+    assert _assess_workload_health(
+        has_unhealthy_pods=False,
+        rollout_complete=True,
+        log_errors=1,
+        log_warnings=0,
+        total_restarts=0,
+    ) == ("warning", "warning")
+    assert _assess_workload_health(
+        has_unhealthy_pods=True,
+        rollout_complete=True,
+        log_errors=0,
+        log_warnings=0,
+        total_restarts=0,
+    ) == ("degraded", "warning")
 
 
 def _set_k8s_tool_context() -> None:

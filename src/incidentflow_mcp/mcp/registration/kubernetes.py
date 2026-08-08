@@ -7,7 +7,6 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Annotated, Any, Literal
 
-import httpx
 from pydantic import Field
 
 from incidentflow_mcp.config import Settings
@@ -86,6 +85,22 @@ def _with_integration_context(
     return decoded if isinstance(decoded, dict) else {"status": "failed", "error": raw}
 
 
+def _assess_workload_health(
+    *,
+    has_unhealthy_pods: bool,
+    rollout_complete: bool | None,
+    log_errors: int,
+    log_warnings: int,
+    total_restarts: int,
+) -> tuple[str, str]:
+    """Separate current Kubernetes health from historical log evidence."""
+    if has_unhealthy_pods or rollout_complete is False:
+        return "degraded", "warning"
+    if log_errors > 0 or log_warnings > 0 or total_restarts > 0:
+        return "warning", "warning"
+    return "healthy", "info"
+
+
 async def _send_k8s_agent_command(
     *,
     settings: Settings,
@@ -119,18 +134,18 @@ async def _send_k8s_agent_command(
         environment=environment,
         cluster_name=cluster_name,
     )
-    try:
-        result = await client.send_agent_command(
-            bearer_token=bearer_token,
-            cluster_id=resolved_cluster_id,
-            action=action,
-            params=params or {},
-            timeout_seconds=timeout_seconds,
-        )
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code in {401, 403}:
-            raise ValueError(_UNAUTHORIZED_CLUSTER_MESSAGE) from exc
-        raise
+    result = await _send_k8s_command(
+        client=client,
+        bearer_token=bearer_token,
+        cluster_id=resolved_cluster_id,
+        action=action,
+        params=params,
+        timeout_seconds=timeout_seconds,
+    )
+    error = _command_error(result)
+    if error and error.get("code") in {"http_401", "http_403"}:
+        raise ValueError(_UNAUTHORIZED_CLUSTER_MESSAGE)
+    result = commands._strip_internal_k8s_metadata(result)
     return attach_integration_context(json.dumps(result, indent=2), integration_context, settings)
 
 
@@ -1050,14 +1065,16 @@ def register_kubernetes_tools(
         unhealthy_related = [
             p for p in related_pods if isinstance(p, dict) and _is_unhealthy_pod(p)
         ]
-        health = "healthy"
-        severity = "info"
-        if unhealthy_related or rollout_complete is False or log_analysis["errors"] > 0:
-            health = "degraded"
-            severity = "critical" if log_analysis["errors"] > 0 else "warning"
-        elif log_analysis["warnings"] > 0 or total_restarts > 0:
-            health = "warning"
-            severity = "warning"
+        # Runtime health comes from Kubernetes state. Logs are diagnostic evidence:
+        # a historical application ERROR must not contradict a ready pod and a
+        # completed rollout by reporting the workload as critical.
+        health, severity = _assess_workload_health(
+            has_unhealthy_pods=bool(unhealthy_related),
+            rollout_complete=rollout_complete,
+            log_errors=log_analysis["errors"],
+            log_warnings=log_analysis["warnings"],
+            total_restarts=total_restarts,
+        )
 
         findings: list[str] = []
         recommendations: list[str] = []

@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
+import json
 import time
+from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 
@@ -33,6 +37,22 @@ _K8S_RBAC_ACTIONS = {
     "list_deployments": ("k8s.list_deployments", {}),
     "list_services": ("k8s.list_services", {}),
 }
+
+# These are deliberately short, in-process caches for stable read operations.
+# They reduce duplicate platform -> gateway -> agent round trips without making
+# troubleshooting tools stale.  Logs and events are intentionally not cached.
+_K8S_READ_CACHE_TTLS_SECONDS = {
+    "k8s.list_namespaces": 120,
+    "k8s.list_pods": 3,
+    "k8s.get_pod": 3,
+    "k8s.describe_pod": 3,
+    "k8s.list_deployments": 15,
+    "k8s.list_services": 15,
+    "k8s.get_rollout_status": 5,
+}
+_K8S_READ_CACHE_MAX_ENTRIES = 256
+_K8S_INTERNAL_CACHE_KEY = "_incidentflow_k8s_cache"
+_k8s_read_cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
 
 _top_restarts = analysis._top_restarts
 _pod_brief = analysis._pod_brief
@@ -140,6 +160,53 @@ def _command_error(response: dict[str, Any]) -> dict[str, Any] | None:
     return error if isinstance(error, dict) else None
 
 
+def _k8s_cache_key(
+    *, bearer_token: str, cluster_id: str, action: str, params: dict[str, Any]
+) -> str:
+    """Build a stable, non-secret cache key scoped to one caller and cluster."""
+    token_scope = hashlib.sha256(bearer_token.encode()).hexdigest()
+    normalized_params = json.dumps(params, sort_keys=True, separators=(",", ":"), default=str)
+    return f"{token_scope}:{cluster_id}:{action}:{normalized_params}"
+
+
+def _with_cache_metadata(
+    response: dict[str, Any], *, hit: bool, age_ms: float | None
+) -> dict[str, Any]:
+    result = copy.deepcopy(response)
+    result[_K8S_INTERNAL_CACHE_KEY] = {
+        "hit": hit,
+        "age_ms": age_ms,
+    }
+    return result
+
+
+def _strip_internal_k8s_metadata(response: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(response)
+    result.pop(_K8S_INTERNAL_CACHE_KEY, None)
+    return result
+
+
+def _cache_summary(responses: list[dict[str, Any]]) -> dict[str, int]:
+    cacheable = [response.get(_K8S_INTERNAL_CACHE_KEY) for response in responses]
+    entries = [entry for entry in cacheable if isinstance(entry, dict)]
+    return {
+        "hits": sum(1 for entry in entries if entry.get("hit") is True),
+        "misses": sum(1 for entry in entries if entry.get("hit") is False),
+    }
+
+
+def _performance_metadata(started: float, responses: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        "cache": _cache_summary(responses),
+    }
+
+
+def _reset_k8s_read_cache_for_tests() -> None:
+    """Clear local cache to keep unit tests independent. Not used at runtime."""
+    _k8s_read_cache.clear()
+
+
 def _k8s_failed_response(
     *,
     code: str,
@@ -235,17 +302,40 @@ async def _send_k8s_command(
     params: dict[str, Any] | None = None,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
-    try:
-        return await client.send_agent_command(
+    effective_params = params or {}
+    ttl_seconds = _K8S_READ_CACHE_TTLS_SECONDS.get(action)
+    cache_key: str | None = None
+    if ttl_seconds is not None:
+        cache_key = _k8s_cache_key(
             bearer_token=bearer_token,
             cluster_id=cluster_id,
             action=action,
-            params=params or {},
+            params=effective_params,
+        )
+        now = time.monotonic()
+        cached = _k8s_read_cache.get(cache_key)
+        if cached is not None:
+            expires_at, cached_response = cached
+            if expires_at > now:
+                _k8s_read_cache.move_to_end(cache_key)
+                return _with_cache_metadata(
+                    cached_response,
+                    hit=True,
+                    age_ms=round((ttl_seconds - (expires_at - now)) * 1000, 2),
+                )
+            del _k8s_read_cache[cache_key]
+
+    try:
+        response = await client.send_agent_command(
+            bearer_token=bearer_token,
+            cluster_id=cluster_id,
+            action=action,
+            params=effective_params,
             timeout_seconds=timeout_seconds,
         )
     except httpx.HTTPStatusError as exc:
         response = exc.response
-        return {
+        response = {
             "status": "failed",
             "error": {
                 "code": f"http_{response.status_code}",
@@ -253,13 +343,21 @@ async def _send_k8s_command(
             },
         }
     except httpx.HTTPError as exc:
-        return {
+        response = {
             "status": "failed",
             "error": {
                 "code": "platform_api_unreachable",
                 "message": str(exc),
             },
         }
+
+    if cache_key is not None and _command_ok(response):
+        _k8s_read_cache[cache_key] = (time.monotonic() + ttl_seconds, copy.deepcopy(response))
+        _k8s_read_cache.move_to_end(cache_key)
+        while len(_k8s_read_cache) > _K8S_READ_CACHE_MAX_ENTRIES:
+            _k8s_read_cache.popitem(last=False)
+        return _with_cache_metadata(response, hit=False, age_ms=None)
+    return response
 
 
 async def _k8s_agent_status_payload(
@@ -321,6 +419,7 @@ async def _k8s_connection_health_payload(
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
     _health_start = time.perf_counter()
+    command_responses: list[dict[str, Any]] = []
     status = await _k8s_agent_status_payload(
         client=client,
         bearer_token=bearer_token,
@@ -358,6 +457,7 @@ async def _k8s_connection_health_payload(
         params={},
         timeout_seconds=timeout_seconds,
     )
+    command_responses.append(namespaces_response)
     list_namespaces_ms = round((time.perf_counter() - started) * 1000, 2)
     latency_ms = list_namespaces_ms
     namespaces = _namespace_names(_command_data(namespaces_response, "namespaces"))
@@ -388,6 +488,7 @@ async def _k8s_connection_health_payload(
                 params=params,
                 timeout_seconds=timeout_seconds,
             )
+            command_responses.append(response)
             permissions[key] = _command_ok(response)
             if key == "list_pods":
                 pod_items = _command_data(response, "pods")
@@ -405,6 +506,7 @@ async def _k8s_connection_health_payload(
                 },
                 timeout_seconds=timeout_seconds,
             )
+            command_responses.append(response)
             permissions["get_logs"] = _command_ok(response)
 
     total_health_ms = round((time.perf_counter() - _health_start) * 1000, 2)
@@ -423,6 +525,7 @@ async def _k8s_connection_health_payload(
                 "total_health_check_ms": total_health_ms,
                 "mcp_handler_ms": None,  # measured by HTTP middleware, not available here
             },
+            "meta": _performance_metadata(_health_start, command_responses),
             "latency_interpretation": latency_interpretation,
             "namespaces_visible": len(namespaces),
             "namespaces": namespaces,
@@ -488,6 +591,7 @@ async def _k8s_cluster_overview_payload(
     namespace: str | None = None,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
+    started = time.perf_counter()
     namespaces_response = await _send_k8s_command(
         client=client,
         bearer_token=bearer_token,
@@ -554,18 +658,22 @@ async def _k8s_cluster_overview_payload(
     namespace_responses = await asyncio.gather(
         *(_namespace_overview_commands(item) for item in namespaces)
     )
+    all_responses = [namespaces_response]
     for (
         pods_response,
         deployments_response,
         services_response,
         events_response,
     ) in namespace_responses:
+        all_responses.extend(
+            [pods_response, deployments_response, services_response, events_response]
+        )
         pods.extend(_command_data(pods_response, "pods"))
         deployments.extend(_command_data(deployments_response, "deployments"))
         services.extend(_command_data(services_response, "services"))
         events.extend(_command_data(events_response, "events"))
 
-    return _overview_payload(
+    overview = _overview_payload(
         namespaces=namespaces,
         pods=pods,
         deployments=deployments,
@@ -573,6 +681,8 @@ async def _k8s_cluster_overview_payload(
         events=events,
         namespace=namespace,
     )
+    overview["meta"] = _performance_metadata(started, all_responses)
+    return overview
 
 
 async def _k8s_rbac_check_payload(
@@ -582,7 +692,9 @@ async def _k8s_rbac_check_payload(
     cluster_id: str,
     timeout_seconds: int = 30,
 ) -> dict[str, Any]:
+    started = time.perf_counter()
     results: dict[str, dict[str, Any]] = {}
+    command_responses: list[dict[str, Any]] = []
     namespace: str | None = None
     first_pod: dict[str, Any] | None = None
     for key, (action, params) in _K8S_RBAC_ACTIONS.items():
@@ -594,6 +706,7 @@ async def _k8s_rbac_check_payload(
             params=params if namespace is None else {**params, "namespace": namespace},
             timeout_seconds=timeout_seconds,
         )
+        command_responses.append(response)
         results[key] = _permission_result(response)
         if key == "list_namespaces":
             names = _namespace_names(_command_data(response, "namespaces"))
@@ -621,6 +734,12 @@ async def _k8s_rbac_check_payload(
             },
             timeout_seconds=timeout_seconds,
         )
+        command_responses.append(response)
         results["get_logs"] = _permission_result(response)
 
-    return {"read_only": True, "permissions": results, "checked_at": _checked_at()}
+    return {
+        "read_only": True,
+        "permissions": results,
+        "checked_at": _checked_at(),
+        "meta": _performance_metadata(started, command_responses),
+    }
