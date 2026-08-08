@@ -213,9 +213,31 @@ async def public_knowledge_search(
     *,
     query: str,
     document_type: str | None = None,
+    integration: str | None = None,
+    component: str | None = None,
     response_mode: str = "compact",
     limit: int = 8,
 ) -> dict[str, Any]:
+    """Search public knowledge, using the filtered docs index when requested."""
+    if integration or component:
+        client = PlatformAPIKnowledgeClient(settings)
+        try:
+            return await client.search_docs(
+                query=query,
+                limit=limit,
+                document_type=document_type,
+                integration=integration,
+                component=component,
+            )
+        except httpx.HTTPStatusError as exc:
+            logger.warning("public docs search failed status=%s", exc.response.status_code)
+            raise KnowledgeSearchAPIError(
+                f"IncidentFlow public docs search failed: HTTP {exc.response.status_code}"
+            ) from exc
+        except Exception as exc:
+            logger.warning("public docs search error: %s", exc)
+            raise KnowledgeSearchAPIError(f"IncidentFlow public docs search error: {exc}") from exc
+
     return await incidentflow_knowledge_search(
         settings=settings,
         workspace_id=None,

@@ -222,9 +222,8 @@ class KubernetesGuideProvider(GuideProvider):
         if goal == "install":
             install_cmd = {
                 "helm": (
-                    "helm repo add incidentflow https://charts.incidentflow.io && "
-                    "helm repo update && "
-                    "helm upgrade --install incidentflow-k8s-agent incidentflow/k8s-agent "
+                    "helm upgrade --install incidentflow-k8s-agent "
+                    "oci://ghcr.io/incidentflow-io/charts/incidentflow-k8s-agent "
                     f"--namespace {ns} --create-namespace "
                     f"--set clusterName={cluster} "
                     "--set registrationToken=<one-time-registration-token>"
@@ -272,7 +271,8 @@ class KubernetesGuideProvider(GuideProvider):
                     title="Apply configuration",
                     instruction="Update Helm values or GitOps config and redeploy the agent.",
                     command_template=(
-                        "helm upgrade incidentflow-k8s-agent incidentflow/k8s-agent "
+                        "helm upgrade incidentflow-k8s-agent "
+                        "oci://ghcr.io/incidentflow-io/charts/incidentflow-k8s-agent "
                         f"--namespace {ns} --reuse-values --set logLevel=<log-level>"
                     ),
                     requires_confirmation=True,
@@ -288,9 +288,9 @@ class KubernetesGuideProvider(GuideProvider):
                         "chart version in production."
                     ),
                     command_template=(
-                        "helm repo update && "
-                        "helm upgrade incidentflow-k8s-agent incidentflow/k8s-agent "
-                        f"--namespace {ns} --version <target-chart-version> --reuse-values"
+                        "helm upgrade incidentflow-k8s-agent "
+                        "oci://ghcr.io/incidentflow-io/charts/incidentflow-k8s-agent "
+                        f'--namespace {ns} --version "<target-chart-version>" --reuse-values'
                     ),
                     requires_confirmation=True,
                 ),
@@ -470,6 +470,7 @@ async def _fetch_sources(
             document_type=_GOAL_TO_DOCTYPE.get(goal),
             integration=integration,
             installation_method=method if integration == "kubernetes" else None,
+            component="k8s-agent" if integration == "kubernetes" else integration,
             product_version=version,
         )
     except Exception as exc:
