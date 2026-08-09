@@ -49,6 +49,7 @@ from incidentflow_mcp.mcp.services.kubernetes_commands import (
 from incidentflow_mcp.mcp.services.slack_access import resolve_slack_tool_access
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
+from incidentflow_mcp.tools.output_models import K8sRbacCheckData
 from incidentflow_mcp.tools.registry import get_tool_specs
 
 
@@ -612,6 +613,8 @@ async def test_k8s_rbac_check_reports_denied_action() -> None:
     assert payload["permissions"]["list_pods"]["allowed"] is False
     assert payload["permissions"]["list_pods"]["error_code"] == "RBAC_DENIED"
     assert payload["permissions"]["get_logs"]["allowed"] is None
+    assert set(payload["meta"]["cache"]) == {"hits", "misses"}
+    K8sRbacCheckData.model_validate(payload)
 
 
 @pytest.mark.asyncio
