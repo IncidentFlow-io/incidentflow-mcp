@@ -161,6 +161,9 @@ class K8sRbacCheckData(BaseModel):
     checked_at: datetime
     permissions: K8sRbacPermissions
     cluster_id: str | None = None
+    # Includes bounded timing and cache hit/miss data from the owned probe.
+    # Keeping it in the strict contract makes cache behaviour observable.
+    meta: dict[str, Any] | None = None
 
 
 class K8sConnectionHealthData(BaseModel):
