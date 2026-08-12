@@ -37,6 +37,11 @@ from incidentflow_mcp.tools.grafana import (
     QueryOutput,
 )
 from incidentflow_mcp.tools.integration_guide import IntegrationGuideOutput
+from incidentflow_mcp.tools.investigations import (
+    InvestigationGetOutput,
+    InvestigationListOutput,
+    InvestigationPassOutput,
+)
 from incidentflow_mcp.tools.schemas import CorrelateAlertsOutput, IncidentSummaryOutput
 from incidentflow_mcp.tools.slack_alerts import SlackAlertsOutput, SlackAlertThreadOutput
 
@@ -489,6 +494,11 @@ TOOL_OUTPUT_MODELS: dict[str, type[BaseModel] | dict[str, Any]] = {
     "knowledge_get": KnowledgeGetData,
     "knowledge_upsert": KnowledgeUpsertData,
     "integration_guide": IntegrationGuideOutput,
+    # investigation lifecycle control surface
+    "investigation_list": InvestigationListOutput,
+    "investigation_get": InvestigationGetOutput,
+    "investigation_continue": InvestigationPassOutput,
+    "investigation_recheck": InvestigationPassOutput,
 }
 
 

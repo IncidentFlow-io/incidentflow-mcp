@@ -1955,6 +1955,72 @@ _TAGS_PROP = {
 _TOOL_SPECS.extend(
     [
         ToolSpec(
+            name="investigation_list",
+            title="List Investigations",
+            description=(
+                "Lists compact, workspace-scoped automated investigations requiring attention "
+                "or recent review."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "needs_attention": {"type": "boolean"},
+                    "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+                },
+                "required": [],
+            },
+            annotations=_read_only_annotations(),
+            structured_output=True,
+        ),
+        ToolSpec(
+            name="investigation_get",
+            title="Get Investigation",
+            description=(
+                "Returns the bounded current state, assessments, evidence summary, and recent "
+                "timeline for one investigation."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {"investigation_id": {"type": "string", "minLength": 1}},
+                "required": ["investigation_id"],
+            },
+            annotations=_read_only_annotations(),
+            structured_output=True,
+        ),
+        ToolSpec(
+            name="investigation_continue",
+            title="Continue Investigation",
+            description=(
+                "Queues a scope-preserving deterministic investigation pass. Reason is audit "
+                "context only and cannot select checks."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "investigation_id": {"type": "string", "minLength": 1},
+                    "reason": {"type": "string", "maxLength": 1000},
+                },
+                "required": ["investigation_id"],
+            },
+            annotations=_read_only_annotations(),
+            structured_output=True,
+        ),
+        ToolSpec(
+            name="investigation_recheck",
+            title="Recheck Investigation",
+            description=(
+                "Queues a fresh read-only Kubernetes snapshot for the saved investigation scope "
+                "without closing it."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {"investigation_id": {"type": "string", "minLength": 1}},
+                "required": ["investigation_id"],
+            },
+            annotations=_read_only_annotations(),
+            structured_output=True,
+        ),
+        ToolSpec(
             name="knowledge_upsert",
             title="Save Knowledge Document",
             description=(
