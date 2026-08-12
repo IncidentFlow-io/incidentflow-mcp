@@ -160,7 +160,7 @@ class PanelViewOutput(BaseModel):
     # contract without adding raw Grafana responses or secrets.
     model_config = ConfigDict(extra="allow")
 
-    version: str = "1"
+    version: Literal["1"] = "1"
     panel: dict[str, Any]
     dashboard: dict[str, Any]
     source: dict[str, Any]
