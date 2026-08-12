@@ -84,29 +84,51 @@ class InvestigationPassOutput(BaseModel):
     existing_evidence_count: int | None = None
 
 
+def _contract_fields(model: type[BaseModel], payload: dict[str, Any]) -> dict[str, Any]:
+    """Project a public API payload onto the strict MCP output contract.
+
+    Platform API intentionally keeps bounded legacy aliases such as ``evidence``
+    and ``timeline`` for the web UI. They are not part of the compact MCP
+    contract and must not leak into generated tool output schemas.
+    """
+    return {name: payload[name] for name in model.model_fields if name in payload}
+
+
 async def investigation_list(
     client: InvestigationsClient, *, needs_attention: bool | None, limit: int
 ) -> InvestigationListOutput:
-    return InvestigationListOutput.model_validate(
-        await client.list(needs_attention=needs_attention, limit=limit)
+    payload = await client.list(needs_attention=needs_attention, limit=limit)
+    raw_items = payload.get("items", [])
+    items = [
+        InvestigationListItem.model_validate(_contract_fields(InvestigationListItem, item))
+        for item in raw_items
+        if isinstance(item, dict)
+    ]
+    return InvestigationListOutput(
+        items=items,
     )
 
 
 async def investigation_get(
     client: InvestigationsClient, *, investigation_id: str
 ) -> InvestigationGetOutput:
-    return InvestigationGetOutput.model_validate(await client.get(investigation_id))
+    payload = await client.get(investigation_id)
+    return InvestigationGetOutput.model_validate(_contract_fields(InvestigationGetOutput, payload))
 
 
 async def investigation_continue(
     client: InvestigationsClient, *, investigation_id: str, reason: str | None
 ) -> InvestigationPassOutput:
+    payload = await client.continue_(investigation_id, reason=reason)
     return InvestigationPassOutput.model_validate(
-        await client.continue_(investigation_id, reason=reason)
+        _contract_fields(InvestigationPassOutput, payload)
     )
 
 
 async def investigation_recheck(
     client: InvestigationsClient, *, investigation_id: str
 ) -> InvestigationPassOutput:
-    return InvestigationPassOutput.model_validate(await client.recheck(investigation_id))
+    payload = await client.recheck(investigation_id)
+    return InvestigationPassOutput.model_validate(
+        _contract_fields(InvestigationPassOutput, payload)
+    )
