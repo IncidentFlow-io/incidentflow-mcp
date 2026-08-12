@@ -72,6 +72,27 @@ class FakeAgentClusterClient:
         return self.clusters
 
 
+@pytest.mark.asyncio
+async def test_resolve_k8s_cluster_preserves_upstream_auth_error() -> None:
+    request = httpx.Request("GET", "https://platform.example/internal/agents/clusters")
+    response = httpx.Response(401, request=request, json={"detail": "Not authenticated"})
+
+    class UnauthorizedClient:
+        async def list_clusters(self, *, bearer_token: str) -> list[dict]:
+            assert bearer_token == "expired-token"
+            raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        await _resolve_k8s_cluster_id(
+            client=UnauthorizedClient(),
+            bearer_token="expired-token",
+            cluster_name="kind-incidentflow-local",
+        )
+
+    assert exc_info.value.response.status_code == 401
+    assert structured_tool_exception(exc_info.value)["__tool_error__"]["code"] == "UNAUTHENTICATED"
+
+
 @pytest.fixture(autouse=True)
 def reset_k8s_read_cache() -> None:
     _reset_k8s_read_cache_for_tests()

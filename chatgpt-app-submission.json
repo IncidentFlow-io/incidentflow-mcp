@@ -20,6 +20,38 @@
         "destructive_justification": "This tool does not delete, overwrite external systems, restart workloads, scale resources, patch configuration, send messages, or perform irreversible actions."
       }
     },
+    "investigation_list": {
+      "annotations": {"readOnlyHint": true, "openWorldHint": false, "destructiveHint": false},
+      "justifications": {
+        "read_only_justification": "This tool reads compact workspace-scoped investigation state.",
+        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace.",
+        "destructive_justification": "This tool does not change Kubernetes resources or external systems."
+      }
+    },
+    "investigation_get": {
+      "annotations": {"readOnlyHint": true, "openWorldHint": false, "destructiveHint": false},
+      "justifications": {
+        "read_only_justification": "This tool reads bounded investigation assessments and evidence summaries.",
+        "open_world_justification": "This tool is limited to the connected IncidentFlow workspace.",
+        "destructive_justification": "This tool does not change Kubernetes resources or external systems."
+      }
+    },
+    "investigation_continue": {
+      "annotations": {"readOnlyHint": true, "openWorldHint": false, "destructiveHint": false},
+      "justifications": {
+        "read_only_justification": "This tool queues a scope-preserving read-only evidence pass.",
+        "open_world_justification": "This tool is limited to an existing IncidentFlow investigation scope.",
+        "destructive_justification": "This tool cannot modify Kubernetes resources or select arbitrary commands."
+      }
+    },
+    "investigation_recheck": {
+      "annotations": {"readOnlyHint": true, "openWorldHint": false, "destructiveHint": false},
+      "justifications": {
+        "read_only_justification": "This tool queues a fresh read-only Kubernetes health snapshot.",
+        "open_world_justification": "This tool is limited to an existing IncidentFlow investigation scope.",
+        "destructive_justification": "This tool cannot modify Kubernetes resources or close an investigation."
+      }
+    },
     "mcp_version": {
       "annotations": {
         "readOnlyHint": true,

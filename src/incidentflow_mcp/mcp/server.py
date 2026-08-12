@@ -13,6 +13,7 @@ from incidentflow_mcp.mcp.registration import slack as _slack_registration
 from incidentflow_mcp.mcp.registration.argocd import register_argocd_tools
 from incidentflow_mcp.mcp.registration.async_jobs import register_async_tools
 from incidentflow_mcp.mcp.registration.grafana import register_grafana_tools
+from incidentflow_mcp.mcp.registration.investigations import register_investigation_tools
 from incidentflow_mcp.mcp.registration.knowledge import register_knowledge_tools
 from incidentflow_mcp.mcp.registration.kubernetes import register_kubernetes_tools
 from incidentflow_mcp.mcp.registration.meta import register_meta_tools, registered_tool_metric_rows
@@ -60,6 +61,7 @@ def create_mcp_server() -> FastMCP:
 
     register_meta_tools(ctx)
     register_knowledge_tools(ctx, current_token_workspace_id=workspace_resolver.token_workspace_id)
+    register_investigation_tools(ctx, current_bearer_token=request_context.bearer_token)
 
     memory_context = MemoryContextService(
         settings,

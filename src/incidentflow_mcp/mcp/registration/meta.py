@@ -99,6 +99,16 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "investigations",
+        "Investigations",
+        (
+            "investigation_list",
+            "investigation_get",
+            "investigation_continue",
+            "investigation_recheck",
+        ),
+    ),
+    (
         "knowledge",
         "Knowledge",
         (

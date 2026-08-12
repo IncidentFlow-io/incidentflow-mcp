@@ -102,12 +102,11 @@ async def _resolve_k8s_cluster_id(
     if explicit_cluster_id:
         return explicit_cluster_id
 
-    try:
-        clusters = await client.list_clusters(bearer_token=bearer_token)
-    except httpx.HTTPStatusError as exc:
-        if exc.response.status_code in {401, 403}:
-            raise ValueError(_UNAUTHORIZED_CLUSTER_MESSAGE) from exc
-        raise
+    # Preserve upstream HTTP authentication/authorization errors so the
+    # canonical MCP wrapper can map 401 to UNAUTHENTICATED and 403 to
+    # PERMISSION_DENIED. Turning them into ValueError misclassifies an auth
+    # failure as INVALID_ARGUMENT.
+    clusters = await client.list_clusters(bearer_token=bearer_token)
 
     connected = [item for item in clusters if item.get("connected") is True]
     if not connected:
