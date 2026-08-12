@@ -87,6 +87,7 @@
               "type": "object"
             },
             "version": {
+              "const": "1",
               "default": "1",
               "type": "string"
             },

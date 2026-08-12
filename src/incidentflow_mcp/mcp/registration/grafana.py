@@ -200,20 +200,8 @@ def register_grafana_tools(
             )
         except httpx.HTTPStatusError as exc:
             return structured_tool_exception(exc, code="GRAFANA_HTTP_ERROR")
-        panel_view = result.model_dump(mode="json")
-        return {
-            "structuredContent": panel_view,
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        f'Loaded Grafana panel "{panel_view["panel"]["title"]}" '
-                        "for the selected time range."
-                    ),
-                }
-            ],
-            "_meta": {
-                "datasourceUid": panel_view["source"].get("datasourceUid"),
-                "rawPanelType": panel_view["panel"].get("type"),
-            },
-        }
+        # The common FastMCP wrapper owns the CallToolResult and response
+        # envelope.  Hand it the panel payload directly; returning a
+        # CallToolResult-shaped dict here would put its `structuredContent`
+        # inside envelope.data and violate the published output schema.
+        return result.model_dump(mode="json")

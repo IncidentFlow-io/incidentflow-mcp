@@ -1,8 +1,4 @@
-type ToolOutputEnvelope = {
-  structuredContent?: unknown;
-  result?: unknown;
-  data?: unknown;
-};
+import { toolResponseSchema, type ToolResponse } from "../contracts/tool-response";
 
 export type OpenAiGlobals = Record<string, unknown>;
 
@@ -41,6 +37,13 @@ export function getPanelPayload(toolOutput: unknown): unknown {
 
   if (!isRecord(normalized)) {
     return normalized;
+  }
+
+  // MCP tools publish a canonical response envelope.  The panel component
+  // validates the payload from `data`, never the envelope itself.
+  const envelope = toolResponseSchema.safeParse(normalized);
+  if (envelope.success) {
+    return envelope.data.status === "success" ? envelope.data.data : normalized;
   }
 
   const directKeys = ["structuredContent", "toolOutput", "output", "result", "toolResult"];
@@ -129,6 +132,6 @@ export function selectPanelPayload(candidates: unknown[]): {
   };
 }
 
-export function getEnvelopeStructuredContent(envelope: ToolOutputEnvelope): unknown {
-  return envelope.structuredContent ?? envelope.result ?? envelope.data;
+export function getEnvelopeStructuredContent(envelope: ToolResponse): unknown {
+  return envelope.data;
 }

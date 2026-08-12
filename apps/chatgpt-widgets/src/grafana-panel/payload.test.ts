@@ -74,6 +74,24 @@ describe("Grafana panel payload extraction", () => {
     expect(payload).toMatchObject({ panel: { title: "Memory Basic" } });
   });
 
+  it("extracts the panel payload from the canonical response envelope data", () => {
+    const envelope = {
+      api_version: "v1",
+      schema_version: "1.0",
+      schema_id: "incidentflow.grafana-get-panel-view.response",
+      status: "success",
+      request_id: "req_panel",
+      data: memoryBasicPanelView,
+      error: null,
+      meta: { generated_at: "2026-08-12T12:00:00Z", truncated: false, warnings: [] }
+    };
+
+    const payload = getPanelPayload(envelope);
+
+    expect(payload).toBe(envelope.data);
+    expect(() => grafanaPanelViewSchema.parse(payload)).not.toThrow();
+  });
+
   it("ignores host payload errors when a later source contains the real panel view", () => {
     const hostMessage = {
       payload: "Invalid input",
