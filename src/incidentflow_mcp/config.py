@@ -118,6 +118,22 @@ class Settings(BaseSettings):
         ),
         description="Optional service-to-service API key for MCP -> platform-api calls",
     )
+    mcp_platform_token_exchange_enabled: bool = Field(
+        default=False,
+        description="Exchange validated MCP tokens for short-lived Platform audience tokens.",
+    )
+    platform_api_token_exchange_path: str = Field(
+        default="/internal/token-exchange",
+        description="Internal Platform API endpoint used for MCP token exchange.",
+    )
+    platform_api_token_exchange_scope: str = Field(
+        default="incidents:read integrations:read",
+        description="Bounded Platform scopes requested by MCP during token exchange.",
+    )
+    platform_api_token_exchange_api_key: SecretStr | None = Field(
+        default=None,
+        description="Dedicated internal credential for MCP token exchange.",
+    )
     platform_api_ai_jobs_path: str = Field(
         default="/api/v1/ai/jobs",
         description="Path for MCP async job submit/poll endpoints on platform-api",
