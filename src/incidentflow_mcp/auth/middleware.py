@@ -243,6 +243,9 @@ async def _attempt_oauth_validation(
 
     if result.ok:
         claims = result.claims or {}
+        downstream_token = await _platform_bearer_token(token)
+        if downstream_token is None:
+            return _service_unavailable("Platform token exchange unavailable")
         _record_auth_success(
             client_id=claims.get("client_id") or "oauth_client",
             auth_method="oauth",
@@ -251,7 +254,7 @@ async def _attempt_oauth_validation(
             request,
             authenticated=True,
             auth_method="oauth",
-            bearer_token=token,
+            bearer_token=downstream_token,
             client_id=str(claims.get("client_id") or "oauth_client"),
             workspace_id=(str(claims.get("workspace_id")) if claims.get("workspace_id") else None),
             workspace_name=(
@@ -283,6 +286,44 @@ async def _attempt_oauth_validation(
 
     # not_oauth -> continue with PAT fallback.
     return None
+
+
+async def _platform_bearer_token(source_token: str) -> str | None:
+    """Return a Platform-audience token when exchange is explicitly enabled."""
+
+    settings = get_settings()
+    if not settings.mcp_platform_token_exchange_enabled:
+        # TODO(auth-migration): remove this legacy bearer forwarding branch
+        # after exchange is enabled for 100% of traffic for 30 days.
+        return source_token
+    if not settings.platform_api_base_url or settings.platform_api_token_exchange_api_key is None:
+        logger.error("auth: token exchange enabled without Platform URL or internal credential")
+        return None
+
+    url = (
+        f"{settings.platform_api_base_url.rstrip('/')}"
+        f"{settings.platform_api_token_exchange_path}"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=settings.platform_api_timeout_seconds) as client:
+            response = await client.post(
+                url,
+                data={
+                    "subject_token": source_token,
+                    "scope": settings.platform_api_token_exchange_scope,
+                },
+                headers={
+                    "X-MCP-Internal-Api-Key": (
+                        settings.platform_api_token_exchange_api_key.get_secret_value()
+                    )
+                },
+            )
+        response.raise_for_status()
+        access_token = response.json().get("access_token")
+        return str(access_token) if isinstance(access_token, str) and access_token else None
+    except (httpx.HTTPError, ValueError):
+        logger.warning("auth: MCP to Platform token exchange failed")
+        return None
 
 
 async def introspect_managed_pat(

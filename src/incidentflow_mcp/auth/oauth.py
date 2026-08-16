@@ -37,10 +37,15 @@ class JwksCache:
         self._expires_at: float = 0.0
 
     async def get(
-        self, *, jwks_url: str, timeout_seconds: float, ttl_seconds: int = 300
+        self,
+        *,
+        jwks_url: str,
+        timeout_seconds: float,
+        ttl_seconds: int = 300,
+        force_refresh: bool = False,
     ) -> dict[str, Any]:
         now = time.time()
-        if self._jwks is not None and now < self._expires_at:
+        if not force_refresh and self._jwks is not None and now < self._expires_at:
             return self._jwks
 
         async with httpx.AsyncClient(timeout=timeout_seconds) as client:
@@ -54,6 +59,14 @@ class JwksCache:
 
 
 _jwks_cache = JwksCache()
+
+
+def _key_by_id(jwks: dict[str, Any], kid: str) -> dict[str, Any] | None:
+    keys = jwks.get("keys", []) if isinstance(jwks, dict) else []
+    for candidate in keys:
+        if isinstance(candidate, dict) and str(candidate.get("kid", "")) == kid:
+            return candidate
+    return None
 
 
 async def validate_oauth_access_token(
@@ -81,19 +94,21 @@ async def validate_oauth_access_token(
     if alg != "RS256":
         return OAuthValidationResult(ok=False, code="not_oauth", detail="Unsupported JWT alg")
 
+    kid = str(header.get("kid", "")).strip()
+    if not kid:
+        return OAuthValidationResult(ok=False, code="oauth_invalid", detail="JWT header has no kid")
+
     jwks = await _jwks_cache.get(jwks_url=jwks_url, timeout_seconds=timeout_seconds)
-    keys = jwks.get("keys", []) if isinstance(jwks, dict) else []
-    kid = str(header.get("kid", ""))
-    key = None
-    if kid:
-        for candidate in keys:
-            if isinstance(candidate, dict) and str(candidate.get("kid", "")) == kid:
-                key = candidate
-                break
-    if key is None and keys:
-        maybe_first = keys[0]
-        if isinstance(maybe_first, dict):
-            key = maybe_first
+    key = _key_by_id(jwks, kid)
+    if key is None:
+        # A new signing key may have been published just after the cache filled.
+        # Retry once with fresh JWKS, but never use a key selected by position.
+        jwks = await _jwks_cache.get(
+            jwks_url=jwks_url,
+            timeout_seconds=timeout_seconds,
+            force_refresh=True,
+        )
+        key = _key_by_id(jwks, kid)
 
     if key is None:
         return OAuthValidationResult(ok=False, code="oauth_invalid", detail="No matching JWKS key")
