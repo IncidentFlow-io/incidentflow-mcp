@@ -50,6 +50,7 @@ ENVELOPE_KEYS = {
 SELECTED_TOOLS = (
     "mcp_version",
     "external_status_check",
+    "incident_summary",
     "k8s_agent_status",
     "argocd_connection_health",
     "public_knowledge_search",
@@ -151,6 +152,12 @@ def test_success_and_error_validate_against_generated_schema(tool_name: str) -> 
             "mode": "async",
             "job_id": "job_123",
             "job_status": "queued",
+            "poll_after_seconds": 2,
+        },
+        "incident_summary": {
+            "mode": "async",
+            "job_id": "job_123",
+            "job_status": "dispatched",
             "poll_after_seconds": 2,
         },
         "k8s_agent_status": {

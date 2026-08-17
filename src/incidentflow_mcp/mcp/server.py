@@ -73,6 +73,7 @@ def create_mcp_server() -> FastMCP:
         ctx,
         memory=memory_context,
         current_token_workspace_id=workspace_resolver.token_workspace_id,
+        current_bearer_token=request_context.bearer_token,
     )
 
     _slack_registration.register_slack_tools(

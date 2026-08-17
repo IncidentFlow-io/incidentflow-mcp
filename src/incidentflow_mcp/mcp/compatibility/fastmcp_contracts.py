@@ -72,6 +72,43 @@ def _error_result(tool_name: str, fields: dict[str, Any], request_id: str) -> Ca
     )
 
 
+def _nested_kubernetes_failure(result: Any) -> dict[str, Any] | None:
+    """Hoist agent command failures into the canonical MCP error envelope."""
+
+    if not isinstance(result, dict) or str(result.get("status", "")).lower() not in {
+        "failed",
+        "error",
+    }:
+        return None
+    raw_error = result.get("error")
+    if isinstance(raw_error, dict):
+        raw_code = str(raw_error.get("code") or "INTERNAL_ERROR").upper()
+        code = ErrorCode._value2member_map_.get(raw_code, ErrorCode.INTERNAL_ERROR)
+        return {
+            "code": code,
+            "message": str(raw_error.get("message") or raw_error.get("detail") or raw_code),
+            "retryable": None,
+            "details": raw_error,
+        }
+    return {
+        "code": ErrorCode.INTERNAL_ERROR,
+        "message": str(raw_error or "Kubernetes agent command failed"),
+        "retryable": False,
+        "details": {"agent_status": result.get("status")},
+    }
+
+
+def _payload_truncated(result: Any) -> bool:
+    """Use one truncation truth for data and the canonical response metadata."""
+
+    if not isinstance(result, dict):
+        return False
+    if result.get("truncated") is True:
+        return True
+    nested = result.get("data")
+    return isinstance(nested, dict) and nested.get("truncated") is True
+
+
 async def run_tool_with_structured_errors(
     tool: Any,
     arguments: dict[str, Any],
@@ -97,9 +134,22 @@ async def run_tool_with_structured_errors(
     if is_tool_error(result):
         return _error_result(tool.name, tool_error_fields(result), request_id)
 
+    # Agent command failures must never be represented as a successful result.
+    # `k8s_get_pod` is the direct command tool; composed diagnostic tools retain
+    # their partial evidence payloads and explicitly model their own status.
+    if tool.name == "k8s_get_pod":
+        nested_failure = _nested_kubernetes_failure(result)
+        if nested_failure is not None:
+            return _error_result(tool.name, nested_failure, request_id)
+
     # Success: wrap the raw payload as `data`. Returned as a plain dict so the
     # lowlevel server validates it against the registered outputSchema.
-    envelope = success_envelope(result, tool_name=tool.name, request_id=request_id)
+    envelope = success_envelope(
+        result,
+        tool_name=tool.name,
+        request_id=request_id,
+        truncated=_payload_truncated(result),
+    )
 
     # Dev/CI runtime contract enforcement (prod stays off): validate the envelope
     # against its published schema with a date-time format checker so schema drift

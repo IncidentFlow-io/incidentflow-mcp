@@ -41,6 +41,7 @@ def register_async_tools(
     *,
     memory: MemoryContextService,
     current_token_workspace_id: Callable[[], str | None],
+    current_bearer_token: Callable[[], str],
 ) -> None:
     settings = ctx.settings
     mcp = ctx.mcp
@@ -57,7 +58,7 @@ def register_async_tools(
     ) -> dict[str, Any]:
         # Poll/fetch an existing async summary job instead of creating a new one.
         if check_id:
-            client = PlatformAPIJobsClient(settings)
+            client = PlatformAPIJobsClient(settings, bearer_token=current_bearer_token())
             job = await client.get_job(check_id)
             if wait_for_result and str(job.get("status", "")) not in TERMINAL_JOB_STATUSES:
                 job = await poll_until_done(
@@ -99,7 +100,7 @@ def register_async_tools(
                 data["memory_context"] = memory_payload
             return data
 
-        client = PlatformAPIJobsClient(settings)
+        client = PlatformAPIJobsClient(settings, bearer_token=current_bearer_token())
         submitted = await client.submit_job(
             {
                 "job_type": "incident.summary.generate",
@@ -189,7 +190,7 @@ def register_async_tools(
         if mode != "async":
             raise ValueError("external_status_check supports async orchestration only")
 
-        client = PlatformAPIJobsClient(settings)
+        client = PlatformAPIJobsClient(settings, bearer_token=current_bearer_token())
         return await execute_external_status_check(
             settings=settings,
             client=client,

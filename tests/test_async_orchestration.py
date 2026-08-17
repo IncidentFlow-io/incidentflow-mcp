@@ -1528,6 +1528,7 @@ async def test_platform_api_jobs_client_submit_includes_internal_key(
         async def post(self, url: str, json: dict, headers: dict[str, str]) -> FakeResponse:
             captured["url"] = url
             captured["key"] = headers.get("X-Internal-Api-Key", "")
+            captured["authorization"] = headers.get("Authorization", "")
             captured["job_type"] = json["job_type"]
             return FakeResponse(
                 {
@@ -1548,13 +1549,14 @@ async def test_platform_api_jobs_client_submit_includes_internal_key(
         platform_api_base_url="http://platform.test",
         platform_api_internal_api_key="secret-key",
     )
-    client = PlatformAPIJobsClient(settings)
+    client = PlatformAPIJobsClient(settings, bearer_token="platform-audience-token")
     payload = {"job_type": "incident.summary.generate"}
     response = await client.submit_job(payload)
 
     assert response["job_id"] == "job_123"
     assert captured["url"] == "http://platform.test/api/v1/ai/jobs"
     assert captured["key"] == "secret-key"
+    assert captured["authorization"] == "Bearer platform-audience-token"
     assert captured["job_type"] == "incident.summary.generate"
 
 

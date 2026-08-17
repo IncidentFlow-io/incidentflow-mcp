@@ -21,11 +21,15 @@
                 },
                 "job_status": {
                   "enum": [
+                    "admitted",
                     "queued",
+                    "dispatched",
                     "running",
                     "succeeded",
                     "failed",
-                    "cancelled"
+                    "cancelled",
+                    "canceled",
+                    "unknown"
                   ],
                   "type": "string"
                 },
@@ -98,11 +102,15 @@
                 },
                 "job_status": {
                   "enum": [
+                    "admitted",
                     "queued",
+                    "dispatched",
                     "running",
                     "succeeded",
                     "failed",
-                    "cancelled"
+                    "cancelled",
+                    "canceled",
+                    "unknown"
                   ],
                   "type": "string"
                 },

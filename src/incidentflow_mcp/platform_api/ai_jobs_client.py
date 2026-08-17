@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class PlatformAPIJobsClient:
     """Thin client for MCP async orchestration against platform-api."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, *, bearer_token: str | None = None) -> None:
         if not settings.platform_api_base_url:
             raise ValueError("PLATFORM_API_BASE_URL is required for async MCP orchestration")
         self._base_url = settings.platform_api_base_url.rstrip("/")
@@ -29,12 +29,19 @@ class PlatformAPIJobsClient:
             if settings.platform_api_internal_api_key
             else None
         )
+        # AI job routes are user/workspace-scoped.  The caller has already
+        # validated and, when enabled, exchanged this for a Platform-audience
+        # token in the auth middleware.  Never rely on the internal key alone:
+        # it is not a substitute for the route's authorization dependency.
+        self._bearer_token = bearer_token.strip() if bearer_token else None
         self._namespace, self._pod = pod_label_values()
 
     def _headers(self) -> dict[str, str]:
         headers: dict[str, str] = {}
         if self._internal_api_key:
             headers["X-Internal-Api-Key"] = self._internal_api_key
+        if self._bearer_token:
+            headers["Authorization"] = f"Bearer {self._bearer_token}"
         inject_trace_headers(headers)
         return headers
 

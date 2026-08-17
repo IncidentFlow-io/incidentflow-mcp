@@ -385,10 +385,25 @@ class IntegrationsStatusData(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# external_status_check — raw oneOf schema (three variants, review #10, #11)
+# async job tools — raw oneOf schemas (sync and async variants)
 # ---------------------------------------------------------------------------
 _ISO = {"type": "string", "format": "date-time"}
-_JOB_STATUS = {"type": "string", "enum": ["queued", "running", "succeeded", "failed", "cancelled"]}
+_JOB_STATUS = {
+    "type": "string",
+    # Platform API may return admitted/dispatched before queued.  These are
+    # valid states and must remain representable by the published contract.
+    "enum": [
+        "admitted",
+        "queued",
+        "dispatched",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "canceled",
+        "unknown",
+    ],
+}
 _CHECK_STATUS = {
     "type": "string",
     "enum": ["success", "partial_success", "failed", "unknown"],
@@ -433,6 +448,45 @@ EXTERNAL_STATUS_CHECK_SCHEMA: dict[str, Any] = {
             },
         },
     ]
+}
+
+_INCIDENT_SUMMARY_SYNC_SCHEMA = IncidentSummaryData.model_json_schema(mode="serialization")
+_INCIDENT_SUMMARY_DEFS = _INCIDENT_SUMMARY_SYNC_SCHEMA.pop("$defs", {})
+
+INCIDENT_SUMMARY_SCHEMA: dict[str, Any] = {
+    "$defs": _INCIDENT_SUMMARY_DEFS,
+    "oneOf": [
+        # Synchronous summary (the existing fully-typed payload).
+        _INCIDENT_SUMMARY_SYNC_SCHEMA,
+        # Accepted / in-flight summary job.
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["mode", "job_id", "job_status", "poll_after_seconds"],
+            "properties": {
+                "mode": {"const": "async"},
+                "job_id": {"type": "string"},
+                "job_status": _JOB_STATUS,
+                "poll_after_seconds": {"type": "integer", "minimum": 1},
+            },
+        },
+        # Terminal job result, including a failed job with an error payload.
+        {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["mode", "job_id", "job_status"],
+            "properties": {
+                "mode": {"const": "completed"},
+                "job_id": {"type": "string"},
+                "job_status": _JOB_STATUS,
+                "result": {"type": ["object", "array", "string", "number", "boolean", "null"]},
+                "error": {"type": ["object", "array", "string", "number", "boolean", "null"]},
+                "artifact_refs": {"type": "array", "items": {"type": "string"}},
+                "usage": {"type": ["object", "null"]},
+                "updated_at": {"type": ["string", "null"], "format": "date-time"},
+            },
+        },
+    ],
 }
 
 
@@ -485,7 +539,7 @@ TOOL_OUTPUT_MODELS: dict[str, type[BaseModel] | dict[str, Any]] = {
     "slack_alerts_list": SlackAlertsOutput,
     "slack_alert_thread_get": SlackAlertThreadOutput,
     "incident_thread_summary": IncidentThreadSummaryData,
-    "incident_summary": IncidentSummaryData,
+    "incident_summary": INCIDENT_SUMMARY_SCHEMA,
     "correlate_alerts": CorrelateAlertsData,
     "external_status_check": EXTERNAL_STATUS_CHECK_SCHEMA,
     # knowledge
