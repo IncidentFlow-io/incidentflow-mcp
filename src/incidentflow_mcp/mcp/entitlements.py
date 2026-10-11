@@ -6,6 +6,7 @@ from incidentflow_mcp.platform_api.entitlements_client import (
     PlatformEntitlementsClient,
 )
 from incidentflow_mcp.tools.contracts import ErrorCode
+from incidentflow_mcp.observability.metrics import record_entitlement_guard
 
 
 async def require_workspace_capability(
@@ -18,12 +19,14 @@ async def require_workspace_capability(
     try:
         snapshot = await client.get(workspace_id, allow_cached=not write)
     except EntitlementsUnavailable:
+        record_entitlement_guard(operation="workspace_capability", result="denied", reason="unavailable")
         return tool_error(
             ErrorCode.ENTITLEMENTS_UNAVAILABLE,
             "Workspace entitlements are temporarily unavailable",
             retryable=True,
         )
     if not snapshot.writable:
+        record_entitlement_guard(operation="workspace_capability", result="denied", reason="remediation")
         return tool_error(
             ErrorCode.BILLING_REMEDIATION_REQUIRED,
             "Billing needs attention before this workspace action can run",
@@ -31,6 +34,7 @@ async def require_workspace_capability(
             details={"upgrade_url": snapshot.upgrade_url},
         )
     if feature_key and not snapshot.features.get(feature_key, False):
+        record_entitlement_guard(operation="workspace_capability", result="denied", reason="feature")
         return tool_error(
             ErrorCode.BILLING_REMEDIATION_REQUIRED,
             "This capability is not included in the current plan",
@@ -42,6 +46,7 @@ async def require_workspace_capability(
         usage_key = limit_key.removeprefix("limit.")
         usage = snapshot.usage.get(usage_key, 0)
         if limit is not None and usage >= limit:
+            record_entitlement_guard(operation="workspace_capability", result="denied", reason="limit")
             return tool_error(
                 ErrorCode.PLAN_LIMIT_EXCEEDED,
                 "Workspace plan limit exceeded",
@@ -53,4 +58,5 @@ async def require_workspace_capability(
                     "upgrade_url": snapshot.upgrade_url,
                 },
             )
+    record_entitlement_guard(operation="workspace_capability", result="allowed", reason="ok")
     return None

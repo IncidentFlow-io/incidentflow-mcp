@@ -10,6 +10,7 @@ from typing import ClassVar
 import httpx
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.metrics import record_entitlement_snapshot
 
 
 class EntitlementsUnavailable(RuntimeError):
@@ -46,7 +47,9 @@ class PlatformEntitlementsClient:
         now = time.monotonic()
         cached = self._cache.get(workspace_id)
         if allow_cached and cached is not None and cached[0] > now:
+            record_entitlement_snapshot(source="cache", result="hit")
             return cached[1]
+        record_entitlement_snapshot(source="cache", result="miss")
         if (
             not self._settings.platform_api_base_url
             or not self._settings.platform_api_internal_api_key
@@ -74,7 +77,9 @@ class PlatformEntitlementsClient:
                 ttl_seconds=min(60, max(1, int(body.get("ttl_seconds", 60)))),
             )
         except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            record_entitlement_snapshot(source="platform_api", result="unavailable")
             raise EntitlementsUnavailable("Platform entitlements are unavailable") from exc
         async with self._lock:
             self._cache[workspace_id] = (now + snapshot.ttl_seconds, snapshot)
+        record_entitlement_snapshot(source="platform_api", result="success")
         return snapshot
