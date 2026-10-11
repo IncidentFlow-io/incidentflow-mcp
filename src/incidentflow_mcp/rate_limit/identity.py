@@ -55,7 +55,10 @@ class IdentityResolver:
             client_id=_normalize_value(
                 auth_ctx.get("client_id") or request.headers.get("x-client-id")
             ),
-            plan=self._resolve_plan(auth_ctx, request),
+            # Do not trust x-plan/x-tier request headers. Platform-issued
+            # entitlement data may populate auth_context in a future exchange;
+            # absent that snapshot we deliberately apply the default policy.
+            plan=self._resolve_plan(auth_ctx),
         )
 
     @staticmethod
@@ -66,14 +69,8 @@ class IdentityResolver:
         return {}
 
     @staticmethod
-    def _resolve_plan(auth_ctx: dict[str, object], request: Request) -> str | None:
-        plan_sources: list[object] = [
-            auth_ctx.get("plan"),
-            auth_ctx.get("tier"),
-            request.headers.get("x-plan"),
-            request.headers.get("x-plan-tier"),
-            request.headers.get("x-tier"),
-        ]
+    def _resolve_plan(auth_ctx: dict[str, object]) -> str | None:
+        plan_sources: list[object] = [auth_ctx.get("plan"), auth_ctx.get("tier")]
         for value in plan_sources:
             normalized = _normalize_value(value)
             if normalized is not None:

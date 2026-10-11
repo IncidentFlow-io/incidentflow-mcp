@@ -441,11 +441,9 @@ def validate_local_pat(
         workspace_name=request.headers.get("x-workspace-name"),
         workspace_slug=request.headers.get("x-workspace-slug"),
         workspace_role=request.headers.get("x-workspace-role"),
-        plan=(
-            request.headers.get("x-plan")
-            or request.headers.get("x-plan-tier")
-            or request.headers.get("x-tier")
-        ),
+        # Billing authority lives in Platform's entitlement projection. A client
+        # header must never be able to opt itself into a more permissive plan.
+        plan=None,
     )
     return JSONResponse(status_code=200, content={})
 
