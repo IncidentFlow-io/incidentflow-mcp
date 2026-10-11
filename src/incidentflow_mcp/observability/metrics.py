@@ -207,6 +207,25 @@ mcp_auth_success_total = Counter(
     ("client_id", "auth_method"),
 )
 
+mcp_entitlement_snapshot_total = Counter(
+    "mcp_entitlement_snapshot_total",
+    "Platform entitlement snapshot lookups by source and result.",
+    ("source", "result"),
+)
+mcp_entitlement_guard_total = Counter(
+    "mcp_entitlement_guard_total",
+    "MCP entitlement guard decisions without workspace identifiers.",
+    ("operation", "result", "reason"),
+)
+
+
+def record_entitlement_snapshot(*, source: str, result: str) -> None:
+    mcp_entitlement_snapshot_total.labels(source=source, result=result).inc()
+
+
+def record_entitlement_guard(*, operation: str, result: str, reason: str) -> None:
+    mcp_entitlement_guard_total.labels(operation=operation, result=result, reason=reason).inc()
+
 _TOOL_CATEGORY_BY_NAME = {
     # Meta
     "incidentflow_capabilities": "meta",
