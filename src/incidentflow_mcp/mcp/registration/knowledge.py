@@ -7,6 +7,8 @@ from typing import Any, Literal
 
 from incidentflow_mcp.mcp.context import ToolRegistrationContext
 from incidentflow_mcp.mcp.errors import structured_tool_exception
+from incidentflow_mcp.mcp.entitlements import require_workspace_capability
+from incidentflow_mcp.platform_api.entitlements_client import PlatformEntitlementsClient
 from incidentflow_mcp.tools.contracts import ErrorCode
 from incidentflow_mcp.tools.integration_guide import integration_guide as _integration_guide
 from incidentflow_mcp.tools.knowledge_search_tools import (
@@ -47,6 +49,7 @@ def register_knowledge_tools(
     *,
     current_token_workspace_id: TokenWorkspaceResolver,
 ) -> None:
+    entitlements = PlatformEntitlementsClient(ctx.settings)
     def _workspace(workspace_id: str | None = None) -> str:
         wid = workspace_id or current_token_workspace_id() or ctx.settings.mcp_default_workspace_id
         if not wid:
@@ -115,6 +118,11 @@ def register_knowledge_tools(
         response_mode: str = "compact",
         limit: int = 8,
     ) -> dict[str, Any]:
+        denied = await require_workspace_capability(
+            entitlements, workspace_id=_workspace(), write=False
+        )
+        if denied is not None:
+            return denied
         try:
             payload = await private_knowledge_search(
                 settings=ctx.settings,
@@ -142,6 +150,11 @@ def register_knowledge_tools(
         document_type: str | None = None,
         response_mode: str = "full",
     ) -> dict[str, Any]:
+        denied = await require_workspace_capability(
+            entitlements, workspace_id=_workspace(), write=False
+        )
+        if denied is not None:
+            return denied
         try:
             return await knowledge_get(
                 settings=ctx.settings,
@@ -174,6 +187,14 @@ def register_knowledge_tools(
         tags: list[str] | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
+        denied = await require_workspace_capability(
+            entitlements,
+            workspace_id=_workspace(),
+            write=True,
+            limit_key="limit.workspace_memory_items",
+        )
+        if denied is not None:
+            return denied
         try:
             return await knowledge_upsert(
                 settings=ctx.settings,

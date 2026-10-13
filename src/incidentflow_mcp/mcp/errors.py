@@ -145,10 +145,12 @@ def map_exception(exc: Exception) -> dict[str, Any]:
 
 
 def structured_guard_error(raw: str) -> dict[str, Any]:
-    """Map an integration guard rejection to a canonical INTEGRATION_UNAVAILABLE error.
+    """Map an integration or entitlement guard rejection to a canonical error.
 
-    ``raw`` is a JSON string (or plain text) produced by the integration guard
-    describing why the tool cannot run (e.g. integration not connected).
+    ``raw`` is a JSON string (or plain text) produced by a guard.  Integration
+    guards without an explicit code retain the historical
+    ``INTEGRATION_UNAVAILABLE`` fallback; entitlement guards preserve their
+    deliberately stable public error codes.
     """
 
     message = raw
@@ -160,6 +162,19 @@ def structured_guard_error(raw: str) -> dict[str, Any]:
     if isinstance(decoded, dict):
         message = str(decoded.get("message") or decoded.get("error") or raw)
         details = decoded
+        raw_code = decoded.get("code")
+        if isinstance(raw_code, str):
+            try:
+                code = ErrorCode(raw_code)
+            except ValueError:
+                code = ErrorCode.INTEGRATION_UNAVAILABLE
+            else:
+                return tool_error(
+                    code,
+                    message,
+                    retryable=default_retryable(code),
+                    details=details,
+                )
     return tool_error(
         ErrorCode.INTEGRATION_UNAVAILABLE,
         message,
