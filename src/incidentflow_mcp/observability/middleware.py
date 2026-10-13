@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from time import monotonic, perf_counter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -48,6 +48,9 @@ from incidentflow_mcp.observability.tool_events import (
 )
 from incidentflow_mcp.observability.tracing import get_tracer
 
+if TYPE_CHECKING:
+    from incidentflow_mcp.observability.analytics import ProductAnalyticsPublisher
+
 logger = logging.getLogger(__name__)
 
 _SESSION_ID_HEADER = "mcp-session-id"
@@ -57,13 +60,22 @@ _SESSION_END_HEADERS: frozenset[str] = frozenset({"1", "true", "yes"})
 class MCPObservabilityMiddleware(BaseHTTPMiddleware):
     """Captures low-cardinality Prometheus metrics and structured request logs."""
 
-    def __init__(self, app, settings: Settings) -> None:  # type: ignore[no-untyped-def]
+    def __init__(
+        self,
+        app,
+        settings: Settings,
+        analytics_publisher: ProductAnalyticsPublisher | None = None,
+    ) -> None:  # type: ignore[no-untyped-def]
         super().__init__(app)
         self._session_tracker = SessionTracker()
         self._session_idle_timeout_seconds = settings.mcp_session_idle_timeout_seconds
         self._http_slow_request_threshold_ms = settings.http_slow_request_threshold_ms
         self._mcp_slow_tool_threshold_ms = settings.mcp_slow_tool_threshold_ms
         self._namespace, self._pod = pod_label_values()
+        # The /mcp proxy forwards to a nested ASGI app.  Keep this dependency
+        # on the middleware itself instead of retrieving it from request.app,
+        # whose scope can belong to that nested application.
+        self._analytics_publisher = analytics_publisher
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         method = request.method.upper()
@@ -272,6 +284,17 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                     workspace_id=workspace_id,
                     tool_event=tool_event,
                 )
+                if self._analytics_publisher is not None:
+                    await self._analytics_publisher.publish_mcp_tool(
+                        tool_name=tool_name,
+                        outcome=tool_outcome,
+                        duration_ms=round(elapsed * 1000),
+                        request_id=request_id,
+                        auth_context=getattr(request.state, "auth_context", None),
+                        error_category=_analytics_error_category(
+                            outcome=tool_outcome, status_code=status_code, tool_event=tool_event
+                        ),
+                    )
             if _tool_event_token is not None:
                 reset_tool_event_context(_tool_event_token)
             if _otel_token is not None:
@@ -487,6 +510,31 @@ def _tool_metric_outcome(
     if tool_event.get("outcome") == "failed":
         return "error"
     return http_outcome
+
+
+def _analytics_error_category(
+    *, outcome: str, status_code: int, tool_event: dict[str, Any] | None
+) -> str | None:
+    """Return only reviewed categories, never raw tool errors or response content."""
+    if outcome == "success":
+        return None
+    reason = str((tool_event or {}).get("reason") or "").lower()
+    code = str((tool_event or {}).get("error_code") or "").lower()
+    if status_code == 401 or "authenticat" in reason or "unauthorized" in code:
+        return "authentication"
+    if status_code == 403 or "authoriz" in reason or "permission" in code:
+        return "authorization"
+    if status_code == 429 or "rate_limit" in reason or "rate_limit" in code:
+        return "rate_limit"
+    if status_code == 404 or "not_found" in reason or "not_found" in code:
+        return "not_found"
+    if "timeout" in reason or "timeout" in code:
+        return "timeout"
+    if "integration" in reason or "upstream" in code or status_code in {502, 503, 504}:
+        return "upstream"
+    if status_code in {400, 422} or outcome == "rejected" or "invalid" in code:
+        return "validation"
+    return "internal"
 
 
 async def _extract_payload(request: Request) -> Any:
