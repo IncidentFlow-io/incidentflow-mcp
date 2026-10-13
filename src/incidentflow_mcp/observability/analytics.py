@@ -51,6 +51,7 @@ class ProductAnalyticsPublisher:
         duration_ms: int,
         request_id: object,
         auth_context: Mapping[str, object] | None,
+        error_category: str | None = None,
     ) -> None:
         event = self._event(
             tool_name=tool_name,
@@ -58,6 +59,7 @@ class ProductAnalyticsPublisher:
             duration_ms=duration_ms,
             request_id=request_id,
             auth_context=auth_context,
+            error_category=error_category,
         )
         if event is None:
             mcp_analytics_events_total.labels(event_name="mcp_tool", result="skipped").inc()
@@ -90,6 +92,7 @@ class ProductAnalyticsPublisher:
         duration_ms: int,
         request_id: object,
         auth_context: Mapping[str, object] | None,
+        error_category: str | None = None,
     ) -> dict[str, object] | None:
         if not auth_context or tool_name == "unknown":
             return None
@@ -119,7 +122,10 @@ class ProductAnalyticsPublisher:
                 or self._settings.analytics_emit_customer_events
                 else "test"
             ),
-            "properties": {"user_initiated": True},
+            "properties": {
+                "user_initiated": True,
+                **({"error_category": error_category} if not succeeded and error_category else {}),
+            },
         }
 
 

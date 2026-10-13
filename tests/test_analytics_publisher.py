@@ -7,6 +7,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.observability.analytics import ProductAnalyticsPublisher
+from incidentflow_mcp.observability.middleware import _analytics_error_category
 
 
 def _settings(*, analytics_emit_customer_events: bool = False) -> Settings:
@@ -104,3 +105,15 @@ async def test_publish_failure_is_fail_open() -> None:
         request_id="request-123",
         auth_context=_context(),
     )
+
+
+def test_failure_category_is_safe_and_does_not_guess_from_error_text() -> None:
+    assert _analytics_error_category(outcome="rejected", status_code=200, tool_event={"reason": "integration_missing"}) == "upstream"
+    assert _analytics_error_category(outcome="error", status_code=429, tool_event=None) == "rate_limit"
+    assert _analytics_error_category(outcome="error", status_code=200, tool_event={"log_message": "private secret"}) == "internal"
+    event = ProductAnalyticsPublisher(_settings())._event(
+        tool_name="knowledge_upsert", outcome="failure", duration_ms=12,
+        request_id="request-123", auth_context=_context(), error_category="upstream",
+    )
+    assert event is not None
+    assert event["properties"] == {"user_initiated": True, "error_category": "upstream"}

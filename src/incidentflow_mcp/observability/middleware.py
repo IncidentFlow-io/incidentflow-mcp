@@ -291,6 +291,9 @@ class MCPObservabilityMiddleware(BaseHTTPMiddleware):
                         duration_ms=round(elapsed * 1000),
                         request_id=request_id,
                         auth_context=getattr(request.state, "auth_context", None),
+                        error_category=_analytics_error_category(
+                            outcome=tool_outcome, status_code=status_code, tool_event=tool_event
+                        ),
                     )
             if _tool_event_token is not None:
                 reset_tool_event_context(_tool_event_token)
@@ -507,6 +510,31 @@ def _tool_metric_outcome(
     if tool_event.get("outcome") == "failed":
         return "error"
     return http_outcome
+
+
+def _analytics_error_category(
+    *, outcome: str, status_code: int, tool_event: dict[str, Any] | None
+) -> str | None:
+    """Return only reviewed categories, never raw tool errors or response content."""
+    if outcome == "success":
+        return None
+    reason = str((tool_event or {}).get("reason") or "").lower()
+    code = str((tool_event or {}).get("error_code") or "").lower()
+    if status_code == 401 or "authenticat" in reason or "unauthorized" in code:
+        return "authentication"
+    if status_code == 403 or "authoriz" in reason or "permission" in code:
+        return "authorization"
+    if status_code == 429 or "rate_limit" in reason or "rate_limit" in code:
+        return "rate_limit"
+    if status_code == 404 or "not_found" in reason or "not_found" in code:
+        return "not_found"
+    if "timeout" in reason or "timeout" in code:
+        return "timeout"
+    if "integration" in reason or "upstream" in code or status_code in {502, 503, 504}:
+        return "upstream"
+    if status_code in {400, 422} or outcome == "rejected" or "invalid" in code:
+        return "validation"
+    return "internal"
 
 
 async def _extract_payload(request: Request) -> Any:
