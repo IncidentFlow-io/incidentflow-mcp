@@ -6,8 +6,8 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 from incidentflow_mcp.mcp.context import ToolRegistrationContext
-from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.mcp.entitlements import require_workspace_capability
+from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.platform_api.entitlements_client import PlatformEntitlementsClient
 from incidentflow_mcp.tools.contracts import ErrorCode
 from incidentflow_mcp.tools.integration_guide import integration_guide as _integration_guide
@@ -50,6 +50,7 @@ def register_knowledge_tools(
     current_token_workspace_id: TokenWorkspaceResolver,
 ) -> None:
     entitlements = PlatformEntitlementsClient(ctx.settings)
+
     def _workspace(workspace_id: str | None = None) -> str:
         wid = workspace_id or current_token_workspace_id() or ctx.settings.mcp_default_workspace_id
         if not wid:

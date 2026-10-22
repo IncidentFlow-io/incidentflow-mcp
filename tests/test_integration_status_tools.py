@@ -8,6 +8,10 @@ from incidentflow_mcp.auth.context import clear_current_auth_context, set_curren
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.server import create_mcp_server
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
+from incidentflow_mcp.platform_api.entitlements_client import (
+    EntitlementSnapshot,
+    PlatformEntitlementsClient,
+)
 from incidentflow_mcp.platform_api.integration_status_client import PlatformIntegrationStatusClient
 
 
@@ -429,6 +433,21 @@ async def test_grafana_tool_returns_standard_not_connected_response(
         Settings(_env_file=None, environment="development", redis_url="redis://test-only"),
     )
     _set_context()
+    monkeypatch.setattr(
+        PlatformEntitlementsClient,
+        "get",
+        AsyncMock(
+            return_value=EntitlementSnapshot(
+                workspace_id="ws_123",
+                access_state="team",
+                limits={},
+                features={},
+                usage={},
+                upgrade_url="",
+                ttl_seconds=60,
+            )
+        ),
+    )
 
     result = await create_mcp_server()._tool_manager.call_tool("grafana_list_dashboards", {})
 
@@ -453,6 +472,21 @@ async def test_argocd_tool_returns_standard_not_connected_response(
         Settings(_env_file=None, environment="development", redis_url="redis://test-only"),
     )
     _set_context()
+    monkeypatch.setattr(
+        PlatformEntitlementsClient,
+        "get",
+        AsyncMock(
+            return_value=EntitlementSnapshot(
+                workspace_id="ws_123",
+                access_state="team",
+                limits={},
+                features={},
+                usage={},
+                upgrade_url="",
+                ttl_seconds=60,
+            )
+        ),
+    )
 
     result = await create_mcp_server()._tool_manager.call_tool("argocd_connection_health", {})
 

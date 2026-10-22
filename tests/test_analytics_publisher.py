@@ -57,9 +57,7 @@ def test_event_requires_uuid_user_and_workspace_attribution() -> None:
 
 
 def test_local_customer_analytics_requires_explicit_opt_in() -> None:
-    event = ProductAnalyticsPublisher(
-        _settings(analytics_emit_customer_events=True)
-    )._event(
+    event = ProductAnalyticsPublisher(_settings(analytics_emit_customer_events=True))._event(
         tool_name="knowledge_upsert",
         outcome="success",
         duration_ms=12,
@@ -108,12 +106,28 @@ async def test_publish_failure_is_fail_open() -> None:
 
 
 def test_failure_category_is_safe_and_does_not_guess_from_error_text() -> None:
-    assert _analytics_error_category(outcome="rejected", status_code=200, tool_event={"reason": "integration_missing"}) == "upstream"
-    assert _analytics_error_category(outcome="error", status_code=429, tool_event=None) == "rate_limit"
-    assert _analytics_error_category(outcome="error", status_code=200, tool_event={"log_message": "private secret"}) == "internal"
+    assert (
+        _analytics_error_category(
+            outcome="rejected", status_code=200, tool_event={"reason": "integration_missing"}
+        )
+        == "upstream"
+    )
+    assert (
+        _analytics_error_category(outcome="error", status_code=429, tool_event=None) == "rate_limit"
+    )
+    assert (
+        _analytics_error_category(
+            outcome="error", status_code=200, tool_event={"log_message": "private secret"}
+        )
+        == "internal"
+    )
     event = ProductAnalyticsPublisher(_settings())._event(
-        tool_name="knowledge_upsert", outcome="failure", duration_ms=12,
-        request_id="request-123", auth_context=_context(), error_category="upstream",
+        tool_name="knowledge_upsert",
+        outcome="failure",
+        duration_ms=12,
+        request_id="request-123",
+        auth_context=_context(),
+        error_category="upstream",
     )
     assert event is not None
     assert event["properties"] == {"user_initiated": True, "error_category": "upstream"}

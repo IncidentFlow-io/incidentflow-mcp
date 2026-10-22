@@ -80,7 +80,9 @@ class ProductAnalyticsPublisher:
             )
         except (RedisError, TimeoutError):
             mcp_analytics_events_total.labels(event_name=event_name, result="unavailable").inc()
-            logger.warning("Analytics event publication failed; MCP result is unaffected", exc_info=True)
+            logger.warning(
+                "Analytics event publication failed; MCP result is unaffected", exc_info=True
+            )
             return
         mcp_analytics_events_total.labels(event_name=event_name, result="published").inc()
 
