@@ -20,6 +20,7 @@ from incidentflow_mcp.http.routers.ops import create_ops_router
 from incidentflow_mcp.http.routes.mcp_proxy import register_mcp_proxy_route
 from incidentflow_mcp.logging_config import configure_logging
 from incidentflow_mcp.mcp.server import create_mcp_server
+from incidentflow_mcp.observability.analytics import ProductAnalyticsPublisher
 from incidentflow_mcp.observability.middleware import MCPObservabilityMiddleware
 from incidentflow_mcp.observability.tracing import configure_tracing
 from incidentflow_mcp.rate_limit.bucket_keys import BucketKeyResolver
@@ -89,6 +90,7 @@ def create_app() -> FastAPI:
         rate_limit_policy,
         rate_limit_bucket_keys,
     )
+    analytics_publisher = ProductAnalyticsPublisher(settings)
 
     # configure_tracing must run before FastAPI is instantiated so that
     # FastAPIInstrumentor middleware is included in Starlette's middleware stack.
@@ -140,6 +142,7 @@ def create_app() -> FastAPI:
                 },
             )
 
+            await analytics_publisher.start()
             # Drive the StreamableHTTPSessionManager task group.
             # We enter run() ourselves because FastAPI does not forward lifespan
             # events to ASGI apps that are called directly (not via Mount).
@@ -150,6 +153,7 @@ def create_app() -> FastAPI:
             logger.exception("application lifespan failed")
             raise
         finally:
+            await analytics_publisher.close()
             await rate_limit_store.close()
             logger.info(
                 "server_stopped",
@@ -179,11 +183,16 @@ def create_app() -> FastAPI:
     app.state.rate_limit_policy = rate_limit_policy
     app.state.rate_limit_bucket_keys = rate_limit_bucket_keys
     app.state.tool_guard = app_tool_guard
+    app.state.analytics_publisher = analytics_publisher
 
     # Middleware stack (outermost → innermost; add_middleware prepends).
     app.add_middleware(TransportRateLimitMiddleware, settings=settings)
     app.add_middleware(BearerAuthMiddleware)
-    app.add_middleware(MCPObservabilityMiddleware, settings=settings)
+    app.add_middleware(
+        MCPObservabilityMiddleware,
+        settings=settings,
+        analytics_publisher=analytics_publisher,
+    )
     app.add_middleware(RequestIDMiddleware)
 
     register_exception_handlers(app)

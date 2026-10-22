@@ -423,6 +423,20 @@ class Settings(BaseSettings):
         default="redis://localhost:6379/0",
         description="Redis connection URL used for distributed rate limiting state",
     )
+    analytics_events_enabled: bool = Field(
+        default=False,
+        description="Publish privacy-safe canonical product events after MCP tool calls.",
+    )
+    analytics_emit_customer_events: bool = Field(
+        default=False,
+        description=(
+            "Opt in to customer-class analytics outside production. Intended only for "
+            "an explicitly configured local/staging analytics environment."
+        ),
+    )
+    analytics_stream_name: str = Field(default="incidentflow.analytics.events.v1")
+    analytics_stream_maxlen: int = Field(default=100_000, ge=1_000, le=10_000_000)
+    analytics_publish_timeout_ms: int = Field(default=50, ge=1, le=1_000)
     rate_limit_unauth_per_min: int = Field(
         default=20,
         description="Transport-level requests per minute for unauthenticated IPs",

@@ -83,7 +83,10 @@
                 "INTEGRATION_UNAVAILABLE",
                 "UPSTREAM_ERROR",
                 "TIMEOUT",
-                "INTERNAL_ERROR"
+                "INTERNAL_ERROR",
+                "PLAN_LIMIT_EXCEEDED",
+                "BILLING_REMEDIATION_REQUIRED",
+                "ENTITLEMENTS_UNAVAILABLE"
               ],
               "type": "string"
             },

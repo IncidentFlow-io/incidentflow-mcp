@@ -217,6 +217,11 @@ mcp_entitlement_guard_total = Counter(
     "MCP entitlement guard decisions without workspace identifiers.",
     ("operation", "result", "reason"),
 )
+mcp_analytics_events_total = Counter(
+    "mcp_analytics_events_total",
+    "Analytics Stream publication outcomes without actor identifiers.",
+    ("event_name", "result"),
+)
 
 
 def record_entitlement_snapshot(*, source: str, result: str) -> None:
