@@ -115,7 +115,7 @@ def test_error_default_retryability(code: ErrorCode, expected_retryable: bool) -
     assert env["error"]["retryable"] is expected_retryable
 
 
-def test_all_ten_canonical_error_codes_exist() -> None:
+def test_all_canonical_error_codes_exist() -> None:
     assert {c.value for c in ErrorCode} == {
         "INVALID_ARGUMENT",
         "UNAUTHENTICATED",
@@ -127,6 +127,9 @@ def test_all_ten_canonical_error_codes_exist() -> None:
         "UPSTREAM_ERROR",
         "TIMEOUT",
         "INTERNAL_ERROR",
+        "PLAN_LIMIT_EXCEEDED",
+        "BILLING_REMEDIATION_REQUIRED",
+        "ENTITLEMENTS_UNAVAILABLE",
     }
 
 
