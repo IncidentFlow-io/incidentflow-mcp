@@ -1,5 +1,7 @@
 # IncidentFlow MCP
 
+[![Tool Contracts](https://github.com/IncidentFlow-io/incidentflow-mcp/actions/workflows/tool-contracts.yml/badge.svg)](https://github.com/IncidentFlow-io/incidentflow-mcp/actions/workflows/tool-contracts.yml)
+
 IncidentFlow MCP is an HTTP-based Model Context Protocol server for investigating
 and operating incidents across Kubernetes, observability platforms, and approved
 workspace integrations.
