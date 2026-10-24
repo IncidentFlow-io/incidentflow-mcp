@@ -4,8 +4,14 @@ FERN_HOME ?= .fern-home
 FERN_ENV = HOME=$(PWD)/$(FERN_HOME) FERN_NO_VERSION_REDIRECTION=true
 KUBECONFIG ?= $(HOME)/.kube/incidentflow
 
-.PHONY: openapi-generate openapi-validate fern-check fern-docs-dev fern-docs-generate fern-docs-publish docs-all \
+.PHONY: test lint openapi-generate openapi-validate fern-check fern-docs-dev fern-docs-generate fern-docs-publish docs-all \
         run-dev run-prod pf-dev pf-prod
+
+test:
+	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) uv run --group dev pytest
+
+lint:
+	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) uv run --extra dev ruff check .
 
 openapi-generate:
 	PYTHONPATH=$(PYTHONPATH) UV_CACHE_DIR=$(UV_CACHE_DIR) uv run python scripts/generate_openapi.py
