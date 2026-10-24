@@ -89,7 +89,7 @@ EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
 
 
 def _load_submission_tools() -> dict:
-    submission_path = Path(__file__).resolve().parents[1] / "chatgpt-app-submission.json"
+    submission_path = Path(__file__).resolve().parents[1] / "apps/chatgpt/submission.json"
     payload = json.loads(submission_path.read_text())
     return payload["tools"]
 
