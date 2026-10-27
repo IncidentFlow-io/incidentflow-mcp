@@ -382,6 +382,31 @@ _TOOL_SPECS: list[ToolSpec] = [
         structured_output=True,
     ),
     ToolSpec(
+        name="guide_me",
+        title="Guide Me Through an Integration",
+        description=(
+            "Routes a natural-language integration setup, connection, verification, upgrade, "
+            "or troubleshooting question to the deterministic integration guide. Installation "
+            "questions use curated guidance first; public documentation search is supplementary."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "Integration question in natural language."},
+                "context": {
+                    "type": "object",
+                    "description": "Optional non-secret context such as cluster_name.",
+                    "additionalProperties": {"type": ["string", "number", "boolean", "null"]},
+                },
+                "response_mode": {"type": "string", "enum": ["compact", "full"], "default": "compact"},
+            },
+            "required": ["question"],
+            "additionalProperties": False,
+        },
+        annotations=_read_only_annotations(),
+        structured_output=True,
+    ),
+    ToolSpec(
         name="public_knowledge_search",
         title="Search Public Knowledge",
         description=(

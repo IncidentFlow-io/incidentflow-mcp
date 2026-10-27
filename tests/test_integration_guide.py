@@ -10,6 +10,7 @@ from incidentflow_mcp.tools.grafana import grafana_connection_health
 from incidentflow_mcp.tools.integration_guide import (
     GUIDE_PROVIDERS,
     IntegrationGuideOutput,
+    route_integration_question,
 )
 
 GOALS = ["install", "configure", "verify", "upgrade", "troubleshoot", "uninstall"]
@@ -28,7 +29,7 @@ def test_every_provider_goal_produces_secret_free_steps(integration: str, goal: 
         template = step.command_template or ""
         # Command templates may only contain placeholders, never real secrets.
         assert not _SECRET_RE.search(template), f"secret-like token in {integration}/{goal}"
-        if "registration-token" in template or "registrationToken" in template:
+        if "registration-token" in template or "registrationToken=" in template:
             assert "registration_token" in step.sensitive_inputs
 
 
@@ -49,6 +50,66 @@ def test_kubernetes_missing_cluster_name_is_reported() -> None:
         if r.name == "cluster_name"
     ]
     assert satisfied and satisfied[0].satisfied is True
+
+
+def test_kubernetes_install_requirements_cover_safe_helm_prerequisites() -> None:
+    provider = GUIDE_PROVIDERS["kubernetes"]
+    requirement_names = {item.name for item in provider.requirements("install", {})}
+    assert {
+        "cluster_name",
+        "kubectl",
+        "helm_3",
+        "outbound_https_wss",
+        "namespace_and_read_only_rbac",
+    } <= requirement_names
+
+
+def test_kubernetes_helm_install_uses_bootstrap_secret_not_token_value() -> None:
+    provider = GUIDE_PROVIDERS["kubernetes"]
+    step = provider.steps("install", "helm", {"cluster_name": "prod-eu-1"})[-1]
+    command = step.command_template or ""
+    assert "registrationTokenSecretName=incidentflow-k8s-agent-bootstrap" in command
+    assert "registrationToken=" not in command
+    assert "agent.platformUrl" not in command
+    assert "agent.gatewayUrl" not in command
+    assert step.command is not None
+    assert step.command.executable == "helm"
+    assert step.command.contains_secret is False
+
+
+def test_kubernetes_hosted_install_contract_has_no_internal_or_secret_values() -> None:
+    provider = GUIDE_PROVIDERS["kubernetes"]
+    step = provider.steps("install", "helm", {"cluster_name": "prod-eu-1"})[-1]
+    payload = step.model_dump_json()
+    for forbidden in (
+        "platformUrl",
+        "gatewayUrl",
+        "localhost",
+        "host.docker.internal",
+        "registration-token",
+        "registrationToken=",
+    ):
+        assert forbidden not in payload
+
+
+def test_kubernetes_install_without_cluster_name_blocks_helm_command() -> None:
+    step = GUIDE_PROVIDERS["kubernetes"].steps("install", "helm", {})[-1]
+    assert step.state == "blocked"
+    assert step.command is None
+
+
+def test_guide_me_routing_sends_kubernetes_install_language_to_curated_guide() -> None:
+    assert route_integration_question("Помоги подключить Kubernetes cluster через Helm") == (
+        "kubernetes",
+        "install",
+    )
+
+
+def test_kubernetes_verify_includes_read_only_rbac_and_remediation() -> None:
+    checks = GUIDE_PROVIDERS["kubernetes"].verification("verify")
+    rbac = next(check for check in checks if check.tool_name == "k8s_rbac_check")
+    assert rbac.expected == {"read_only": True}
+    assert "If permissions are missing" in rbac.description
 
 
 def test_verification_tools_are_correct() -> None:

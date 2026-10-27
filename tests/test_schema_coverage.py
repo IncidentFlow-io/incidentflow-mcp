@@ -46,6 +46,7 @@ EXPECTED_STRICT_TOOLS = {
     "incident_thread_summary",
     "grafana_connection_health",
     "integration_guide",
+    "guide_me",
     "investigation_list",
     "investigation_get",
     "investigation_continue",
