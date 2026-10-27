@@ -362,8 +362,10 @@ _TOOL_SPECS: list[ToolSpec] = [
                 "context": {
                     "type": "object",
                     "description": (
-                        "Optional non-secret integration parameters (e.g. cluster_name, "
-                        "namespace). Never include tokens or credentials."
+                        "Optional non-secret integration parameters (e.g. cluster_identifier, "
+                        "namespace). For Kubernetes verify, set helm_install_completed=true "
+                        "only after the user selected Verify or confirmed Helm completed. "
+                        "Never include tokens or credentials."
                     ),
                     "additionalProperties": {
                         "type": ["string", "number", "boolean", "null"],
@@ -377,6 +379,34 @@ _TOOL_SPECS: list[ToolSpec] = [
                 },
             },
             "required": ["integration", "goal"],
+        },
+        annotations=_read_only_annotations(),
+        structured_output=True,
+    ),
+    ToolSpec(
+        name="guide_me",
+        title="Guide Me Through an Integration",
+        description=(
+            "Routes a natural-language integration setup, connection, verification, upgrade, "
+            "or troubleshooting question to the deterministic integration guide. Installation "
+            "questions use curated guidance first; public documentation search is supplementary."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "question": {"type": "string", "description": "Integration question in natural language."},
+                "context": {
+                    "type": "object",
+                    "description": (
+                        "Optional non-secret context such as cluster_identifier. For Kubernetes "
+                        "verification after a user says done, also set helm_install_completed=true."
+                    ),
+                    "additionalProperties": {"type": ["string", "number", "boolean", "null"]},
+                },
+                "response_mode": {"type": "string", "enum": ["compact", "full"], "default": "compact"},
+            },
+            "required": ["question"],
+            "additionalProperties": False,
         },
         annotations=_read_only_annotations(),
         structured_output=True,

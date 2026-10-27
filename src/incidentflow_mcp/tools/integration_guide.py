@@ -20,12 +20,15 @@ Design constraints:
 from __future__ import annotations
 
 import logging
+import re
+import shlex
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from incidentflow_mcp.config import Settings
+from incidentflow_mcp.observability.metrics import integration_guide_unsafe_template_total
 from incidentflow_mcp.tools.knowledge_search_tools import PlatformAPIKnowledgeClient
 
 logger = logging.getLogger(__name__)
@@ -33,6 +36,8 @@ logger = logging.getLogger(__name__)
 Integration = Literal["kubernetes", "slack", "grafana", "argocd"]
 Goal = Literal["install", "configure", "verify", "upgrade", "troubleshoot", "uninstall"]
 ResponseMode = Literal["compact", "full"]
+GuideStatus = Literal["success", "needs_input"]
+StepState = Literal["blocked", "current", "completed", "pending"]
 
 _GOAL_TO_DOCTYPE: dict[str, str | None] = {
     "install": "installation_guide",
@@ -52,6 +57,9 @@ _APP_URLS: dict[str, str] = {
     "argocd": "https://app.incidentflow.io/integrations",
 }
 
+_HOSTED_K8S_CHART_VERSION = "1.0.14"
+_CLUSTER_IDENTIFIER_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+
 
 # ---------------------------------------------------------------------------
 # Output models (strict)
@@ -65,16 +73,43 @@ class Requirement(BaseModel):
     satisfied: bool | None = None
 
 
+class GuideCommand(BaseModel):
+    """A safe, copyable command without relying on shell parsing by clients."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    executable: str
+    args: list[str]
+    rendered_shell: str
+    copyable: bool = True
+    contains_secret: bool = False
+
+
 class GuideStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    id: str = ""
     number: int = Field(ge=1)
     title: str
     instruction: str
+    state: StepState = "pending"
+    user_action_required: bool = False
+    completion_signal: str | None = None
+    command_contains_secret: bool = False
+    inputs: list[str] = Field(default_factory=list)
+    token_handling: Literal["ui_only"] | None = None
+    command: GuideCommand | None = None
+    # Deprecated compatibility field. New clients should use command.rendered_shell.
     command_template: str | None = None
     app_url: str | None = None
     requires_confirmation: bool = False
     sensitive_inputs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def assign_stable_id(self) -> "GuideStep":
+        if not self.id:
+            self.id = re.sub(r"[^a-z0-9]+", "_", self.title.lower()).strip("_")
+        return self
 
 
 class VerificationCheck(BaseModel):
@@ -90,26 +125,36 @@ class VerificationCheck(BaseModel):
 class GuideSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    document_id: str | None = None
+    document_id: str
     title: str
     url: str
-    section: str | None = None
-    docs_version: str | None = None
-    updated_at: str | None = None
+    section: str
+    docs_version: str
+    updated_at: str
+
+
+class UnsafeIntegrationGuideTemplateError(ValueError):
+    """Raised when a stale guide attempts to expose a raw registration token."""
 
 
 class IntegrationGuideOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    status: GuideStatus = "success"
+    # A guide is not an observation. Only a k8s_agent_status tool result in
+    # the current trace may establish that the cluster is healthy.
+    connection_status: Literal["not_checked"] = "not_checked"
     integration: str
     goal: str
     method: str | None = None
     summary: str
     requirements: list[Requirement] = Field(default_factory=list)
     missing_inputs: list[str] = Field(default_factory=list)
+    next_action: dict[str, str] | None = None
     steps: list[GuideStep] = Field(default_factory=list)
     verification: list[VerificationCheck] = Field(default_factory=list)
-    sources: list[GuideSource] = Field(default_factory=list)
+    sources: list[GuideSource] = Field(min_length=1)
+    security_notes: list[str] = Field(min_length=1)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -160,11 +205,30 @@ class GuideProvider:
         return f"How to {goal} the {self.display_name} integration{method_note}."
 
     # Shared helpers -------------------------------------------------------
-    def _app_step(self, number: int, title: str, instruction: str) -> GuideStep:
+    def _app_step(
+        self,
+        number: int,
+        title: str,
+        instruction: str,
+        *,
+        step_id: str | None = None,
+        state: StepState = "pending",
+        completion_signal: str | None = None,
+        inputs: list[str] | None = None,
+        sensitive_inputs: list[str] | None = None,
+        token_handling: Literal["ui_only"] | None = None,
+    ) -> GuideStep:
         return GuideStep(
+            id=step_id or "",
             number=number,
             title=title,
             instruction=instruction,
+            state=state,
+            user_action_required=True,
+            completion_signal=completion_signal,
+            inputs=inputs or [],
+            sensitive_inputs=sensitive_inputs or [],
+            token_handling=token_handling,
             app_url=_APP_URLS[self.integration],
             requires_confirmation=False,
         )
@@ -181,9 +245,41 @@ def _satisfied(ctx: Mapping[str, Any], key: str) -> bool:
     return value is not None and str(value).strip() != ""
 
 
+def _helm_install_completed(ctx: Mapping[str, Any]) -> bool:
+    """Only an explicit user-confirmed completion can unlock verification."""
+    return ctx.get("helm_install_completed") is True
+
+
+def _validate_cluster_identifier(ctx: dict[str, Any]) -> None:
+    """Keep a user identifier from becoming additional Helm --set values."""
+    value = ctx.get("cluster_identifier")
+    if value is None:
+        return
+    identifier = str(value).strip()
+    if not _CLUSTER_IDENTIFIER_RE.fullmatch(identifier):
+        raise ValueError(
+            "cluster_identifier must be a 1-63 character lowercase DNS label "
+            "containing only letters, digits, and hyphens."
+        )
+    ctx["cluster_identifier"] = identifier
+
+
+def _shell(executable: str, args: list[str]) -> str:
+    """Render trusted, curated argv as a readable multi-line shell command."""
+    return " ".join([executable, *args])
+
+
+def _command(executable: str, args: list[str], *, rendered_shell: str | None = None) -> GuideCommand:
+    return GuideCommand(
+        executable=executable,
+        args=args,
+        rendered_shell=rendered_shell or _shell(executable, args),
+    )
+
+
 class KubernetesGuideProvider(GuideProvider):
     integration = "kubernetes"
-    allowed_methods = ("helm", "argocd", "terraform", "flux", "raw_yaml")
+    allowed_methods = ("helm",)
     default_method = "helm"
     verification_tool = "k8s_agent_status"
     display_name = "Kubernetes"
@@ -197,15 +293,29 @@ class KubernetesGuideProvider(GuideProvider):
                 satisfied=None,
             )
         ]
-        if goal in {"install", "configure", "upgrade"}:
+        if goal in {"install", "configure", "upgrade", "verify"}:
             reqs.append(
                 Requirement(
-                    name="cluster_name",
+                    name="cluster_identifier",
                     description="Stable cluster identifier used to register the agent.",
                     required=True,
-                    satisfied=_satisfied(ctx, "cluster_name"),
+                    satisfied=_satisfied(ctx, "cluster_identifier"),
                 )
             )
+        if goal == "verify":
+            reqs.append(
+                Requirement(
+                    name="helm_install_completed",
+                    description=(
+                        "The user has selected Verify or confirmed that the Helm installation "
+                        "finished for this cluster."
+                    ),
+                    required=True,
+                    satisfied=_helm_install_completed(ctx),
+                )
+            )
+            return reqs
+        if goal in {"install", "configure", "upgrade"}:
             reqs.append(
                 Requirement(
                     name="kubectl",
@@ -214,48 +324,124 @@ class KubernetesGuideProvider(GuideProvider):
                     satisfied=None,
                 )
             )
+            reqs.extend(
+                [
+                    Requirement(
+                        name="helm_3",
+                        description=(
+                            "Helm 3 is installed and can install releases in the target cluster."
+                        ),
+                        required=True,
+                        satisfied=None,
+                    ),
+                    Requirement(
+                        name="supported_kubernetes_version",
+                        description="A supported Kubernetes version for the IncidentFlow Agent chart.",
+                        required=True,
+                        satisfied=None,
+                    ),
+                    Requirement(
+                        name="outbound_https_wss",
+                        description=(
+                            "The cluster can make outbound HTTPS and secure WebSocket (WSS) "
+                            "connections to IncidentFlow; no inbound cluster access is required."
+                        ),
+                        required=True,
+                        satisfied=None,
+                    ),
+                    Requirement(
+                        name="namespace_and_read_only_rbac",
+                        description=(
+                            "Permission to create the agent namespace, ServiceAccount, bootstrap "
+                            "Secret, and read-only RBAC resources. The Agent receives no write "
+                            "permissions to workload resources."
+                        ),
+                        required=True,
+                        satisfied=None,
+                    ),
+                ]
+            )
         return reqs
 
     def steps(self, goal: str, method: str | None, ctx: Mapping[str, Any]) -> list[GuideStep]:
         ns = str(ctx.get("namespace") or "incidentflow-agent")
-        cluster = "<cluster-identifier>"
+        cluster = str(ctx.get("cluster_identifier") or "")
         if goal == "install":
-            install_cmd = {
-                "helm": (
-                    "helm upgrade --install incidentflow-k8s-agent "
-                    "oci://ghcr.io/incidentflow-io/charts/incidentflow-k8s-agent "
-                    f"--namespace {ns} --create-namespace "
-                    f"--set clusterName={cluster} "
-                    "--set registrationToken=<one-time-registration-token>"
-                ),
-                "raw_yaml": (
-                    "kubectl apply -f <incidentflow-agent-manifest-generated-in-app.yaml>"
-                ),
-            }.get(method or "helm")
+            install_command = None
+            if cluster:
+                install_args = [
+                    "upgrade", "--install", "incidentflow-k8s-agent",
+                    "oci://ghcr.io/incidentflow-io/charts/incidentflow-k8s-agent",
+                    "--version", _HOSTED_K8S_CHART_VERSION,
+                    "--namespace", ns, "--create-namespace",
+                    "--set-string", f"clusterName={cluster}",
+                    "--set", "registrationTokenSecretName=incidentflow-k8s-agent-bootstrap",
+                ]
+                install_command = _command(
+                    "helm",
+                    install_args,
+                    rendered_shell=(
+                        "helm upgrade --install incidentflow-k8s-agent "
+                        "oci://ghcr.io/incidentflow-io/charts/incidentflow-k8s-agent \\\n"
+                        f"  --version {_HOSTED_K8S_CHART_VERSION} \\\n"
+                        f"  --namespace {shlex.quote(ns)} --create-namespace \\\n"
+                        f"  --set-string clusterName={shlex.quote(cluster)} \\\n"
+                        "  --set registrationTokenSecretName=incidentflow-k8s-agent-bootstrap"
+                    ),
+                )
             return [
                 self._app_step(
                     1,
                     "Register the agent",
-                    "Open IncidentFlow → Kubernetes Agents, select Install Agent, and enter "
-                    "a cluster display name and unique cluster identifier.",
+                    "Open IncidentFlow → Kubernetes Agents → Install Agent and enter "
+                    "the cluster identifier. The Agent receives read-only Kubernetes permissions.",
+                    step_id="register_agent",
+                    state="current",
+                    completion_signal="agent_registered",
+                    inputs=["cluster_identifier"],
                 ),
                 self._app_step(
                     2,
-                    "Copy the one-time registration token",
-                    "The token is shown once, expires in 24 hours, and is consumed on first "
-                    "registration. Always use the command generated for your workspace.",
+                    "Create the bootstrap Secret",
+                    "Create the one-time registration token, then run the protected “Run first” "
+                    "command generated by IncidentFlow. It creates the namespace and bootstrap "
+                    "Secret. Never paste the token into chat, Git, docs, logs, or knowledge.",
+                    step_id="create_bootstrap_secret",
+                    state="blocked" if not cluster else "pending",
+                    completion_signal="bootstrap_secret_created",
+                    sensitive_inputs=["registration_token"],
+                    token_handling="ui_only",
                 ),
                 GuideStep(
+                    id="install_helm_chart",
                     number=3,
-                    title="Run the generated install command",
+                    title="Install with Helm",
                     instruction=(
-                        f"Install the read-only agent with {method or 'helm'}. The real token "
-                        "is supplied by the installation screen — the template below only shows "
-                        "its shape."
+                        "Run Helm after the bootstrap Secret exists. Helm receives the Secret "
+                        "name, not a raw registration token. For hosted IncidentFlow, the chart "
+                        "uses the production platform and gateway URLs by default; override them "
+                        "only for a self-hosted deployment."
                     ),
-                    command_template=install_cmd,
+                    state="blocked" if not cluster else "pending",
+                    user_action_required=True,
+                    completion_signal="helm_release_installed",
+                    command=install_command,
+                    command_template=(install_command.rendered_shell if install_command else None),
+                    command_contains_secret=False,
                     requires_confirmation=True,
-                    sensitive_inputs=["registration_token"],
+                ),
+                GuideStep(
+                    id="verify_connection",
+                    number=4,
+                    title="Verify connection",
+                    instruction=(
+                        "After Helm reports a successful rollout, select Verify or tell the "
+                        "assistant that installation is complete. Only then may it run "
+                        "k8s_agent_status for this exact cluster identifier."
+                    ),
+                    state="blocked" if not cluster else "pending",
+                    user_action_required=False,
+                    completion_signal="k8s_agent_status_healthy",
                 ),
             ]
         if goal == "configure":
@@ -332,13 +518,65 @@ class KubernetesGuideProvider(GuideProvider):
         # verify
         return [
             GuideStep(
+                id="verify_connection",
                 number=1,
-                title="Confirm the agent is connected",
-                instruction="Check the agent workload rollout and then confirm connectivity "
-                "from an MCP client.",
+                title="Confirm the Helm rollout",
+                instruction="Confirm that the agent deployment is available before checking its "
+                "IncidentFlow connection.",
                 command_template=(
                     f"kubectl rollout status deployment/incidentflow-k8s-agent --namespace {ns}"
                 ),
+            ),
+            GuideStep(
+                number=2,
+                title="Check connection from MCP",
+                instruction=(
+                    f"Use k8s_agent_status for cluster '{cluster}' and expect healthy=true. "
+                    "IncidentFlow then confirms "
+                    "token acceptance, credentials, gateway connection, heartbeat, and "
+                    "read-only RBAC. "
+                    "If it is unhealthy, inspect the rollout and outbound connectivity, then use "
+                    "the Kubernetes troubleshooting guide; do not reveal Secret values or tokens."
+                ),
+            ),
+        ]
+
+    def verification(self, goal: str) -> list[VerificationCheck]:
+        if goal != "verify":
+            # An install guide must never suggest a status check before the user
+            # explicitly confirms that Helm installation has completed.
+            return []
+        return [
+            VerificationCheck(
+                type="command",
+                description=(
+                    "The IncidentFlow Agent deployment has completed its rollout. If it fails, "
+                    "inspect the Helm release, Pod events, and sanitized agent logs before "
+                    "retrying."
+                ),
+                command=(
+                    "kubectl rollout status deployment/incidentflow-k8s-agent "
+                    "--namespace incidentflow-agent"
+                ),
+            ),
+            VerificationCheck(
+                type="mcp_tool",
+                description=(
+                    "The Agent is connected and has a recent heartbeat. If it is unhealthy, "
+                    "check outbound HTTPS/WSS connectivity and the IncidentFlow registration state."
+                ),
+                tool_name="k8s_agent_status",
+                expected={"healthy": True},
+            ),
+            VerificationCheck(
+                type="mcp_tool",
+                description=(
+                    "The Agent's effective Kubernetes access remains read-only. If permissions are "
+                    "missing or write access is reported, correct the chart-managed RBAC to the "
+                    "minimum read-only scope and rerun this check."
+                ),
+                tool_name="k8s_rbac_check",
+                expected={"read_only": True},
             ),
         ]
 
@@ -483,14 +721,21 @@ async def _fetch_sources(
     seen: set[str] = set()
     for match in payload.get("matches", []) or []:
         url = str(match.get("url") or "")
-        if not url or url in seen:
+        document_id = str(match.get("document_id") or "")
+        section = str(match.get("heading") or match.get("section") or "")
+        docs_version = str(match.get("docs_version") or "")
+        updated_at = str(match.get("updated_at") or "")
+        if not url or url in seen or not all((document_id, section, docs_version, updated_at)):
             continue
         seen.add(url)
         sources.append(
             GuideSource(
+                document_id=document_id,
                 title=str(match.get("title") or url),
                 url=url,
-                section=match.get("section") or None,
+                section=section,
+                docs_version=docs_version,
+                updated_at=updated_at,
             )
         )
     return sources, warnings
@@ -509,13 +754,21 @@ async def integration_guide(
     response_mode: str = "compact",
 ) -> IntegrationGuideOutput:
     provider = GUIDE_PROVIDERS[integration]
-    ctx: Mapping[str, Any] = context or {}
+    ctx: dict[str, Any] = dict(context or {})
+    if integration == "kubernetes":
+        _validate_cluster_identifier(ctx)
 
     resolved_method, warnings = provider.resolve_method(method)
     requirements = provider.requirements(goal, ctx)
     steps = provider.steps(goal, resolved_method, ctx)
     verification = provider.verification(goal)
     missing_inputs = [req.name for req in requirements if req.required and req.satisfied is False]
+
+    # A new-install conversation starts with one question only. Rendering the
+    # remaining flow before the target is known can invite a status check
+    # against an unrelated connected cluster.
+    if integration == "kubernetes" and goal == "install" and "cluster_identifier" in missing_inputs:
+        steps = []
 
     limit = 6 if response_mode == "full" else 3
     sources, source_warnings = await _fetch_sources(
@@ -529,18 +782,162 @@ async def integration_guide(
     )
     warnings.extend(source_warnings)
 
+    # A guide must remain cited even when the search service is temporarily unavailable.
+    # The deterministic fallback is intentionally public and non-secret.
+    if not sources:
+        sources = [
+            GuideSource(
+                document_id=(
+                    "k8s-agent-installation" if integration == "kubernetes" and goal == "install" else "integration-guide"
+                ),
+                title=(
+                    "Install Kubernetes Agent with Helm"
+                    if integration == "kubernetes" and goal == "install"
+                    else f"IncidentFlow {integration.title()} integration guide"
+                ),
+                url=(
+                    "https://docs.incidentflow.io/docs/integrations/kubernetes/installation"
+                    if integration == "kubernetes"
+                    else "https://docs.incidentflow.io/docs/integrations"
+                ),
+                section="Install with Helm" if integration == "kubernetes" and goal == "install" else "Integration guide",
+                docs_version="v1",
+                updated_at="2026-10-27",
+            )
+        ]
+
     if environment:
         warnings.append(f"Guidance targets the '{environment}' environment where relevant.")
 
-    return IntegrationGuideOutput(
+    next_action = None
+    if missing_inputs:
+        field = missing_inputs[0]
+        prompt = (
+            "What cluster identifier should appear in IncidentFlow?\n"
+            "Example: production-eu1"
+            if field == "cluster_identifier"
+            else f"Provide the required value for {field}."
+        )
+        next_action = {"type": "collect_input", "field": field, "prompt": prompt}
+
+    security_notes = [
+        "Never place credentials or one-time registration tokens in chat, Git, logs, tickets, documentation, or Qdrant.",
+        "Integration guides contain only safe command templates and references to server-side credential storage.",
+    ]
+    if integration == "kubernetes":
+        security_notes.extend(
+            [
+                "The Kubernetes registration token is one-time and expires after 24 hours.",
+                "Helm receives only registrationTokenSecretName; the raw registration token never enters Helm values or release history.",
+                "The Agent is granted read-only Kubernetes permissions and no workload mutation, exec, port-forward, or Secret-read access.",
+            ]
+        )
+
+    if integration == "kubernetes" and goal == "install":
+        cluster = str(ctx.get("cluster_identifier") or "")
+        summary = (
+            "Я помогу подключить новый Kubernetes cluster через Helm с read-only RBAC.\n"
+            "Какой `cluster identifier` использовать? Например: `production-eu1`."
+            if not cluster
+            else (
+                "1. В IncidentFlow открой Kubernetes Agents → Install Agent.\n"
+                f"2. Создай Agent с identifier `{cluster}`.\n"
+                "3. Создай одноразовый token и выполни защищённый `Run first` из UI.\n"
+                "4. Выполни Helm command.\n"
+                f"5. Напиши «готово», и я проверю именно `{cluster}` через `k8s_agent_status`."
+            )
+        )
+    else:
+        summary = provider.summary(goal, resolved_method)
+
+    output = IntegrationGuideOutput(
+        status="needs_input" if missing_inputs else "success",
         integration=integration,
         goal=goal,
         method=resolved_method,
-        summary=provider.summary(goal, resolved_method),
+        summary=summary,
         requirements=requirements,
         missing_inputs=missing_inputs,
+        next_action=next_action,
         steps=steps,
         verification=verification,
         sources=sources,
+        security_notes=security_notes,
         warnings=warnings,
+    )
+    _reject_unsafe_guide(output)
+    return output
+
+
+def _reject_unsafe_guide(output: IntegrationGuideOutput) -> None:
+    """Fail closed rather than letting an orchestrator repair a stale guide."""
+    raw_token_patterns = (
+        r"(?:^|\s)--set(?:-string|-json)?(?:\s+|=)registrationToken\s*=",
+        r"(?:^|,)registrationToken\s*=",
+    )
+    for step in output.steps:
+        command_text = step.command_template or ""
+        if step.command is not None:
+            command_text = f"{command_text}\n{step.command.rendered_shell}\n{' '.join(step.command.args)}"
+        if any(re.search(pattern, command_text) for pattern in raw_token_patterns):
+            integration_guide_unsafe_template_total.inc()
+            raise UnsafeIntegrationGuideTemplateError(
+                "Guide version is outdated. Refresh/deploy required."
+            )
+
+
+def route_integration_question(question: str) -> tuple[Integration, Goal]:
+    """Deterministically route setup language to curated guidance, never Qdrant."""
+    normalized = question.lower()
+    integration: Integration
+    if any(term in normalized for term in ("kubernetes", "k8s", "helm", "cluster")):
+        integration = "kubernetes"
+    elif "grafana" in normalized:
+        integration = "grafana"
+    elif "argo" in normalized:
+        integration = "argocd"
+    elif "slack" in normalized:
+        integration = "slack"
+    else:
+        raise ValueError("Specify an integration: kubernetes, slack, grafana, or argocd.")
+
+    if any(term in normalized for term in ("install", "connect", "setup", "set up", "подключ", "установ")):
+        return integration, "install"
+    if any(term in normalized for term in ("verify", "check", "проверк")):
+        return integration, "verify"
+    if any(term in normalized for term in ("upgrade", "обнов")):
+        return integration, "upgrade"
+    if any(term in normalized for term in ("troubleshoot", "problem", "ошиб", "не работает")):
+        return integration, "troubleshoot"
+    return integration, "configure"
+
+
+async def guide_me(
+    settings: Settings,
+    *,
+    question: str,
+    context: Mapping[str, Any] | None = None,
+    response_mode: str = "compact",
+) -> IntegrationGuideOutput:
+    normalized_question = question.lower()
+    completion_words = ("done", "complete", "finished", "готово", "заверш")
+    if (
+        _helm_install_completed(context or {})
+        and _satisfied(context or {}, "cluster_identifier")
+        and any(word in normalized_question for word in completion_words)
+    ):
+        integration, goal = "kubernetes", "verify"
+    else:
+        integration, goal = route_integration_question(question)
+    # Installation conversations deliberately do not inspect existing clusters.
+    # A connected cluster can be unrelated to the requested new installation.
+    # Verification is a separate explicit goal after the user confirms Helm is
+    # complete, and must receive the exact supplied cluster_identifier.
+    return await integration_guide(
+        settings,
+        integration=integration,
+        goal=goal,
+        method="helm" if integration == "kubernetes" and goal == "install" else None,
+        context=context,
+        response_mode=response_mode,
     )

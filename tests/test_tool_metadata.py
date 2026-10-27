@@ -57,6 +57,7 @@ EXPECTED_TOOL_NAMES = {
     "argocd_analyze_application",
     "knowledge_upsert",
     "integration_guide",
+    "guide_me",
     "investigation_list",
     "investigation_get",
     "investigation_continue",
@@ -83,7 +84,7 @@ EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
     "argocd": 8,
     "grafana_prometheus": 8,
     "slack_incidents": 6,
-    "knowledge": 5,
+    "knowledge": 6,
     "investigations": 4,
 }
 
@@ -193,9 +194,9 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
         "incidentflow_auth_status",
         "incidentflow_integrations_status",
     }
-    assert payload["total"] == 48
+    assert payload["total"] == 49
     assert payload["total"] == len(operational_names)
-    assert payload["read_only"] == 47
+    assert payload["read_only"] == 48
     assert payload["write_memory_only"] == 1
     assert "canonical" in payload["summary"]
     assert "authoritative runtime tool list" in payload["summary"]
@@ -301,7 +302,7 @@ async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatc
     assert payload["environment"] == "dev"
     assert payload["tools"] == {
         "registered": len(EXPECTED_TOOL_NAMES),
-        "operational": 48,
+            "operational": 49,
         "meta": 4,
     }
     assert payload["image"] == {

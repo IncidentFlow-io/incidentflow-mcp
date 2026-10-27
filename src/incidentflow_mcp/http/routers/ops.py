@@ -50,14 +50,21 @@ def _contract_json(request: Request, payload: object, *, media_type: str | None 
 
 def _oauth_authority_base(settings: Settings, request: Request) -> str:
     return (
-        settings.oauth_expected_issuer
-        or settings.platform_api_base_url
+        # platform-api owns dynamic registration, authorization, and token
+        # issuance. oauth_expected_issuer validates issued JWTs; it is not the
+        # endpoint to proxy OAuth protocol requests to.
+        settings.platform_api_base_url
+        or settings.oauth_expected_issuer
         or str(request.base_url).rstrip("/")
     ).rstrip("/")
 
 
 def _oauth_metadata(settings: Settings, request: Request, *, openid: bool = False) -> dict:
-    auth_base = _oauth_authority_base(settings, request)
+    # OAuth metadata must identify the same origin that serves its well-known
+    # document. The local MCP origin bridges authorize/token/register requests
+    # to platform-api, while OAUTH_EXPECTED_ISSUER remains the issuer used only
+    # to validate returned access tokens.
+    auth_base = str(request.base_url).rstrip("/")
     scopes_supported = (
         ["openid", "email", "profile", "mcp:read", "mcp:tools:run"]
         if openid
@@ -205,15 +212,10 @@ def create_ops_router(settings: Settings) -> APIRouter:
         summary="OAuth protected resource metadata",
     )
     async def oauth_protected_resource(request: Request) -> JSONResponse:
-        _ = request
-        auth_server = (
-            settings.oauth_expected_issuer
-            or settings.platform_api_base_url
-            or str(request.base_url).rstrip("/")
-        )
+        auth_server = str(request.base_url).rstrip("/")
         return JSONResponse(
             content={
-                "resource": settings.mcp_canonical_resource,
+                "resource": f"{auth_server}/mcp",
                 "authorization_servers": [auth_server],
                 "scopes_supported": ["mcp:read", "mcp:tools:run"],
             }
@@ -224,15 +226,10 @@ def create_ops_router(settings: Settings) -> APIRouter:
         summary="OAuth protected resource metadata (MCP path)",
     )
     async def oauth_protected_resource_mcp(request: Request) -> JSONResponse:
-        _ = request
-        auth_server = (
-            settings.oauth_expected_issuer
-            or settings.platform_api_base_url
-            or str(request.base_url).rstrip("/")
-        )
+        auth_server = str(request.base_url).rstrip("/")
         return JSONResponse(
             content={
-                "resource": settings.mcp_canonical_resource,
+                "resource": f"{auth_server}/mcp",
                 "authorization_servers": [auth_server],
                 "scopes_supported": ["mcp:read", "mcp:tools:run"],
             }

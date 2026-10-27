@@ -1,62 +1,66 @@
 {
   "$defs": {
+    "GuideCommand": {
+      "additionalProperties": false,
+      "description": "A safe, copyable command without relying on shell parsing by clients.",
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contains_secret": {
+          "default": false,
+          "type": "boolean"
+        },
+        "copyable": {
+          "default": true,
+          "type": "boolean"
+        },
+        "executable": {
+          "type": "string"
+        },
+        "rendered_shell": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "executable",
+        "args",
+        "rendered_shell"
+      ],
+      "type": "object"
+    },
     "GuideSource": {
       "additionalProperties": false,
       "properties": {
         "docs_version": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "type": "string"
         },
         "document_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "type": "string"
         },
         "section": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "type": "string"
         },
         "title": {
           "type": "string"
         },
         "updated_at": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
+          "type": "string"
         },
         "url": {
           "type": "string"
         }
       },
       "required": [
+        "document_id",
         "title",
-        "url"
+        "url",
+        "section",
+        "docs_version",
+        "updated_at"
       ],
       "type": "object"
     },
@@ -74,6 +78,21 @@
           ],
           "default": null
         },
+        "command": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GuideCommand"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "command_contains_secret": {
+          "default": false,
+          "type": "boolean"
+        },
         "command_template": {
           "anyOf": [
             {
@@ -84,6 +103,27 @@
             }
           ],
           "default": null
+        },
+        "completion_signal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "default": "",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "instruction": {
           "type": "string"
@@ -102,8 +142,34 @@
           },
           "type": "array"
         },
+        "state": {
+          "default": "pending",
+          "enum": [
+            "blocked",
+            "current",
+            "completed",
+            "pending"
+          ],
+          "type": "string"
+        },
         "title": {
           "type": "string"
+        },
+        "token_handling": {
+          "anyOf": [
+            {
+              "const": "ui_only",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "user_action_required": {
+          "default": false,
+          "type": "boolean"
         }
       },
       "required": [
@@ -223,6 +289,11 @@
         {
           "additionalProperties": false,
           "properties": {
+            "connection_status": {
+              "const": "not_checked",
+              "default": "not_checked",
+              "type": "string"
+            },
             "goal": {
               "type": "string"
             },
@@ -246,17 +317,47 @@
               },
               "type": "array"
             },
+            "next_action": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "requirements": {
               "items": {
                 "$ref": "#/$defs/Requirement"
               },
               "type": "array"
             },
+            "security_notes": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "sources": {
               "items": {
                 "$ref": "#/$defs/GuideSource"
               },
+              "minItems": 1,
               "type": "array"
+            },
+            "status": {
+              "default": "success",
+              "enum": [
+                "success",
+                "needs_input"
+              ],
+              "type": "string"
             },
             "steps": {
               "items": {
@@ -283,7 +384,9 @@
           "required": [
             "integration",
             "goal",
-            "summary"
+            "summary",
+            "sources",
+            "security_notes"
           ],
           "type": "object"
         },

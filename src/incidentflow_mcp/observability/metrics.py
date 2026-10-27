@@ -207,6 +207,11 @@ mcp_auth_success_total = Counter(
     ("client_id", "auth_method"),
 )
 
+integration_guide_unsafe_template_total = Counter(
+    "integration_guide_unsafe_template_total",
+    "Total stale integration-guide templates suppressed because they expose raw registration tokens.",
+)
+
 mcp_entitlement_snapshot_total = Counter(
     "mcp_entitlement_snapshot_total",
     "Platform entitlement snapshot lookups by source and result.",

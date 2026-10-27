@@ -38,15 +38,15 @@ def test_local_oauth_authorization_server_metadata_bridge(monkeypatch) -> None:
 
     protected = client.get("/.well-known/oauth-protected-resource")
     assert protected.status_code == 200
-    assert protected.json()["authorization_servers"] == ["http://localhost:8000"]
+    assert protected.json()["authorization_servers"] == ["http://testserver"]
 
     metadata = client.get("/.well-known/oauth-authorization-server")
     assert metadata.status_code == 200
     metadata_body = metadata.json()
-    assert metadata_body["issuer"] == "http://localhost:8000"
-    assert metadata_body["authorization_endpoint"] == "http://localhost:8000/authorize"
-    assert metadata_body["token_endpoint"] == "http://localhost:8000/token"
-    assert metadata_body["registration_endpoint"] == "http://localhost:8000/register"
+    assert metadata_body["issuer"] == "http://testserver"
+    assert metadata_body["authorization_endpoint"] == "http://testserver/authorize"
+    assert metadata_body["token_endpoint"] == "http://testserver/token"
+    assert metadata_body["registration_endpoint"] == "http://testserver/register"
     assert metadata_body["jwks_uri"] == "http://localhost:8000/.well-known/jwks.json"
     assert metadata_body["code_challenge_methods_supported"] == ["S256"]
     assert metadata_body["scopes_supported"] == ["mcp:read", "mcp:tools:run"]
@@ -54,7 +54,7 @@ def test_local_oauth_authorization_server_metadata_bridge(monkeypatch) -> None:
     openid = client.get("/.well-known/openid-configuration")
     assert openid.status_code == 200
     openid_body = openid.json()
-    assert openid_body["authorization_endpoint"] == "http://localhost:8000/authorize"
+    assert openid_body["authorization_endpoint"] == "http://testserver/authorize"
     assert "openid" in openid_body["scopes_supported"]
     assert "admin" not in openid_body["scopes_supported"]
 

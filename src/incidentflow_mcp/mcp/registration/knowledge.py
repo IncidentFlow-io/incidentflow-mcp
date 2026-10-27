@@ -10,6 +10,8 @@ from incidentflow_mcp.mcp.entitlements import require_workspace_capability
 from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.platform_api.entitlements_client import PlatformEntitlementsClient
 from incidentflow_mcp.tools.contracts import ErrorCode
+from incidentflow_mcp.tools.integration_guide import UnsafeIntegrationGuideTemplateError
+from incidentflow_mcp.tools.integration_guide import guide_me as _guide_me
 from incidentflow_mcp.tools.integration_guide import integration_guide as _integration_guide
 from incidentflow_mcp.tools.knowledge_search_tools import (
     KnowledgeSearchAPIError,
@@ -52,7 +54,14 @@ def register_knowledge_tools(
     entitlements = PlatformEntitlementsClient(ctx.settings)
 
     def _workspace(workspace_id: str | None = None) -> str:
-        wid = workspace_id or current_token_workspace_id() or ctx.settings.mcp_default_workspace_id
+        # Workspace scope is server-owned. An MCP/LLM argument may at most be
+        # checked for an attempted cross-tenant request; it is never selected as
+        # the authoritative scope.
+        authenticated_workspace_id = current_token_workspace_id()
+        local_default_workspace_id = ctx.settings.mcp_default_workspace_id
+        wid = authenticated_workspace_id or local_default_workspace_id
+        if workspace_id and workspace_id != wid:
+            raise ValueError("workspace_id does not match the authenticated workspace context")
         if not wid:
             raise ValueError(
                 "workspace_id is required from auth context. For local development, set "
@@ -106,8 +115,29 @@ def register_knowledge_tools(
                 context=context,
                 response_mode=response_mode,
             )
+        except UnsafeIntegrationGuideTemplateError as exc:
+            return structured_tool_exception(exc, code=ErrorCode.CONFLICT)
         except KnowledgeSearchAPIError as exc:
             return structured_tool_exception(exc, code=ErrorCode.UPSTREAM_ERROR)
+        except ValueError as exc:
+            return structured_tool_exception(exc, code=ErrorCode.INVALID_ARGUMENT)
+        return result.model_dump(mode="json")
+
+    @ctx.mcp.tool(**ctx.metadata("guide_me"))
+    async def guide_me_tool(
+        question: str,
+        context: dict[str, Any] | None = None,
+        response_mode: Literal["compact", "full"] = "compact",
+    ) -> dict[str, Any]:
+        """Route integration-install questions to deterministic curated guidance."""
+        try:
+            result = await _guide_me(
+                ctx.settings, question=question, context=context, response_mode=response_mode
+            )
+        except UnsafeIntegrationGuideTemplateError as exc:
+            return structured_tool_exception(exc, code=ErrorCode.CONFLICT)
+        except (KnowledgeSearchAPIError, ValueError) as exc:
+            return structured_tool_exception(exc, code=ErrorCode.INVALID_ARGUMENT)
         return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("private_knowledge_search"))

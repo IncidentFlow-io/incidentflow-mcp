@@ -548,6 +548,7 @@ TOOL_OUTPUT_MODELS: dict[str, type[BaseModel] | dict[str, Any]] = {
     "knowledge_get": KnowledgeGetData,
     "knowledge_upsert": KnowledgeUpsertData,
     "integration_guide": IntegrationGuideOutput,
+    "guide_me": IntegrationGuideOutput,
     # investigation lifecycle control surface
     "investigation_list": InvestigationListOutput,
     "investigation_get": InvestigationGetOutput,

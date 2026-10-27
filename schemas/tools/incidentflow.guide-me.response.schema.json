@@ -1,0 +1,505 @@
+{
+  "$defs": {
+    "GuideCommand": {
+      "additionalProperties": false,
+      "description": "A safe, copyable command without relying on shell parsing by clients.",
+      "properties": {
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "contains_secret": {
+          "default": false,
+          "type": "boolean"
+        },
+        "copyable": {
+          "default": true,
+          "type": "boolean"
+        },
+        "executable": {
+          "type": "string"
+        },
+        "rendered_shell": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "executable",
+        "args",
+        "rendered_shell"
+      ],
+      "type": "object"
+    },
+    "GuideSource": {
+      "additionalProperties": false,
+      "properties": {
+        "docs_version": {
+          "type": "string"
+        },
+        "document_id": {
+          "type": "string"
+        },
+        "section": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id",
+        "title",
+        "url",
+        "section",
+        "docs_version",
+        "updated_at"
+      ],
+      "type": "object"
+    },
+    "GuideStep": {
+      "additionalProperties": false,
+      "properties": {
+        "app_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "command": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GuideCommand"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "command_contains_secret": {
+          "default": false,
+          "type": "boolean"
+        },
+        "command_template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "completion_signal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "default": "",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "instruction": {
+          "type": "string"
+        },
+        "number": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "requires_confirmation": {
+          "default": false,
+          "type": "boolean"
+        },
+        "sensitive_inputs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "state": {
+          "default": "pending",
+          "enum": [
+            "blocked",
+            "current",
+            "completed",
+            "pending"
+          ],
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "token_handling": {
+          "anyOf": [
+            {
+              "const": "ui_only",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "user_action_required": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "number",
+        "title",
+        "instruction"
+      ],
+      "type": "object"
+    },
+    "Requirement": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "type": "boolean"
+        },
+        "satisfied": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "VerificationCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "description": {
+          "type": "string"
+        },
+        "expected": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tool_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "enum": [
+            "command",
+            "mcp_tool",
+            "http_request",
+            "manual"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "description"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://incidentflow.io/schemas/tools/incidentflow.guide-me.response.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "api_version": {
+      "enum": [
+        "v1"
+      ],
+      "type": "string"
+    },
+    "data": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "connection_status": {
+              "const": "not_checked",
+              "default": "not_checked",
+              "type": "string"
+            },
+            "goal": {
+              "type": "string"
+            },
+            "integration": {
+              "type": "string"
+            },
+            "method": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "missing_inputs": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "next_action": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "requirements": {
+              "items": {
+                "$ref": "#/$defs/Requirement"
+              },
+              "type": "array"
+            },
+            "security_notes": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "sources": {
+              "items": {
+                "$ref": "#/$defs/GuideSource"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "status": {
+              "default": "success",
+              "enum": [
+                "success",
+                "needs_input"
+              ],
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/GuideStep"
+              },
+              "type": "array"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "verification": {
+              "items": {
+                "$ref": "#/$defs/VerificationCheck"
+              },
+              "type": "array"
+            },
+            "warnings": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "integration",
+            "goal",
+            "summary",
+            "sources",
+            "security_notes"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "error": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "enum": [
+                "INVALID_ARGUMENT",
+                "UNAUTHENTICATED",
+                "PERMISSION_DENIED",
+                "NOT_FOUND",
+                "CONFLICT",
+                "RATE_LIMITED",
+                "INTEGRATION_UNAVAILABLE",
+                "UPSTREAM_ERROR",
+                "TIMEOUT",
+                "INTERNAL_ERROR",
+                "PLAN_LIMIT_EXCEEDED",
+                "BILLING_REMEDIATION_REQUIRED",
+                "ENTITLEMENTS_UNAVAILABLE"
+              ],
+              "type": "string"
+            },
+            "details": {
+              "type": [
+                "object",
+                "array",
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "meta": {
+      "additionalProperties": false,
+      "properties": {
+        "generated_at": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "generated_at",
+        "truncated",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "request_id": {
+      "type": "string"
+    },
+    "schema_id": {
+      "const": "incidentflow.guide-me.response",
+      "type": "string"
+    },
+    "schema_version": {
+      "enum": [
+        "1.0"
+      ],
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "api_version",
+    "schema_version",
+    "schema_id",
+    "status",
+    "request_id",
+    "data",
+    "error",
+    "meta"
+  ],
+  "type": "object"
+}

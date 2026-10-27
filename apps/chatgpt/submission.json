@@ -604,6 +604,18 @@
         "destructive_justification": "This tool does not delete, overwrite, or modify any Grafana configuration, dashboards, or data; it only reports connection health."
       }
     },
+    "guide_me": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "This tool deterministically routes an integration question to curated, read-only setup guidance. It never accepts, returns, or stores secrets and cannot make changes.",
+        "open_world_justification": "This tool is limited to IncidentFlow's curated integration guidance and public documentation sources.",
+        "destructive_justification": "This tool does not delete, overwrite, or modify anything; it only returns guidance."
+      }
+    },
     "integration_guide": {
       "annotations": {
         "readOnlyHint": true,
