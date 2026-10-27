@@ -10,6 +10,7 @@ from incidentflow_mcp.mcp.entitlements import require_workspace_capability
 from incidentflow_mcp.mcp.errors import structured_tool_exception
 from incidentflow_mcp.platform_api.entitlements_client import PlatformEntitlementsClient
 from incidentflow_mcp.tools.contracts import ErrorCode
+from incidentflow_mcp.tools.integration_guide import UnsafeIntegrationGuideTemplateError
 from incidentflow_mcp.tools.integration_guide import guide_me as _guide_me
 from incidentflow_mcp.tools.integration_guide import integration_guide as _integration_guide
 from incidentflow_mcp.tools.knowledge_search_tools import (
@@ -114,8 +115,12 @@ def register_knowledge_tools(
                 context=context,
                 response_mode=response_mode,
             )
+        except UnsafeIntegrationGuideTemplateError as exc:
+            return structured_tool_exception(exc, code=ErrorCode.CONFLICT)
         except KnowledgeSearchAPIError as exc:
             return structured_tool_exception(exc, code=ErrorCode.UPSTREAM_ERROR)
+        except ValueError as exc:
+            return structured_tool_exception(exc, code=ErrorCode.INVALID_ARGUMENT)
         return result.model_dump(mode="json")
 
     @ctx.mcp.tool(**ctx.metadata("guide_me"))
@@ -129,6 +134,8 @@ def register_knowledge_tools(
             result = await _guide_me(
                 ctx.settings, question=question, context=context, response_mode=response_mode
             )
+        except UnsafeIntegrationGuideTemplateError as exc:
+            return structured_tool_exception(exc, code=ErrorCode.CONFLICT)
         except (KnowledgeSearchAPIError, ValueError) as exc:
             return structured_tool_exception(exc, code=ErrorCode.INVALID_ARGUMENT)
         return result.model_dump(mode="json")

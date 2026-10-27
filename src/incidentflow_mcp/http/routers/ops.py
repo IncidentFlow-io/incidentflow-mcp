@@ -50,8 +50,11 @@ def _contract_json(request: Request, payload: object, *, media_type: str | None 
 
 def _oauth_authority_base(settings: Settings, request: Request) -> str:
     return (
-        settings.oauth_expected_issuer
-        or settings.platform_api_base_url
+        # platform-api owns dynamic registration, authorization, and token
+        # issuance. oauth_expected_issuer validates issued JWTs; it is not the
+        # endpoint to proxy OAuth protocol requests to.
+        settings.platform_api_base_url
+        or settings.oauth_expected_issuer
         or str(request.base_url).rstrip("/")
     ).rstrip("/")
 
