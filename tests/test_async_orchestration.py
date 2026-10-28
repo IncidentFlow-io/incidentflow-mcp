@@ -1417,6 +1417,33 @@ async def test_fastmcp_runtime_error_sets_is_error() -> None:
     assert result.structuredContent["error"]["details"]["http_status"] == 404
 
 
+@pytest.mark.asyncio
+async def test_fastmcp_k8s_policy_denial_sets_is_error() -> None:
+    class FakeMetadata:
+        async def call_fn_with_arg_validation(self, *args: object, **kwargs: object) -> object:
+            return {
+                "status": "failed",
+                "error": {
+                    "code": "POLICY_DENIED",
+                    "message": "no active workspace access policy",
+                },
+            }
+
+    class FakeTool:
+        name = "k8s_list_namespaces"
+        fn_metadata = FakeMetadata()
+        fn = object()
+        is_async = True
+        context_kwarg = None
+
+    result = await run_tool_with_structured_errors(FakeTool(), {})
+
+    assert result.isError is True
+    assert result.structuredContent["status"] == "error"
+    assert result.structuredContent["error"]["code"] == "PERMISSION_DENIED"
+    assert result.structuredContent["error"]["details"]["code"] == "POLICY_DENIED"
+
+
 async def test_fastmcp_unknown_tool_arguments_return_structured_validation_error() -> None:
     from incidentflow_mcp.mcp.server import create_mcp_server
 

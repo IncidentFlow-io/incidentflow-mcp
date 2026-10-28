@@ -83,6 +83,11 @@ def _nested_kubernetes_failure(result: Any) -> dict[str, Any] | None:
     raw_error = result.get("error")
     if isinstance(raw_error, dict):
         raw_code = str(raw_error.get("code") or "INTERNAL_ERROR").upper()
+        # Agent policy denials are intentional authorization decisions. Keep
+        # their transport-specific code in details, but expose the stable MCP
+        # authorization code to callers.
+        if raw_code in {"POLICY_DENIED", "NAMESPACE_DENIED", "RBAC_DENIED"}:
+            raw_code = ErrorCode.PERMISSION_DENIED.value
         code = ErrorCode._value2member_map_.get(raw_code, ErrorCode.INTERNAL_ERROR)
         return {
             "code": code,
@@ -135,9 +140,18 @@ async def run_tool_with_structured_errors(
         return _error_result(tool.name, tool_error_fields(result), request_id)
 
     # Agent command failures must never be represented as a successful result.
-    # `k8s_get_pod` is the direct command tool; composed diagnostic tools retain
-    # their partial evidence payloads and explicitly model their own status.
-    if tool.name == "k8s_get_pod":
+    # Composite diagnostic tools retain their partial-evidence payloads and
+    # explicitly model their own status; these tools are direct agent commands.
+    if tool.name in {
+        "k8s_list_namespaces",
+        "k8s_list_pods",
+        "k8s_get_pod",
+        "k8s_get_pod_logs",
+        "k8s_list_events",
+        "k8s_list_deployments",
+        "k8s_list_services",
+        "k8s_get_rollout_status",
+    }:
         nested_failure = _nested_kubernetes_failure(result)
         if nested_failure is not None:
             return _error_result(tool.name, nested_failure, request_id)
