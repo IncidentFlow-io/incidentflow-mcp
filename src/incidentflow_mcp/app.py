@@ -51,6 +51,7 @@ def create_app() -> FastAPI:
     in tests or the CLI runner — never instantiate FastAPI directly.
     """
     settings = get_settings()
+    settings.validate_oauth_discovery()
     configure_logging(
         settings.log_level,
         settings.library_log_level,

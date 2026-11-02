@@ -49,6 +49,7 @@ from incidentflow_mcp.mcp.services.kubernetes_commands import (
 from incidentflow_mcp.mcp.services.slack_access import resolve_slack_tool_access
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
+from incidentflow_mcp.platform_api.entitlements_client import PlatformEntitlementsClient
 from incidentflow_mcp.tools.output_models import K8sRbacCheckData
 from incidentflow_mcp.tools.registry import get_tool_specs
 
@@ -212,6 +213,15 @@ def _set_k8s_tool_context() -> None:
             "plan": None,
         }
     )
+
+
+def _allow_workspace_entitlements(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def get(self: PlatformEntitlementsClient, workspace_id: str) -> object:
+        _ = self
+        assert workspace_id == "ws_123"
+        return type("WritableEntitlements", (), {"writable": True})()
+
+    monkeypatch.setattr(PlatformEntitlementsClient, "get", get)
 
 
 def test_resolve_execution_mode_auto_sync_in_dev() -> None:
@@ -869,6 +879,7 @@ def test_cluster_health_assessment_deduplicates_warning_recommendations() -> Non
 async def test_k8s_namespace_overview_returns_namespace_error_before_empty_overview(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_workspace_entitlements(monkeypatch)
     monkeypatch.setattr(
         "incidentflow_mcp.config._settings",
         Settings(
@@ -946,6 +957,7 @@ async def test_k8s_namespace_overview_returns_namespace_error_before_empty_overv
 async def test_k8s_analyze_workload_missing_workload_is_not_healthy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    _allow_workspace_entitlements(monkeypatch)
     monkeypatch.setattr(
         "incidentflow_mcp.config._settings",
         Settings(

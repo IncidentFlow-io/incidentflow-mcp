@@ -58,14 +58,14 @@ def test_identity_resolution_prefers_auth_context_then_headers() -> None:
     assert identity.plan == "plan-from-auth"
 
 
-def test_plan_metadata_is_raw_not_remapped() -> None:
+def test_untrusted_plan_header_is_ignored() -> None:
     req = _request(
         headers=[(b"x-plan-tier", b" Pro ")],
         auth_context={"authenticated": True},
     )
 
     identity = IdentityResolver().resolve(req)
-    assert identity.plan == "Pro"
+    assert identity.plan is None
 
 
 def test_principal_key_resolution_order() -> None:

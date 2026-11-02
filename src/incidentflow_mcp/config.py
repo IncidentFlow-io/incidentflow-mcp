@@ -5,6 +5,8 @@ Copy `.env.example` to `.env` and adjust values for local development.
 All settings can be overridden via real environment variables without a file.
 """
 
+from urllib.parse import SplitResult, urlsplit
+
 from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -529,6 +531,54 @@ class Settings(BaseSettings):
 
     def oauth_validation_enabled(self) -> bool:
         return bool(self.oauth_expected_issuer and self.oauth_jwks_url)
+
+    def validate_oauth_discovery(self) -> None:
+        """Fail startup when published OAuth identity differs from token validation."""
+        if bool(self.oauth_expected_issuer) != bool(self.oauth_jwks_url):
+            raise ValueError("OAUTH_EXPECTED_ISSUER and OAUTH_JWKS_URL must be configured together")
+        canonical_configured = "mcp_canonical_resource" in self.model_fields_set
+        if not self.oauth_validation_enabled() and not canonical_configured:
+            return
+
+        resource = self.mcp_canonical_resource
+        issuer = self.oauth_expected_issuer or resource.removesuffix("/mcp")
+        metadata = self.mcp_resource_metadata_url
+        parsed_issuer = urlsplit(issuer)
+        parsed_resource = urlsplit(resource)
+        parsed_metadata = urlsplit(metadata)
+        jwks = self.oauth_jwks_url or ""
+        parsed_jwks = urlsplit(jwks)
+        local_hosts = {"localhost", "127.0.0.1", "::1"}
+
+        def valid_url(url: str, parsed: SplitResult) -> bool:
+            return bool(
+                parsed.scheme in {"https", "http"}
+                and parsed.hostname
+                and (parsed.scheme == "https" or parsed.hostname in local_hosts)
+                and not parsed.username
+                and not parsed.password
+                and not parsed.query
+                and not parsed.fragment
+                and not url.endswith("/")
+            )
+
+        if not valid_url(issuer, parsed_issuer) or parsed_issuer.path:
+            raise ValueError(
+                "OAUTH_EXPECTED_ISSUER must be a public HTTPS origin or local HTTP origin"
+            )
+        if (
+            not valid_url(resource, parsed_resource)
+            or parsed_resource.path != "/mcp"
+            or (parsed_resource.scheme, parsed_resource.netloc)
+            != (parsed_issuer.scheme, parsed_issuer.netloc)
+        ):
+            raise ValueError("MCP_CANONICAL_RESOURCE must equal OAUTH_EXPECTED_ISSUER + /mcp")
+        if metadata != f"{issuer}/.well-known/oauth-protected-resource" or not valid_url(
+            metadata, parsed_metadata
+        ):
+            raise ValueError("MCP_RESOURCE_METADATA_URL must match OAUTH_EXPECTED_ISSUER")
+        if self.oauth_validation_enabled() and not valid_url(jwks, parsed_jwks):
+            raise ValueError("OAUTH_JWKS_URL must use HTTPS or local loopback HTTP")
 
 
 _settings: Settings | None = None
