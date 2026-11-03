@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import pytest
@@ -54,6 +55,63 @@ async def test_get_projects_public_api_payload_onto_strict_mcp_contract() -> Non
     assert payload["latest_assessment"]["root_cause"] == "ErrImagePull"
     assert "evidence" not in payload
     assert "timeline" not in payload
+
+
+@pytest.mark.asyncio
+async def test_get_projects_citation_uuids_to_aliases_across_all_assessments_and_passes() -> None:
+    evidence_id = "295f6333-8da0-47d9-98e4-e199da0f8229"
+    timeline_id = "a769d27f-e419-4da8-906c-026c3e054b6c"
+    assessment = {
+        "support_evidence_ids": [evidence_id],
+        "llm_rca": {
+            "summary": {"support_evidence_ids": [evidence_id]},
+            "hypotheses": [{"contradiction_evidence_ids": [evidence_id]}],
+            "timeline_event_refs": [timeline_id],
+        },
+    }
+    detail = _detail_payload()
+    detail["evidence_summary"] = {
+        "items": [{"id": evidence_id, "evidence_id": "E01"}],
+        "returned": 1,
+        "limit": 20,
+    }
+    detail["recent_timeline"] = {
+        "items": [{"id": timeline_id, "reference_id": "T01"}],
+        "returned": 1,
+        "limit": 20,
+    }
+    detail["assessment"] = assessment
+    detail["initial_assessment"] = assessment
+    detail["latest_assessment"] = assessment
+    detail["passes"] = [{"assessment": assessment}]
+
+    output = await investigation_get(
+        FakeInvestigationsClient(detail=detail),
+        investigation_id="be02f333-7333-4072-bf56-e44b4572715c",
+    )
+
+    payload = output.model_dump(mode="json")
+    for key in ("assessment", "initial_assessment", "latest_assessment"):
+        projected = payload[key]
+        assert projected["support_evidence_ids"] == ["E01"]
+        assert projected["llm_rca"]["summary"]["support_evidence_ids"] == ["E01"]
+        assert projected["llm_rca"]["hypotheses"][0]["contradiction_evidence_ids"] == ["E01"]
+        assert projected["llm_rca"]["timeline_event_refs"] == ["T01"]
+        assert evidence_id not in json.dumps(projected)
+        assert timeline_id not in json.dumps(projected)
+
+    pass_assessment = payload["passes"][0]["assessment"]
+    assert pass_assessment["llm_rca"]["timeline_event_refs"] == ["T01"]
+    assert evidence_id not in json.dumps(pass_assessment)
+    assert timeline_id not in json.dumps(pass_assessment)
+
+    repeated_output = await investigation_get(
+        FakeInvestigationsClient(detail=payload),
+        investigation_id="be02f333-7333-4072-bf56-e44b4572715c",
+    )
+    repeated_payload = repeated_output.model_dump(mode="json")
+    assert repeated_payload["initial_assessment"] == payload["initial_assessment"]
+    assert repeated_payload["passes"] == payload["passes"]
 
 
 @pytest.mark.asyncio
