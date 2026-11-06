@@ -252,7 +252,7 @@ sequenceDiagram
 
 ## 6. OAuth: MCP as a Resource Server
 
-MCP implements **discovery + a thin bridge**; the authorization server itself lives in platform-api. The "authority base" is computed as `oauth_expected_issuer`, otherwise `platform_api_base_url`, otherwise `request.base_url` (`ops.py:_oauth_authority_base`).
+MCP implements **discovery + a thin bridge**; the authorization server itself lives in platform-api. Protected Resource metadata publishes `MCP_CANONICAL_RESOURCE` and `OAUTH_EXPECTED_ISSUER`, never the internal ASGI request origin. The two protected-resource paths return identical documents. MCP's local Authorization Server discovery also uses `OAUTH_EXPECTED_ISSUER`; in dev/prod, Istio routes Authorization Server discovery and the OAuth endpoints directly to platform-api. MCP's bridge targets `PLATFORM_API_BASE_URL` when used locally.
 
 ```mermaid
 sequenceDiagram
@@ -428,6 +428,10 @@ flowchart LR
 | `metrics_trusted_cidrs` | `METRICS_TRUSTED_CIDRS` | `127/8,::1,10/8,172.16/12,192.168/16` | `/metrics` access without auth |
 | `openai_domain_verification_path/_token` | — | `None` | OpenAI Apps domain verification |
 | `allow_unprotected_in_production` | `ALLOW_UNPROTECTED_IN_PRODUCTION` | `False` | bypass the prod guard |
+
+For OAuth-enabled deployments, configure `OAUTH_EXPECTED_ISSUER`, `OAUTH_JWKS_URL`, `MCP_CANONICAL_RESOURCE`, and `MCP_RESOURCE_METADATA_URL` together. The issuer must be a public HTTPS origin; the resource must equal `{issuer}/mcp`, and the metadata URL must equal `{issuer}/.well-known/oauth-protected-resource`. HTTP is accepted only for a local loopback issuer (`localhost`, `127.0.0.1`, `::1`). Invalid combinations fail MCP startup. Discovery ignores client-supplied `X-Forwarded-Proto` and `X-Forwarded-Host`. If `MCP_CANONICAL_RESOURCE` is explicitly configured while JWT validation is disabled, Protected Resource metadata still publishes that canonical resource and derives its public issuer from the same origin. With neither configured, isolated local development uses the request origin.
+
+The existing Helm values in `infrastructure/helm/incidentflow-mcp/values-dev.yaml` and `values-prod.yaml` already set these URLs to `https://mcp-dev.incidentflow.io` and `https://mcp.incidentflow.io` respectively. The corresponding platform-api Helm values set the same issuer/resource for token issuance. No new Secret or proxy-header trust setting is required. Publish the MCP image through its `incidentflow-mcp/dev-v*` tag workflow; it updates only the dev Helm values, after which Argo CD syncs dev. Verify both metadata paths and the Platform API Authorization Server metadata before attempting `codex mcp login incidentflow-dev` and MCP `tools/list`. Promote to production only after the dev OAuth flow succeeds.
 | `mcp_default_workspace_id` | `INCIDENTFLOW_WORKSPACE_ID` / `MCP_DEFAULT_WORKSPACE_ID` | `None` | default workspace |
 
 ---

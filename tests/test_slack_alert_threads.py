@@ -8,6 +8,7 @@ from incidentflow_mcp.auth.context import clear_current_auth_context, set_curren
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.mcp.registration.slack import normalize_slack_thread_mode
 from incidentflow_mcp.mcp.server import create_mcp_server
+from incidentflow_mcp.platform_api.entitlements_client import PlatformEntitlementsClient
 from incidentflow_mcp.slack.slack_client import SlackThreadFetchResult
 from incidentflow_mcp.tools import slack_alerts
 
@@ -538,6 +539,12 @@ def test_unknown_thread_mode_still_raises() -> None:
 async def test_slack_alerts_list_rejects_zero_limit_before_slack_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    async def writable_entitlements(self: PlatformEntitlementsClient, workspace_id: str) -> object:
+        _ = self
+        assert workspace_id == "ws_123"
+        return type("WritableEntitlements", (), {"writable": True})()
+
+    monkeypatch.setattr(PlatformEntitlementsClient, "get", writable_entitlements)
     monkeypatch.setattr(
         "incidentflow_mcp.config._settings",
         Settings(_env_file=None, environment="development", redis_url="redis://test-only"),

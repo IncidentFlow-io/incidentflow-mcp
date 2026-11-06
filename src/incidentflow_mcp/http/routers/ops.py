@@ -7,6 +7,7 @@ be included into the FastAPI app via app.include_router(...).
 
 import hashlib
 import json
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -60,11 +61,9 @@ def _oauth_authority_base(settings: Settings, request: Request) -> str:
 
 
 def _oauth_metadata(settings: Settings, request: Request, *, openid: bool = False) -> dict:
-    # OAuth metadata must identify the same origin that serves its well-known
-    # document. The local MCP origin bridges authorize/token/register requests
-    # to platform-api, while OAUTH_EXPECTED_ISSUER remains the issuer used only
-    # to validate returned access tokens.
-    auth_base = str(request.base_url).rstrip("/")
+    # Public identity is configured explicitly. Proxy headers and the internal
+    # ASGI scheme must not change the issuer advertised to OAuth clients.
+    auth_base = _public_oauth_issuer(settings, request)
     scopes_supported = (
         ["openid", "email", "profile", "mcp:read", "mcp:tools:run"]
         if openid
@@ -72,6 +71,7 @@ def _oauth_metadata(settings: Settings, request: Request, *, openid: bool = Fals
     )
     payload = {
         "issuer": auth_base,
+        "authorization_response_iss_parameter_supported": True,
         "authorization_endpoint": f"{auth_base}/authorize",
         "token_endpoint": f"{auth_base}/token",
         "registration_endpoint": f"{auth_base}/register",
@@ -95,6 +95,28 @@ def _oauth_metadata(settings: Settings, request: Request, *, openid: bool = Fals
             }
         )
     return payload
+
+
+def _public_oauth_issuer(settings: Settings, request: Request) -> str:
+    # Unconfigured local development retains the request origin.
+    if settings.oauth_expected_issuer:
+        return settings.oauth_expected_issuer
+    if "mcp_canonical_resource" in settings.model_fields_set:
+        resource = urlsplit(settings.mcp_canonical_resource)
+        return f"{resource.scheme}://{resource.netloc}"
+    return str(request.base_url).rstrip("/")
+
+
+def _protected_resource_metadata(settings: Settings, request: Request) -> dict:
+    issuer = _public_oauth_issuer(settings, request)
+    return {
+        "resource": settings.mcp_canonical_resource
+        if settings.oauth_validation_enabled()
+        or "mcp_canonical_resource" in settings.model_fields_set
+        else f"{issuer}/mcp",
+        "authorization_servers": [issuer],
+        "scopes_supported": ["mcp:read", "mcp:tools:run"],
+    }
 
 
 async def _proxy_to_oauth_authority(
@@ -212,28 +234,14 @@ def create_ops_router(settings: Settings) -> APIRouter:
         summary="OAuth protected resource metadata",
     )
     async def oauth_protected_resource(request: Request) -> JSONResponse:
-        auth_server = str(request.base_url).rstrip("/")
-        return JSONResponse(
-            content={
-                "resource": f"{auth_server}/mcp",
-                "authorization_servers": [auth_server],
-                "scopes_supported": ["mcp:read", "mcp:tools:run"],
-            }
-        )
+        return JSONResponse(content=_protected_resource_metadata(settings, request))
 
     @router.get(
         "/.well-known/oauth-protected-resource/mcp",
         summary="OAuth protected resource metadata (MCP path)",
     )
     async def oauth_protected_resource_mcp(request: Request) -> JSONResponse:
-        auth_server = str(request.base_url).rstrip("/")
-        return JSONResponse(
-            content={
-                "resource": f"{auth_server}/mcp",
-                "authorization_servers": [auth_server],
-                "scopes_supported": ["mcp:read", "mcp:tools:run"],
-            }
-        )
+        return JSONResponse(content=_protected_resource_metadata(settings, request))
 
     @router.get(
         "/.well-known/oauth-authorization-server",
