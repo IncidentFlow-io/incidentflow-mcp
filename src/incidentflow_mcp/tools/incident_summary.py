@@ -170,3 +170,65 @@ def incident_summary(input_data: IncidentSummaryInput) -> IncidentSummaryOutput:
         recommendations=raw["recommendations"],
         human_context_from_slack_thread=raw.get("human_context_from_slack_thread"),
     )
+
+
+def incident_summary_from_platform(
+    input_data: IncidentSummaryInput,
+    incident: dict,
+    timeline: dict | None = None,
+) -> IncidentSummaryOutput:
+    """Map the workspace-scoped Platform API read model without status filtering."""
+    raw_severity = str(incident.get("severity") or "info").lower()
+    severity = {
+        "sev1": Severity.CRITICAL,
+        "sev2": Severity.HIGH,
+        "sev3": Severity.WARNING,
+    }.get(raw_severity)
+    if severity is None:
+        try:
+            severity = Severity(raw_severity)
+        except ValueError:
+            severity = Severity.INFO
+
+    events = []
+    if input_data.include_timeline:
+        for event in (timeline or {}).get("events", []):
+            payload = event.get("payload") or {}
+            description = next(
+                (
+                    value
+                    for key in ("summary", "description", "message", "title")
+                    if isinstance((value := payload.get(key)), str) and value.strip()
+                ),
+                str(event.get("event_name") or "Incident event"),
+            )
+            provenance = event.get("provenance") or {}
+            events.append(
+                TimelineEvent(
+                    timestamp=event["occurred_at"],
+                    description=description,
+                    actor=provenance.get("actor") or provenance.get("source"),
+                )
+            )
+
+    services = []
+    if input_data.include_affected_services:
+        candidates = [incident.get("primary_service_ref")]
+        candidates.extend(
+            signal.get("service_ref")
+            for signal in incident.get("contributing_signals", [])
+            if isinstance(signal, dict)
+        )
+        services = list(dict.fromkeys(item for item in candidates if isinstance(item, str) and item))
+
+    title = str(incident.get("title") or "Incident")
+    return IncidentSummaryOutput(
+        incident_id=str(incident.get("id") or input_data.incident_id),
+        title=title,
+        severity=severity,
+        status=str(incident.get("status") or "unknown"),
+        summary=str(incident.get("summary_current") or title),
+        affected_services=services,
+        timeline=events,
+        recommendations=[],
+    )
