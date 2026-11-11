@@ -305,6 +305,12 @@ tool_duration_seconds = Histogram(
     ("tool", "status"),
     buckets=_LATENCY_BUCKETS,
 )
+kubernetes_tool_cache_duration_seconds = Histogram(
+    "incidentflow_mcp_kubernetes_tool_duration_seconds",
+    "MCP pod list tool latency in seconds by agent cache outcome.",
+    ("cache_result",),
+    buckets=_LATENCY_BUCKETS,
+)
 mcp_request_duration_seconds = Histogram(
     "mcp_request_duration_seconds",
     "Full MCP request latency in seconds from HTTP entrypoint to response.",
