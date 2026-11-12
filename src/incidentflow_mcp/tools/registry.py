@@ -1014,6 +1014,18 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema=_k8s_schema(
             {
                 "namespace": {"type": "string"},
+                "consistency": {
+                    "type": "string",
+                    "enum": ["cached", "fresh"],
+                    "default": "cached",
+                    "description": "Use a recent cache snapshot or force a live Kubernetes LIST.",
+                },
+                "max_staleness_seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5,
+                    "description": "Maximum confirmed cache age for cached reads.",
+                },
                 "include_labels": {
                     "type": "boolean",
                     "default": False,

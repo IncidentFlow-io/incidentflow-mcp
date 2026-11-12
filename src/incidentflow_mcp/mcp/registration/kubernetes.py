@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from time import perf_counter
 from typing import Annotated, Any, Literal
 
 from pydantic import Field
@@ -16,6 +17,7 @@ from incidentflow_mcp.mcp.errors import structured_guard_error as _structured_gu
 from incidentflow_mcp.mcp.services import kubernetes_analysis as analysis
 from incidentflow_mcp.mcp.services import kubernetes_commands as commands
 from incidentflow_mcp.mcp.services.memory_context import MemoryContextService
+from incidentflow_mcp.observability.metrics import kubernetes_tool_cache_duration_seconds
 from incidentflow_mcp.platform_api.agent_commands_client import PlatformAPIAgentCommandsClient
 
 _K8S_ALLOWED_ACTIONS = {
@@ -159,7 +161,11 @@ async def _fetch_pods_for_analysis(
     cluster_name: str | None,
     timeout_seconds: int,
     integration_context: ResolvedIntegrationContext | None = None,
+    health_summary_only: bool = False,
 ) -> dict[str, Any]:
+    params: dict[str, Any] = {"namespace": namespace} if namespace else {}
+    if health_summary_only:
+        params["health_summary_only"] = True
     raw = await _send_k8s_agent_command(
         settings=settings,
         current_bearer_token=current_bearer_token,
@@ -167,7 +173,7 @@ async def _fetch_pods_for_analysis(
         environment=environment,
         cluster_name=cluster_name,
         action="k8s.list_pods",
-        params={"namespace": namespace} if namespace else {},
+        params=params,
         timeout_seconds=timeout_seconds,
         integration_context=integration_context,
     )
@@ -410,10 +416,18 @@ def register_kubernetes_tools(
         include_images: bool = True,
         include_node: bool = True,
         limit: Annotated[int, Field(ge=1, le=200)] = 50,
+        consistency: Literal["cached", "fresh"] = "cached",
+        max_staleness_seconds: Annotated[int | None, Field(ge=1, le=5)] = None,
     ) -> dict[str, Any]:
+        started = perf_counter()
         guard = await resolve_tool_guard("k8s_list_pods")
         if isinstance(guard, str):
             return {"status": "failed", "error": guard}
+        params: dict[str, Any] = {"namespace": namespace} if namespace else {}
+        if consistency == "fresh":
+            params["consistency"] = consistency
+        if max_staleness_seconds is not None:
+            params["max_staleness_seconds"] = max_staleness_seconds
         raw = await _send_k8s_agent_command(
             current_bearer_token=current_bearer_token,
             settings=settings,
@@ -421,7 +435,7 @@ def register_kubernetes_tools(
             environment=environment,
             cluster_name=cluster_name,
             action="k8s.list_pods",
-            params={"namespace": namespace} if namespace else {},
+            params=params,
             timeout_seconds=timeout_seconds,
             integration_context=guard if isinstance(guard, ResolvedIntegrationContext) else None,
         )
@@ -439,7 +453,7 @@ def register_kubernetes_tools(
             for p in capped
             if isinstance(p, dict)
         ]
-        return _with_integration_context(
+        result = _with_integration_context(
             {
                 "status": payload.get("status", "unknown"),
                 "data": {
@@ -453,6 +467,12 @@ def register_kubernetes_tools(
             guard if isinstance(guard, ResolvedIntegrationContext) else None,
             settings,
         )
+        cache_result = data.get("cache_result") if isinstance(data, dict) else None
+        if payload.get("status") == "succeeded" and cache_result in ("cached", "live"):
+            kubernetes_tool_cache_duration_seconds.labels(cache_result=cache_result).observe(
+                perf_counter() - started
+            )
+        return result
 
     @ctx.mcp.tool(**ctx.metadata("k8s_get_pod"))
     async def k8s_get_pod(
@@ -841,7 +861,10 @@ def register_kubernetes_tools(
             cluster_name=cluster_name,
             timeout_seconds=timeout_seconds,
             integration_context=guard if isinstance(guard, ResolvedIntegrationContext) else None,
+            health_summary_only=True,
         )
+        if not _command_ok(result):
+            return result
         data = result.get("data") if isinstance(result, dict) else None
         pods = data.get("pods") if isinstance(data, dict) else []
         pods = pods if isinstance(pods, list) else []

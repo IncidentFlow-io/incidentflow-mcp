@@ -43,7 +43,6 @@ _K8S_RBAC_ACTIONS = {
 # troubleshooting tools stale.  Logs and events are intentionally not cached.
 _K8S_READ_CACHE_TTLS_SECONDS = {
     "k8s.list_namespaces": 120,
-    "k8s.list_pods": 3,
     "k8s.get_pod": 3,
     "k8s.describe_pod": 3,
     "k8s.list_deployments": 15,

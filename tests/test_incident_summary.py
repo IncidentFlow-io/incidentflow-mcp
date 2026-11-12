@@ -5,7 +5,12 @@ Unit tests for the incident_summary tool.
 import pytest
 from pydantic import ValidationError
 
-from incidentflow_mcp.tools.incident_summary import incident_summary
+from incidentflow_mcp.config import Settings
+from incidentflow_mcp.mcp.registration import async_jobs
+from incidentflow_mcp.tools.incident_summary import (
+    incident_summary,
+    incident_summary_from_platform,
+)
 from incidentflow_mcp.tools.schemas import IncidentSummaryInput, Severity
 
 
@@ -66,6 +71,95 @@ class TestIncidentSummaryUnknownId:
     def test_unknown_id_has_empty_timeline(self) -> None:
         result = incident_summary(IncidentSummaryInput(incident_id="INC-UNKNOWN"))
         assert result.timeline == []
+
+
+def test_platform_summary_returns_resolved_incident_from_workspace_read_model() -> None:
+    result = incident_summary_from_platform(
+        IncidentSummaryInput(incident_id="ca4436cc-eaaa-4e79-a6aa-6ea02a045ca2"),
+        {
+            "id": "ca4436cc-eaaa-4e79-a6aa-6ea02a045ca2",
+            "workspace_id": "5e647670-a2c6-4994-b7fb-5e3a331bea82",
+            "title": "Pod is crash looping",
+            "status": "resolved",
+            "severity": "sev1",
+            "summary_current": "Pod recovered",
+            "primary_service_ref": "details-v1",
+            "contributing_signals": [],
+        },
+        {"events": []},
+    )
+
+    assert result.status == "resolved"
+    assert result.incident_id == "ca4436cc-eaaa-4e79-a6aa-6ea02a045ca2"
+    assert result.affected_services == ["details-v1"]
+
+
+@pytest.mark.asyncio
+async def test_registered_incident_summary_reads_resolved_incident_from_platform(
+    monkeypatch,
+) -> None:
+    incident_id = "ca4436cc-eaaa-4e79-a6aa-6ea02a045ca2"
+    workspace_id = "5e647670-a2c6-4994-b7fb-5e3a331bea82"
+    platform_incident = {
+        "id": incident_id,
+        "workspace_id": workspace_id,
+        "title": "Pod is crash looping",
+        "status": "resolved",
+        "severity": "sev1",
+        "summary_current": "Pod recovered",
+        "primary_service_ref": "details-v1",
+        "contributing_signals": [],
+    }
+
+    class FakePlatformClient:
+        def __init__(self, _settings, *, bearer_token: str) -> None:
+            assert bearer_token == "workspace-token"
+
+        async def get(self, requested_id: str) -> dict:
+            assert requested_id == incident_id
+            return platform_incident
+
+        async def get_timeline(self, requested_id: str) -> dict:
+            assert requested_id == incident_id
+            return {"events": []}
+
+    class FakeMemory:
+        async def consult_memory(self, **kwargs):
+            assert kwargs["workspace_id"] == workspace_id
+            return None
+
+    class FakeMCP:
+        tools = {}
+
+        def tool(self, **metadata):
+            def register(function):
+                self.tools[metadata["name"]] = function
+                return function
+
+            return register
+
+    monkeypatch.setattr(async_jobs, "PlatformIncidentsClient", FakePlatformClient)
+    mcp = FakeMCP()
+    context = type(
+        "Context",
+        (),
+        {
+            "settings": Settings(_env_file=None, platform_api_base_url="http://platform"),
+            "mcp": mcp,
+            "metadata": staticmethod(lambda name: {"name": name}),
+        },
+    )()
+    async_jobs.register_async_tools(
+        context,
+        memory=FakeMemory(),
+        current_token_workspace_id=lambda: workspace_id,
+        current_bearer_token=lambda: "workspace-token",
+    )
+
+    result = await mcp.tools["incident_summary"](incident_id=incident_id, execution_mode="sync")
+
+    assert result["incident_id"] == incident_id
+    assert result["status"] == "resolved"
 
 
 class TestIncidentSummaryInputValidation:

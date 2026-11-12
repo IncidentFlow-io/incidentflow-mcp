@@ -23,8 +23,12 @@ from incidentflow_mcp.mcp.services.async_jobs import (
 )
 from incidentflow_mcp.mcp.services.memory_context import MemoryContextService
 from incidentflow_mcp.platform_api.ai_jobs_client import PlatformAPIJobsClient
+from incidentflow_mcp.platform_api.incidents_client import PlatformIncidentsClient
 from incidentflow_mcp.tools.correlate_alerts import correlate_alerts as _correlate_alerts_impl
-from incidentflow_mcp.tools.incident_summary import incident_summary as _incident_summary_impl
+from incidentflow_mcp.tools.incident_summary import (
+    incident_summary as _incident_summary_impl,
+    incident_summary_from_platform,
+)
 from incidentflow_mcp.tools.schemas import (
     Alert,
     CorrelateAlertsInput,
@@ -88,6 +92,24 @@ def register_async_tools(
             token_workspace_id=current_token_workspace_id(),
             default_workspace_id=settings.mcp_default_workspace_id,
         )
+        bearer_token = current_bearer_token()
+        if settings.platform_api_base_url and bearer_token:
+            client = PlatformIncidentsClient(settings, bearer_token=bearer_token)
+            incident = await client.get(incident_id)
+            timeline = (
+                await client.get_timeline(incident_id) if include_timeline else None
+            )
+            result = incident_summary_from_platform(input_data, incident, timeline)
+            data = result.model_dump(mode="json")
+            memory_payload = await memory.consult_memory(
+                query=f"{result.title} {result.summary}".strip(),
+                service=result.affected_services[0] if result.affected_services else None,
+                workspace_id=resolved_workspace_id,
+            )
+            if memory_payload:
+                data["memory_context"] = memory_payload
+            return data
+
         if mode == "sync":
             result: IncidentSummaryOutput = _incident_summary_impl(input_data)
             data = result.model_dump(mode="json")
