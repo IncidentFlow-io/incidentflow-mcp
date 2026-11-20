@@ -394,7 +394,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         input_schema={
             "type": "object",
             "properties": {
-                "question": {"type": "string", "description": "Integration question in natural language."},
+                "question": {
+                    "type": "string",
+                    "description": "Integration question in natural language.",
+                },
                 "context": {
                     "type": "object",
                     "description": (
@@ -403,7 +406,11 @@ _TOOL_SPECS: list[ToolSpec] = [
                     ),
                     "additionalProperties": {"type": ["string", "number", "boolean", "null"]},
                 },
-                "response_mode": {"type": "string", "enum": ["compact", "full"], "default": "compact"},
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                },
             },
             "required": ["question"],
             "additionalProperties": False,
@@ -2119,3 +2126,110 @@ _TOOL_SPECS.extend(
 def get_tool_specs() -> list[ToolSpec]:
     """Return all registered tool specifications."""
     return list(_TOOL_SPECS)
+
+
+_LOGS_SCOPE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        key: {"type": "string"}
+        for key in (
+            "cluster",
+            "environment",
+            "namespace",
+            "service",
+            "workload",
+            "pod",
+            "container",
+        )
+    },
+    "additionalProperties": False,
+}
+_LOGS_FILTER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "contains": {"type": "array", "items": {"type": "string"}},
+        "excludes": {"type": "array", "items": {"type": "string"}},
+        "levels": {"type": "array", "items": {"type": "string"}},
+        "labels": {"type": "object", "additionalProperties": {"type": "string"}},
+    },
+    "additionalProperties": False,
+}
+_TOOL_SPECS.extend(
+    [
+        ToolSpec(
+            name="logs_list_sources",
+            title="List Logs Sources",
+            description=(
+                "Read-only list of configured log sources in the active workspace. "
+                "Returns no credentials."
+            ),
+            input_schema={"type": "object", "properties": {}, "required": []},
+            annotations=_read_only_annotations(),
+            structured_output=True,
+        ),
+        ToolSpec(
+            name="logs_connection_health",
+            title="Check Logs Connection",
+            description="Read-only health check for one workspace log source.",
+            input_schema={
+                "type": "object",
+                "properties": {"source_id": {"type": "string"}},
+                "required": ["source_id"],
+            },
+            annotations=_read_only_annotations(),
+            structured_output=True,
+        ),
+        ToolSpec(
+            name="logs_query",
+            title="Query Logs",
+            description=(
+                "Read-only bounded and redacted log query for a configured workspace source."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "source_id": {"type": "string"},
+                    "time_range": {
+                        "type": "object",
+                        "properties": {
+                            "start": {"type": "string", "format": "date-time"},
+                            "end": {"type": "string", "format": "date-time"},
+                        },
+                        "required": ["start", "end"],
+                        "additionalProperties": False,
+                    },
+                    "scope": _LOGS_SCOPE_SCHEMA,
+                    "filters": _LOGS_FILTER_SCHEMA,
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 500, "default": 100},
+                    "direction": {
+                        "type": "string",
+                        "enum": ["forward", "backward"],
+                        "default": "backward",
+                    },
+                },
+                "required": ["source_id", "time_range"],
+            },
+            annotations=_read_only_annotations(),
+            structured_output=True,
+        ),
+        ToolSpec(
+            name="logs_get_context",
+            title="Get Logs Context",
+            description=(
+                "Read-only bounded and redacted log lines around a timestamp for "
+                "a configured workspace source."
+            ),
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "source_id": {"type": "string"},
+                    "timestamp": {"type": "string", "format": "date-time"},
+                    "scope": _LOGS_SCOPE_SCHEMA,
+                },
+                "required": ["source_id", "timestamp"],
+            },
+            annotations=_read_only_annotations(),
+            structured_output=True,
+        ),
+    ]
+)
