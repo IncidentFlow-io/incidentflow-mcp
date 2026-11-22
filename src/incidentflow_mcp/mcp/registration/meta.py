@@ -120,6 +120,16 @@ _CAPABILITY_CATEGORIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             "knowledge_upsert",
         ),
     ),
+    (
+        "logs",
+        "Logs",
+        (
+            "logs_list_sources",
+            "logs_connection_health",
+            "logs_query",
+            "logs_get_context",
+        ),
+    ),
 )
 
 

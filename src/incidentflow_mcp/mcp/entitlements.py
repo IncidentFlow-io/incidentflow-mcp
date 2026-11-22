@@ -28,13 +28,20 @@ async def require_workspace_capability(
             "Workspace entitlements are temporarily unavailable",
             retryable=True,
         )
-    if not snapshot.writable:
+    permitted = snapshot.writable if write else snapshot.readable
+    if not permitted:
         record_entitlement_guard(
-            operation="workspace_capability", result="denied", reason="remediation"
+            operation="workspace_capability",
+            result="denied",
+            reason="remediation" if write else "read_access",
         )
         return tool_error(
             ErrorCode.BILLING_REMEDIATION_REQUIRED,
-            "Billing needs attention before this workspace action can run",
+            (
+                "Billing needs attention before this workspace action can run"
+                if write
+                else "Read access is not available for this workspace"
+            ),
             retryable=False,
             details={"upgrade_url": snapshot.upgrade_url},
         )

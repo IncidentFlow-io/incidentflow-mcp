@@ -1,0 +1,29 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: platform-api-local
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: platform-api
+          service: platform-api
+          environment: local
+          __path__: /var/log/incidentflow/platform-api.jsonl
+    pipeline_stages:
+      - json:
+          expressions:
+            timestamp: timestamp
+            level: level
+      - labels:
+          level:
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano

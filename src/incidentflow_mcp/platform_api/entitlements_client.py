@@ -21,16 +21,13 @@ class EntitlementsUnavailable(RuntimeError):
 class EntitlementSnapshot:
     workspace_id: str
     access_state: str
+    readable: bool
+    writable: bool
     limits: dict[str, int | None]
     features: dict[str, bool]
     usage: dict[str, int]
     upgrade_url: str
     ttl_seconds: int
-
-    @property
-    def writable(self) -> bool:
-        return self.access_state in {"free", "trial", "team", "team_canceling", "grace"}
-
 
 class PlatformEntitlementsClient:
     """Caches only successful snapshots; failures never extend cached writes."""
@@ -70,6 +67,8 @@ class PlatformEntitlementsClient:
             snapshot = EntitlementSnapshot(
                 workspace_id=str(body["workspace_id"]),
                 access_state=str(body["access_state"]),
+                readable=bool(body["readable"]),
+                writable=bool(body["writable"]),
                 limits=dict(body.get("limits") or {}),
                 features=dict(body.get("features") or {}),
                 usage=dict(body.get("usage") or {}),

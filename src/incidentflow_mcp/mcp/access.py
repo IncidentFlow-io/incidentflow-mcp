@@ -45,10 +45,17 @@ class ToolAccessResolver:
             return _entitlement_error(
                 "ENTITLEMENTS_UNAVAILABLE", "Workspace entitlements are temporarily unavailable"
             )
-        if not snapshot.writable:
+        permitted = (
+            snapshot.readable if spec.annotations.get("readOnlyHint") is True else snapshot.writable
+        )
+        if not permitted:
             return _entitlement_error(
                 "BILLING_REMEDIATION_REQUIRED",
-                "Billing needs attention before this workspace action can run",
+                (
+                    "Read access is not available for this workspace"
+                    if spec.annotations.get("readOnlyHint") is True
+                    else "Billing needs attention before this workspace action can run"
+                ),
             )
         return await self.integration_context_resolver(
             tool=spec,
