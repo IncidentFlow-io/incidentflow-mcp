@@ -542,7 +542,7 @@ async def test_slack_alerts_list_rejects_zero_limit_before_slack_access(
     async def writable_entitlements(self: PlatformEntitlementsClient, workspace_id: str) -> object:
         _ = self
         assert workspace_id == "ws_123"
-        return type("WritableEntitlements", (), {"writable": True})()
+        return type("WritableEntitlements", (), {"readable": True, "writable": True})()
 
     monkeypatch.setattr(PlatformEntitlementsClient, "get", writable_entitlements)
     monkeypatch.setattr(

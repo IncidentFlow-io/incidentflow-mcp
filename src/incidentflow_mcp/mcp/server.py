@@ -16,6 +16,7 @@ from incidentflow_mcp.mcp.registration.grafana import register_grafana_tools
 from incidentflow_mcp.mcp.registration.investigations import register_investigation_tools
 from incidentflow_mcp.mcp.registration.knowledge import register_knowledge_tools
 from incidentflow_mcp.mcp.registration.kubernetes import register_kubernetes_tools
+from incidentflow_mcp.mcp.registration.logs import register_logs_tools
 from incidentflow_mcp.mcp.registration.meta import register_meta_tools, registered_tool_metric_rows
 from incidentflow_mcp.mcp.request_context import MCPRequestContext
 from incidentflow_mcp.mcp.resources import register_resources
@@ -102,6 +103,12 @@ def create_mcp_server() -> FastMCP:
         ctx,
         resolve_workspace_id=workspace_resolver.resolve_from_token,
         current_token_workspace_id=workspace_resolver.token_workspace_id,
+    )
+
+    register_logs_tools(
+        ctx,
+        current_bearer_token=request_context.bearer_token,
+        resolve_tool_guard=tool_access.resolve,
     )
 
     publish_registered_tools(registered_tool_metric_rows())

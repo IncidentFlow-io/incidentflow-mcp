@@ -61,6 +61,29 @@ services:
       - "${NODE_EXPORTER_PORT:-9100}:9100"
     restart: unless-stopped
 
+  loki:
+    profiles:
+      - grafana-smoke
+    image: grafana/loki:3.7.0
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    volumes:
+      - ./docker/loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+    restart: unless-stopped
+
+  promtail:
+    profiles:
+      - grafana-smoke
+    image: grafana/promtail:3.4.2
+    command: ["-config.file=/etc/promtail/config.yml"]
+    volumes:
+      - ./docker/promtail/config.yml:/etc/promtail/config.yml:ro
+      - ../incidentflow-platform/services/platform-api/.local/logs:/var/log/incidentflow:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+
   grafana:
     profiles:
       - grafana-smoke
@@ -77,6 +100,7 @@ services:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
       - prometheus
+      - loki
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health >/dev/null"]
       interval: 10s

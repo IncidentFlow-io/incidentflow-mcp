@@ -219,7 +219,7 @@ def _allow_workspace_entitlements(monkeypatch: pytest.MonkeyPatch) -> None:
     async def get(self: PlatformEntitlementsClient, workspace_id: str) -> object:
         _ = self
         assert workspace_id == "ws_123"
-        return type("WritableEntitlements", (), {"writable": True})()
+        return type("WritableEntitlements", (), {"readable": True, "writable": True})()
 
     monkeypatch.setattr(PlatformEntitlementsClient, "get", get)
 

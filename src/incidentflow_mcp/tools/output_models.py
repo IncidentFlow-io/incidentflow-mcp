@@ -573,3 +573,32 @@ def schema_mode_for(tool_name: str) -> Literal["strict", "permissive"]:
         )
     extra = entry.model_config.get("extra")
     return "strict" if extra == "forbid" else "permissive"
+
+
+class LogsSourcesOutput(BaseModel):
+    sources: list[dict[str, Any]]
+
+
+class LogsHealthOutput(BaseModel):
+    healthy: bool
+    status: str
+    reason: str
+    last_successful_test_at: datetime | None = None
+
+
+class LogsQueryOutput(BaseModel):
+    entries: list[dict[str, Any]]
+    next_cursor: str | None = None
+    truncated: bool
+    applied_limits: dict[str, int]
+    warnings: list[str] = Field(default_factory=list)
+
+
+TOOL_OUTPUT_MODELS.update(
+    {
+        "logs_list_sources": LogsSourcesOutput,
+        "logs_connection_health": LogsHealthOutput,
+        "logs_query": LogsQueryOutput,
+        "logs_get_context": LogsQueryOutput,
+    }
+)

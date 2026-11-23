@@ -440,6 +440,8 @@ async def test_grafana_tool_returns_standard_not_connected_response(
             return_value=EntitlementSnapshot(
                 workspace_id="ws_123",
                 access_state="team",
+                readable=True,
+                writable=True,
                 limits={},
                 features={},
                 usage={},
@@ -479,6 +481,8 @@ async def test_argocd_tool_returns_standard_not_connected_response(
             return_value=EntitlementSnapshot(
                 workspace_id="ws_123",
                 access_state="team",
+                readable=True,
+                writable=True,
                 limits={},
                 features={},
                 usage={},

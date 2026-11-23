@@ -17,10 +17,12 @@ async def test_entitlement_client_caps_cache_ttl_at_sixty_seconds() -> None:
     response.raise_for_status.return_value = None
     response.json.return_value = {
         "workspace_id": "workspace-1", "access_state": "team", "limits": {},
-        "features": {}, "usage": {}, "upgrade_url": "https://app.test/settings?section=billing",
+        "readable": True, "writable": True, "features": {}, "usage": {},
+        "upgrade_url": "https://app.test/settings?section=billing",
         "ttl_seconds": 999,
     }
     with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=response):
         snapshot = await PlatformEntitlementsClient(settings).get("workspace-1")
     assert snapshot.ttl_seconds == 60
+    assert snapshot.readable is True
     assert snapshot.writable is True

@@ -62,6 +62,10 @@ EXPECTED_TOOL_NAMES = {
     "investigation_get",
     "investigation_continue",
     "investigation_recheck",
+    "logs_list_sources",
+    "logs_connection_health",
+    "logs_query",
+    "logs_get_context",
 }
 
 # Write tools legitimately set readOnlyHint=False; everything else must be read-only.
@@ -86,6 +90,7 @@ EXPECTED_CAPABILITY_CATEGORY_TOTALS = {
     "slack_incidents": 6,
     "knowledge": 6,
     "investigations": 4,
+    "logs": 4,
 }
 
 
@@ -194,9 +199,9 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
         "incidentflow_auth_status",
         "incidentflow_integrations_status",
     }
-    assert payload["total"] == 49
+    assert payload["total"] == 53
     assert payload["total"] == len(operational_names)
-    assert payload["read_only"] == 48
+    assert payload["read_only"] == 52
     assert payload["write_memory_only"] == 1
     assert "canonical" in payload["summary"]
     assert "authoritative runtime tool list" in payload["summary"]
@@ -221,6 +226,13 @@ async def test_incidentflow_capabilities_returns_canonical_inventory() -> None:
     assert [tool["canonical_name"] for tool in write_tools] == ["knowledge_upsert"]
     assert write_tools[0]["read_only"] is False
     assert all("description" not in tool for tool in knowledge_tools)
+
+    assert [tool["canonical_name"] for tool in categories["logs"]["tools"]] == [
+        "logs_list_sources",
+        "logs_connection_health",
+        "logs_query",
+        "logs_get_context",
+    ]
 
     full_result = await tool_manager.call_tool(
         "incidentflow_capabilities", {"response_mode": "full", "category": "knowledge"}
@@ -302,7 +314,7 @@ async def test_mcp_version_returns_build_metadata(monkeypatch: pytest.MonkeyPatc
     assert payload["environment"] == "dev"
     assert payload["tools"] == {
         "registered": len(EXPECTED_TOOL_NAMES),
-            "operational": 49,
+        "operational": 53,
         "meta": 4,
     }
     assert payload["image"] == {

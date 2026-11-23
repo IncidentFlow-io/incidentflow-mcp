@@ -616,6 +616,38 @@
         "destructive_justification": "This tool does not delete, overwrite, or modify anything; it only returns guidance."
       }
     },
+    "logs_list_sources": {
+      "annotations": {"readOnlyHint": true, "openWorldHint": false, "destructiveHint": false},
+      "justifications": {
+        "read_only_justification": "This tool lists configured workspace log sources without returning credentials or changing their configuration.",
+        "open_world_justification": "This tool is limited to log sources configured in the connected IncidentFlow workspace.",
+        "destructive_justification": "This tool does not create, change, or delete log sources or upstream data."
+      }
+    },
+    "logs_connection_health": {
+      "annotations": {"readOnlyHint": true, "openWorldHint": false, "destructiveHint": false},
+      "justifications": {
+        "read_only_justification": "This tool checks one configured log source with a read-only health probe.",
+        "open_world_justification": "This tool is limited to one configured log source in the connected IncidentFlow workspace.",
+        "destructive_justification": "This tool does not change the log source or upstream logging platform."
+      }
+    },
+    "logs_query": {
+      "annotations": {"readOnlyHint": true, "openWorldHint": false, "destructiveHint": false},
+      "justifications": {
+        "read_only_justification": "This tool reads bounded, redacted log entries from a configured workspace source.",
+        "open_world_justification": "This tool is limited to configured workspace log sources, structured filters, and bounded time ranges.",
+        "destructive_justification": "This tool does not change log sources, log retention, or upstream data."
+      }
+    },
+    "logs_get_context": {
+      "annotations": {"readOnlyHint": true, "openWorldHint": false, "destructiveHint": false},
+      "justifications": {
+        "read_only_justification": "This tool reads bounded, redacted log context around a requested timestamp.",
+        "open_world_justification": "This tool is limited to one configured workspace log source and its allowed scope.",
+        "destructive_justification": "This tool does not change log sources or upstream log data."
+      }
+    },
     "integration_guide": {
       "annotations": {
         "readOnlyHint": true,
