@@ -39,6 +39,53 @@ class LogFilters(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict, max_length=32)
 
 
+_SCOPE_HINT = (
+    "Narrow time_range, add scope (namespace, service, workload, pod, container), "
+    "or add filters (contains, levels) and query again."
+)
+
+
+def _with_truncation(result: Any, requested_limit: int | None) -> Any:
+    """Explain why a bounded log result was cut, without implying pagination.
+
+    Logs queries are single-shot: platform-api never issues a cursor, so
+    ``next_cursor`` is dropped and a truncated result carries a reason and a
+    hint to narrow the query instead.
+    """
+
+    if not isinstance(result, dict) or "entries" not in result:
+        return result
+    result = dict(result)
+    result.pop("next_cursor", None)
+    if not result.get("truncated"):
+        result["truncation"] = None
+        return result
+    returned = len(result.get("entries") or [])
+    limits = result.get("applied_limits") or {}
+    if requested_limit is None:
+        reason = "result_limit"
+        detail = f"Returned {returned} lines; the bounded context window has more lines."
+    elif returned < requested_limit:
+        reason = "byte_limit"
+        detail = (
+            f"Returned {returned} of up to {requested_limit} lines: the response hit the "
+            f"source byte budget ({limits.get('max_bytes', 'unknown')} bytes)."
+        )
+    else:
+        reason = "line_limit"
+        cap = limits.get("max_lines")
+        detail = f"Returned {returned} lines; more lines match this query."
+        if isinstance(cap, int) and requested_limit < cap:
+            detail += f" You can raise limit up to the source maximum of {cap}."
+    result["truncation"] = {
+        "reason": reason,
+        "returned": returned,
+        "detail": detail,
+        "hint": _SCOPE_HINT + " Pagination is not supported.",
+    }
+    return result
+
+
 def register_logs_tools(
     ctx: ToolRegistrationContext, *, current_bearer_token, resolve_tool_guard
 ) -> None:
@@ -62,7 +109,12 @@ def register_logs_tools(
                 return await upstream.query(payload)
             return await upstream.context(payload)
         except PlatformLogsError as exc:
-            return tool_error(exc.code, exc.message)
+            details = (
+                {"retry_after_seconds": exc.retry_after_seconds}
+                if exc.retry_after_seconds is not None
+                else None
+            )
+            return tool_error(exc.code, exc.message, details=details)
         except Exception:
             # Never copy upstream headers, URLs, credentials, or error bodies into MCP.
             return structured_tool_exception(
@@ -87,7 +139,7 @@ def register_logs_tools(
         limit: Annotated[int, Field(ge=1, le=500)] = 100,
         direction: Literal["forward", "backward"] = "backward",
     ) -> dict[str, Any]:
-        return await call(
+        result = await call(
             "logs_query",
             "query",
             {
@@ -99,12 +151,13 @@ def register_logs_tools(
                 "direction": direction,
             },
         )
+        return _with_truncation(result, limit)
 
     @ctx.mcp.tool(**ctx.metadata("logs_get_context"))
     async def logs_get_context(
         source_id: str, timestamp: datetime, scope: LogScope | None = None
     ) -> dict[str, Any]:
-        return await call(
+        result = await call(
             "logs_get_context",
             "context",
             {
@@ -113,3 +166,4 @@ def register_logs_tools(
                 "scope": scope.model_dump(exclude_none=True) if scope else {},
             },
         )
+        return _with_truncation(result, None)

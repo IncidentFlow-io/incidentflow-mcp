@@ -42,6 +42,8 @@ from incidentflow_mcp.observability.metrics import (
     tool_duration_seconds,
 )
 from incidentflow_mcp.observability.tool_events import (
+    GUARD_ERROR_SOURCE,
+    GUARD_REJECTION_REASONS,
     current_tool_event,
     reset_tool_event_context,
     start_tool_event_context,
@@ -617,6 +619,18 @@ def _mcp_tool_event_from_body(
         code = _structured_error_code(structured_payload)
         message = _structured_error_message(structured_payload)
         retryable = bool(error_block.get("retryable")) if isinstance(error_block, dict) else False
+        guard_reason = _guard_rejection_reason(error_block)
+        if guard_reason is not None:
+            # Rate-limit / concurrency / timeout rejections from the tool guard are
+            # returned as tool envelopes but remain rejections, not tool failures.
+            return {
+                "outcome": "rejected",
+                "reason": guard_reason,
+                "error_code": code,
+                "error_type": "MCPToolGuardRejection",
+                "log_message": message,
+                "retryable": retryable,
+            }
         if code in {"INTEGRATION_UNAVAILABLE", "INTEGRATION_NOT_CONNECTED"}:
             integration = structured_payload.get("integration") or _integration_for_tool(tool_name)
             return {
@@ -691,6 +705,14 @@ def _optional_error_code(value: object) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _guard_rejection_reason(error_block: Any) -> str | None:
+    details = error_block.get("details") if isinstance(error_block, dict) else None
+    if not isinstance(details, dict) or details.get("source") != GUARD_ERROR_SOURCE:
+        return None
+    reason = details.get("reason")
+    return str(reason) if reason in GUARD_REJECTION_REASONS else None
 
 
 def _reason_from_mcp_error_code(error_code: str | None) -> str:

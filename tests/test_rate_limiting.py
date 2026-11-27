@@ -33,6 +33,16 @@ MCP_TOOL_REQUEST = {
 }
 
 
+def _guard_envelope(body: dict) -> dict:
+    result = body["result"]
+    assert result["isError"] is True
+    envelope = result["structuredContent"]
+    assert json.loads(result["content"][0]["text"]) == envelope
+    assert envelope["status"] == "error"
+    assert envelope["error"]["details"]["source"] == "mcp_guard"
+    return envelope
+
+
 def _make_client(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> TestClient:
     monkeypatch.setattr("incidentflow_mcp.config._settings", settings)
     monkeypatch.setattr("incidentflow_mcp.auth.repository._repo", InMemoryTokenRepository())
@@ -145,8 +155,52 @@ class TestToolRateLimiting:
 
         second = client.post("/mcp", headers=headers, json={**MCP_TOOL_REQUEST, "id": 2})
         assert second.status_code == 200
+        assert int(second.headers["Retry-After"]) >= 1
         body = second.json()
-        assert body["error"]["message"] == "Rate limit exceeded for tool invocation"
+        assert body["id"] == 2 and "error" not in body
+        envelope = _guard_envelope(body)
+        assert envelope["schema_id"] == "incidentflow.incident-summary.response"
+        assert envelope["error"]["code"] == "RATE_LIMITED"
+        assert envelope["error"]["retryable"] is True
+        assert envelope["error"]["message"] == "Rate limit exceeded for tool invocation"
+        assert envelope["error"]["details"]["limit_scope"] == "tool_expensive"
+        assert envelope["error"]["details"]["retry_after_seconds"] >= 1
+
+    def test_transport_limit_on_tools_call_returns_rate_limited_envelope(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        settings = Settings(
+            _env_file=None,
+            incidentflow_pat="test-secret-token",
+            platform_api_base_url=None,
+            environment="test",
+            log_level="warning",
+            redis_url="redis://test-only",
+            rate_limit_authenticated_per_min=1,
+            tool_limit_authenticated_per_min=100,
+            expensive_tools="",
+        )
+        client = _make_client(monkeypatch, settings)
+        headers = {
+            "Authorization": "Bearer test-secret-token",
+            "x-workspace-id": "ws-1",
+            "x-user-id": "u-1",
+        }
+
+        client.post("/mcp", headers=headers, json=MCP_TOOL_REQUEST)
+        limited = client.post("/mcp", headers=headers, json={**MCP_TOOL_REQUEST, "id": 7})
+
+        assert limited.status_code == 200
+        assert limited.headers["Retry-After"]
+        assert limited.headers["X-RateLimit-Limit"] == "1"
+        envelope = _guard_envelope(limited.json())
+        assert limited.json()["id"] == 7
+        assert envelope["error"]["code"] == "RATE_LIMITED"
+        assert envelope["error"]["retryable"] is True
+        assert envelope["error"]["details"]["limit_scope"] == "transport"
+        assert envelope["error"]["details"]["retry_after_seconds"] == int(
+            limited.headers["Retry-After"]
+        )
 
 
 class TestToolGuardUnit:
@@ -220,8 +274,12 @@ class TestToolGuardUnit:
         )
         await first_task
 
-        body = json.loads(second.body.decode("utf-8"))
-        assert body["error"]["message"] == "Too many concurrent tool invocations"
+        envelope = _guard_envelope(json.loads(second.body.decode("utf-8")))
+        assert envelope["error"]["code"] == "RATE_LIMITED"
+        assert envelope["error"]["retryable"] is True
+        assert envelope["error"]["message"] == "Too many concurrent tool invocations"
+        assert envelope["error"]["details"]["reason"] == "concurrency_limit"
+        assert second.headers["Retry-After"] == "1"
 
     @pytest.mark.asyncio
     async def test_timeout_behavior(self, rate_limit_store) -> None:
@@ -259,5 +317,69 @@ class TestToolGuardUnit:
             tool_call=MCPToolCall(request_id=9, tool_name="incident_summary"),
         )
 
-        body = json.loads(result.body.decode("utf-8"))
-        assert body["error"]["message"] == "Tool execution timed out"
+        envelope = _guard_envelope(json.loads(result.body.decode("utf-8")))
+        assert envelope["error"]["code"] == "TIMEOUT"
+        assert envelope["error"]["retryable"] is True
+        assert envelope["error"]["message"] == "Tool execution timed out"
+
+
+def test_guard_envelope_is_classified_as_rejection_not_tool_failure() -> None:
+    from incidentflow_mcp.observability.middleware import _mcp_tool_event_from_body
+    from incidentflow_mcp.rate_limit.tool_guard import tool_guard_error_response
+    from incidentflow_mcp.tools.contracts import ErrorCode
+
+    response = tool_guard_error_response(
+        tool_call=MCPToolCall(request_id=1, tool_name="logs_query"),
+        code=ErrorCode.RATE_LIMITED,
+        reason="rate_limited",
+        limit_scope="tool",
+        message="Rate limit exceeded for tool invocation",
+        retry_after_seconds=3,
+    )
+    event = _mcp_tool_event_from_body(
+        body=response.body, content_type="application/json", tool_name="logs_query"
+    )
+    assert event is not None
+    assert event["outcome"] == "rejected"
+    assert event["reason"] == "rate_limited"
+    assert event["error_code"] == "RATE_LIMITED"
+    assert event["retryable"] is True
+
+
+def test_upstream_retry_after_is_preserved_in_error_details() -> None:
+    import httpx
+
+    from incidentflow_mcp.mcp.errors import map_exception
+    from incidentflow_mcp.platform_api.logs_client import PlatformLogsError
+
+    request = httpx.Request("GET", "https://platform.invalid/x")
+    response = httpx.Response(429, headers={"Retry-After": "7"}, request=request)
+    fields = map_exception(httpx.HTTPStatusError("429", request=request, response=response))
+    assert fields["code"] == "RATE_LIMITED"
+    assert fields["retryable"] is True
+    assert fields["details"]["retry_after_seconds"] == 7
+
+    exc = PlatformLogsError(429, 5)
+    assert exc.code == "RATE_LIMITED" and exc.retry_after_seconds == 5
+
+
+@pytest.mark.asyncio
+async def test_logs_client_reads_upstream_retry_after() -> None:
+    import httpx
+
+    from incidentflow_mcp.platform_api.logs_client import PlatformLogsClient, PlatformLogsError
+
+    settings = Settings(
+        _env_file=None,
+        platform_api_base_url="https://platform.invalid",
+        platform_api_internal_api_key="internal-key",
+        redis_url="redis://test-only",
+    )
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(429, headers={"Retry-After": "4"})
+    )
+    client = PlatformLogsClient(settings, "bearer", transport=transport)
+    with pytest.raises(PlatformLogsError) as caught:
+        await client.query({})
+    assert caught.value.code == "RATE_LIMITED"
+    assert caught.value.retry_after_seconds == 4

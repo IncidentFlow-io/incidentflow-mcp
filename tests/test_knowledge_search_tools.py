@@ -234,3 +234,34 @@ async def test_public_knowledge_search_uses_docs_filters() -> None:
         "integration": "kubernetes",
         "component": "k8s-agent",
     }
+
+
+def test_search_response_has_one_canonical_results_list_by_default() -> None:
+    from incidentflow_mcp.mcp.registration.knowledge import _normalize_search_response
+
+    hit = {"title": "Install the Kubernetes Agent"}
+    payload = {"query": "k8s", "scope": "public", "workspaceResults": [], "publicResults": [hit]}
+
+    compact = _normalize_search_response(payload, query="k8s", scope="public")
+    assert compact["results"] == [hit]
+    assert compact["total"] == 1
+    assert "publicResults" not in compact and "workspaceResults" not in compact
+    assert "deprecated_fields" not in compact
+
+    private = _normalize_search_response(
+        {"workspaceResults": [hit], "publicResults": []}, query="k8s", scope="workspace"
+    )
+    assert private["results"] == [hit]
+    assert "workspaceResults" not in private
+
+
+def test_search_response_full_mode_keeps_legacy_lists_flagged_deprecated() -> None:
+    from incidentflow_mcp.mcp.registration.knowledge import _normalize_search_response
+
+    hit = {"title": "Install the Kubernetes Agent"}
+    payload = {"publicResults": [hit], "results": [hit], "workspaceResults": []}
+
+    full = _normalize_search_response(payload, query="k8s", scope="public", response_mode="full")
+    assert full["results"] == [hit]
+    assert full["publicResults"] == [hit]
+    assert full["deprecated_fields"] == ["publicResults", "workspaceResults"]

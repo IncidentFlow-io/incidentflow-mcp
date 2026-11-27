@@ -479,3 +479,34 @@ async def test_grafana_panel_view_description_guides_chart_requests() -> None:
         "dashboard_uid",
         "panel_id",
     ]
+
+
+def test_similar_tool_descriptions_point_to_each_other() -> None:
+    specs = {spec.name: spec.description for spec in get_tool_specs()}
+    pairs = [
+        ("k8s_get_pod", ["k8s_describe_pod", "k8s_debug_pod", "k8s_analyze_workload"]),
+        ("k8s_describe_pod", ["k8s_get_pod", "k8s_debug_pod"]),
+        ("k8s_debug_pod", ["k8s_describe_pod", "k8s_get_pod"]),
+        ("k8s_analyze_workload", ["k8s_describe_pod", "k8s_debug_pod"]),
+        ("k8s_get_pod_logs", ["logs_query", "logs_list_sources"]),
+        ("logs_query", ["k8s_get_pod_logs", "logs_list_sources"]),
+        ("slack_alert_thread_get", ["incident_thread_summary"]),
+        ("incident_thread_summary", ["slack_alert_thread_get"]),
+        ("investigation_continue", ["investigation_recheck"]),
+        ("investigation_recheck", ["investigation_continue"]),
+        ("guide_me", ["integration_guide"]),
+        ("integration_guide", ["guide_me"]),
+    ]
+    for name, references in pairs:
+        for reference in references:
+            assert reference in specs[name], f"{name} should mention {reference}"
+    assert "first" in specs["logs_list_sources"].lower()
+
+
+def test_kubernetes_safety_note_is_short_and_positive() -> None:
+    from incidentflow_mcp.tools.registry import _K8S_READ_ONLY_JUSTIFICATION
+
+    assert len(_K8S_READ_ONLY_JUSTIFICATION) <= 100
+    assert "read-only" in _K8S_READ_ONLY_JUSTIFICATION.lower()
+    for word in ("exec", "escalate", "delete"):
+        assert word not in _K8S_READ_ONLY_JUSTIFICATION

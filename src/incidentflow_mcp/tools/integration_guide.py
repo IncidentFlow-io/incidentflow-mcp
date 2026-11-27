@@ -531,7 +531,8 @@ class KubernetesGuideProvider(GuideProvider):
                 number=2,
                 title="Check connection from MCP",
                 instruction=(
-                    f"Use k8s_agent_status for cluster '{cluster}' and expect healthy=true. "
+                    f"Use k8s_agent_status for cluster '{cluster or '<cluster-id>'}' "
+                    "and expect healthy=true. "
                     "IncidentFlow then confirms "
                     "token acceptance, credentials, gateway connection, heartbeat, and "
                     "read-only RBAC. "

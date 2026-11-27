@@ -15,7 +15,9 @@ from incidentflow_mcp.rate_limit.metrics import mcp_http_rate_limited_total, mcp
 from incidentflow_mcp.rate_limit.tool_guard import (
     build_transport_rate_limit_headers,
     parse_tool_call_payload,
+    tool_guard_error_response,
 )
+from incidentflow_mcp.tools.contracts import ErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +57,28 @@ class TransportRateLimitMiddleware(BaseHTTPMiddleware):
                 resolved_policy.name,
                 identity.authenticated,
             )
+            headers = build_transport_rate_limit_headers(
+                limit=result.limit,
+                remaining=result.remaining,
+                reset_after_ms=result.reset_after_ms,
+            )
+            # A tools/call caller gets the canonical RATE_LIMITED tool envelope, the
+            # same shape as every other tool error; other requests keep HTTP 429.
+            tool_call = await _extract_tool_call(request)
+            if tool_call is not None:
+                return tool_guard_error_response(
+                    tool_call=tool_call,
+                    code=ErrorCode.RATE_LIMITED,
+                    reason="rate_limited",
+                    limit_scope="transport",
+                    message="Rate limit exceeded for MCP requests",
+                    retry_after_seconds=int(headers["Retry-After"]),
+                    headers=headers,
+                )
             return JSONResponse(
                 status_code=429,
                 content={"detail": "Too Many Requests"},
-                headers=build_transport_rate_limit_headers(
-                    limit=result.limit,
-                    remaining=result.remaining,
-                    reset_after_ms=result.reset_after_ms,
-                ),
+                headers=headers,
             )
 
         tool_call = await _extract_tool_call(request)

@@ -99,6 +99,9 @@ def map_exception(exc: Exception) -> dict[str, Any]:
         status_code = exc.response.status_code
         code = _code_for_http_status(status_code)
         details: dict[str, Any] = {"http_status": status_code}
+        retry_after = exc.response.headers.get("Retry-After")
+        if retry_after and retry_after.strip().isdigit():
+            details["retry_after_seconds"] = int(retry_after.strip())
         try:
             body = exc.response.json()
         except ValueError:

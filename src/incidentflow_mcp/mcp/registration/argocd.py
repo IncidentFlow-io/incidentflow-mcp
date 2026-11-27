@@ -157,13 +157,34 @@ def register_argocd_tools(
     async def argocd_get_last_operation(
         name: Annotated[str, Field(min_length=1)],
         integration_id: str | None = None,
+        response_mode: Annotated[
+            Literal["compact", "full"],
+            Field(
+                description=(
+                    "compact (default): phase, revision, timing, message, per-status resource "
+                    "counts, and only resources that did not sync. full: every resource result."
+                )
+            ),
+        ] = "compact",
+        resource_limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=200,
+                description="Compact mode: maximum number of problem resources to return.",
+            ),
+        ] = 10,
     ) -> dict[str, Any]:
         guard = await ctx.resolve_tool_guard("argocd_get_last_operation")
         if isinstance(guard, str):
             return structured_guard_error(guard)
         try:
             result = await argocd_tools.argocd_get_last_operation(
-                _argocd_client(), name=name, integration_id=integration_id
+                _argocd_client(),
+                name=name,
+                integration_id=integration_id,
+                response_mode=response_mode,
+                resource_limit=resource_limit,
             )
         except httpx.HTTPStatusError as exc:
             return structured_tool_exception(exc, code="ARGOCD_HTTP_ERROR")

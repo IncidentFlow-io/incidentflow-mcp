@@ -299,3 +299,35 @@ async def test_grafana_connection_health_status_mapping(
     assert result.status == expected_status
     assert result.healthy is expected_healthy
     assert result.ok is bool(payload.get("ok"))
+
+
+@pytest.mark.asyncio
+async def test_kubernetes_verify_needs_input_without_cluster_uses_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(integration_guide_module, "_fetch_sources", _no_docs)
+    result = await integration_guide(object(), integration="kubernetes", goal="verify")  # type: ignore[arg-type]
+
+    assert result.status == "needs_input"
+    assert "cluster_identifier" in result.missing_inputs
+    text = result.model_dump_json()
+    assert "cluster ''" not in text
+    assert "''" not in " ".join(step.instruction for step in result.steps)
+    agent_step = next(step for step in result.steps if "k8s_agent_status" in step.instruction)
+    assert "<cluster-id>" in agent_step.instruction
+
+
+@pytest.mark.asyncio
+async def test_kubernetes_verify_with_cluster_names_it_in_agent_status_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(integration_guide_module, "_fetch_sources", _no_docs)
+    result = await integration_guide(
+        object(),  # type: ignore[arg-type]
+        integration="kubernetes",
+        goal="verify",
+        context={"cluster_identifier": "production-eu1"},
+    )
+    agent_step = next(step for step in result.steps if "k8s_agent_status" in step.instruction)
+    assert "cluster 'production-eu1'" in agent_step.instruction
+    assert "<cluster-id>" not in agent_step.instruction

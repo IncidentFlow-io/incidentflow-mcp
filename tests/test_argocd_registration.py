@@ -41,6 +41,9 @@ def test_required_inputs_declared() -> None:
     assert specs["argocd_get_application_resources"].input_schema["required"] == ["name"]
     assert specs["argocd_get_sync_history"].input_schema["required"] == ["name"]
     assert specs["argocd_get_last_operation"].input_schema["required"] == ["name"]
+    last_op_props = specs["argocd_get_last_operation"].input_schema["properties"]
+    assert last_op_props["response_mode"]["default"] == "compact"
+    assert last_op_props["resource_limit"]["maximum"] == 200
     assert specs["argocd_analyze_application"].input_schema["required"] == ["name"]
 
 

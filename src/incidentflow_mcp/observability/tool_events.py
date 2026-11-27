@@ -5,6 +5,12 @@ from __future__ import annotations
 from contextvars import ContextVar, Token
 from typing import Any
 
+# Marker in ``error.details.source`` for rejections produced by the MCP tool guard
+# or transport limiter (not by a tool). Observability keeps classifying them as
+# rejections instead of tool failures.
+GUARD_ERROR_SOURCE = "mcp_guard"
+GUARD_REJECTION_REASONS = frozenset({"rate_limited", "concurrency_limit", "timeout"})
+
 _tool_event_context: ContextVar[dict[str, Any] | None] = ContextVar(
     "mcp_tool_event_context",
     default=None,

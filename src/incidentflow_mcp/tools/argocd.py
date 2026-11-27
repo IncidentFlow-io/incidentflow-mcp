@@ -192,12 +192,82 @@ async def argocd_get_sync_history(
     )
 
 
-async def argocd_get_last_operation(
-    client: ArgoCDReadClient, *, name: str, integration_id: str | None = None
-) -> ArgoCDOutput:
-    return ArgoCDOutput.model_validate(
-        await client.get_last_operation(name=name, integration_id=integration_id)
+# Argo CD per-resource sync statuses that need no attention.
+_OK_RESOURCE_STATUSES = frozenset({"Synced", "Pruned"})
+_RESOURCE_MESSAGE_LIMIT = 300
+
+
+def _resource_problem(resource: dict[str, Any]) -> dict[str, Any]:
+    message = resource.get("message")
+    if isinstance(message, str) and len(message) > _RESOURCE_MESSAGE_LIMIT:
+        message = message[:_RESOURCE_MESSAGE_LIMIT] + "…"
+    return {
+        "group": resource.get("group"),
+        "kind": resource.get("kind"),
+        "namespace": resource.get("namespace"),
+        "name": resource.get("name"),
+        "status": resource.get("status"),
+        "message": message,
+    }
+
+
+def _compact_last_operation_payload(
+    payload: dict[str, Any], *, resource_limit: int
+) -> dict[str, Any]:
+    """Replace the per-resource list with counts plus a bounded list of problem resources."""
+
+    compact = dict(payload)
+    operation = compact.get("operation")
+    if not isinstance(operation, dict):
+        return compact
+    resources = operation.get("resource_results")
+    resources = (
+        [item for item in resources if isinstance(item, dict)]
+        if isinstance(resources, list)
+        else []
     )
+    by_status: dict[str, int] = {}
+    for item in resources:
+        key = str(item.get("status") or "Unknown")
+        by_status[key] = by_status.get(key, 0) + 1
+    problems = [item for item in resources if item.get("status") not in _OK_RESOURCE_STATUSES]
+    compact["operation"] = {
+        "phase": operation.get("phase"),
+        "message": operation.get("message"),
+        "started_at": operation.get("started_at"),
+        "finished_at": operation.get("finished_at"),
+        "sync_revision": operation.get("sync_revision"),
+        "resource_summary": {
+            "total": len(resources),
+            "by_status": by_status,
+            "problem_count": len(problems),
+        },
+        "resource_errors": [_resource_problem(item) for item in problems[:resource_limit]],
+        "resource_errors_truncated": len(problems) > resource_limit,
+    }
+    compact["response_mode"] = "compact"
+    if len(problems) > resource_limit:
+        compact["truncated"] = True
+        _append_warning(
+            compact,
+            f"Problem resources trimmed to {resource_limit} of {len(problems)}; "
+            "raise resource_limit or use response_mode=full.",
+        )
+    return compact
+
+
+async def argocd_get_last_operation(
+    client: ArgoCDReadClient,
+    *,
+    name: str,
+    integration_id: str | None = None,
+    response_mode: ResponseMode = "compact",
+    resource_limit: int = 10,
+) -> ArgoCDOutput:
+    payload = await client.get_last_operation(name=name, integration_id=integration_id)
+    if response_mode == "compact" and isinstance(payload, dict):
+        payload = _compact_last_operation_payload(payload, resource_limit=resource_limit)
+    return ArgoCDOutput.model_validate(payload)
 
 
 async def argocd_find_recent_deployments(
