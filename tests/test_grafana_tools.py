@@ -503,3 +503,23 @@ class TestPanelView:
         assert payload["samples_returned"] == 1
         assert payload["samples_total"] == 1
         assert payload["truncated"] is False
+
+
+async def test_compact_trimming_prefers_series_with_samples() -> None:
+    empty = {"metric": {"tool": "idle"}, "samples": []}
+    busy = {"metric": {"tool": "busy"}, "samples": [{"timestamp": 1.0, "value": 2.0}]}
+    client = FakeClient(
+        analyze={"dashboard_uid": "d", "panels": [{"series": [empty, busy]}]},
+        query={"series": [empty, busy]},
+    )
+
+    analyzed = (
+        await analyze_dashboard_health(client, dashboard_uid="d", max_series=1)
+    ).model_dump()
+    assert analyzed["panels"][0]["series"][0]["metric"] == {"tool": "busy"}
+    assert analyzed["analysis_window"]["returned_range"]["points"] == 1
+
+    queried = (
+        await grafana_metrics_query(client, datasource_uid="ds", query="up", max_series=1)
+    ).model_dump()
+    assert queried["series"][0]["metric"] == {"tool": "busy"}

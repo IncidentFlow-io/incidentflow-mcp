@@ -380,6 +380,28 @@ async def test_logs_client_reads_upstream_retry_after() -> None:
     )
     client = PlatformLogsClient(settings, "bearer", transport=transport)
     with pytest.raises(PlatformLogsError) as caught:
-        await client.query({})
+        await client.query({"source_id": "f12f7829-0ed4-463c-8bd6-9f6f459bcc28"})
     assert caught.value.code == "RATE_LIMITED"
     assert caught.value.retry_after_seconds == 4
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_code", "retryable"),
+    [(429, "RATE_LIMITED", True), (502, "UPSTREAM_ERROR", True), (400, "INVALID_ARGUMENT", False)],
+)
+def test_legacy_integration_error_label_keeps_http_derived_code(
+    status: int, expected_code: str, retryable: bool
+) -> None:
+    import httpx
+
+    from incidentflow_mcp.mcp.errors import TOOL_ERROR_MARKER, structured_tool_exception
+
+    request = httpx.Request("POST", "https://platform.invalid/grafana/query")
+    response = httpx.Response(status, request=request, json={"detail": "x"})
+    exc = httpx.HTTPStatusError("upstream", request=request, response=response)
+    for label in ("GRAFANA_HTTP_ERROR", "ARGOCD_HTTP_ERROR"):
+        fields = structured_tool_exception(exc, code=label)[TOOL_ERROR_MARKER]
+        assert fields["code"] == expected_code
+        assert fields["retryable"] is retryable
+        assert fields["details"]["http_status"] == status
+        assert fields["details"]["integration_error"] == label

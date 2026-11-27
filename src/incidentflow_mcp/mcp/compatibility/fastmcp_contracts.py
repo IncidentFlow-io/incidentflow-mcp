@@ -24,6 +24,7 @@ from mcp.shared.exceptions import UrlElicitationRequiredError
 from mcp.types import CallToolResult, TextContent
 
 from incidentflow_mcp.mcp.errors import (
+    _code_for_http_status,
     is_tool_error,
     map_exception,
     tool_error_fields,
@@ -103,6 +104,43 @@ def _nested_kubernetes_failure(result: Any) -> dict[str, Any] | None:
     }
 
 
+def _nested_argocd_failure(result: Any) -> dict[str, Any] | None:
+    """Hoist a platform-api Argo CD failure (``ok: false`` + ``error``) into an error."""
+
+    if not isinstance(result, dict) or result.get("ok") is not False:
+        return None
+    raw_error = result.get("error")
+    if not isinstance(raw_error, dict):
+        return None
+    status = raw_error.get("http_status")
+    code = _code_for_http_status(status) if isinstance(status, int) else ErrorCode.UPSTREAM_ERROR
+    message = str(raw_error.get("message") or "Argo CD request failed")
+    details = raw_error.get("details")
+    if status == 403 and isinstance(details, dict) and details.get("application_name"):
+        # Argo CD answers 403 both for a missing application and for one the
+        # token may not read, so the caller cannot tell them apart.
+        message = (
+            f"Argo CD application '{details['application_name']}' was not found or is not "
+            "visible to the IncidentFlow Argo CD token. Check the name with "
+            "argocd_list_applications."
+        )
+    return {
+        "code": code,
+        "message": message,
+        "retryable": None,
+        "details": {"argocd_error": raw_error, "status": result.get("status")},
+    }
+
+
+def _payload_warnings(result: Any) -> list[str]:
+    if not isinstance(result, dict):
+        return []
+    warnings = result.get("warnings")
+    if not isinstance(warnings, list):
+        return []
+    return [item for item in warnings if isinstance(item, str)]
+
+
 def _payload_truncated(result: Any) -> bool:
     """Use one truncation truth for data and the canonical response metadata."""
 
@@ -156,6 +194,12 @@ async def run_tool_with_structured_errors(
         if nested_failure is not None:
             return _error_result(tool.name, nested_failure, request_id)
 
+    # Argo CD reads report upstream failures as ``ok: false`` data; they are errors.
+    if tool.name.startswith("argocd_") and tool.name != "argocd_connection_health":
+        argocd_failure = _nested_argocd_failure(result)
+        if argocd_failure is not None:
+            return _error_result(tool.name, argocd_failure, request_id)
+
     # Success: wrap the raw payload as `data`. Returned as a plain dict so the
     # lowlevel server validates it against the registered outputSchema.
     envelope = success_envelope(
@@ -163,6 +207,7 @@ async def run_tool_with_structured_errors(
         tool_name=tool.name,
         request_id=request_id,
         truncated=_payload_truncated(result),
+        warnings=_payload_warnings(result),
     )
 
     # Dev/CI runtime contract enforcement (prod stays off): validate the envelope

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 import httpx
 
@@ -67,9 +68,21 @@ class ToolDefinition(Protocol):
     supports_shared_dev_fallback: bool
 
 
+# Successful platform-api status snapshots per workspace. Every tool call resolves
+# integration status before running; a short TTL removes that round-trip from
+# back-to-back calls while a connect/disconnect is still picked up within seconds.
+_STATUS_CACHE_TTL_SECONDS = 10.0
+
+
 class IntegrationStatusService:
+    _status_cache: ClassVar[dict[str, tuple[float, dict[IntegrationType, IntegrationStatus]]]] = {}
+
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        cls._status_cache.clear()
 
     async def get_statuses(
         self,
@@ -114,6 +127,20 @@ class IntegrationStatusService:
         ):
             return None
 
+        workspace_id = str(principal.workspace.id)
+        now = time.monotonic()
+        cached = self._status_cache.get(workspace_id)
+        if cached is not None and cached[0] > now:
+            return dict(cached[1])
+        statuses = await self._fetch_internal_workspace_statuses(principal)
+        if statuses is not None:
+            self._status_cache[workspace_id] = (now + _STATUS_CACHE_TTL_SECONDS, dict(statuses))
+        return statuses
+
+    async def _fetch_internal_workspace_statuses(
+        self,
+        principal: IncidentFlowPrincipal,
+    ) -> dict[IntegrationType, IntegrationStatus] | None:
         try:
             client = PlatformIntegrationStatusClient(self._settings)
             payload = await client.get_workspace_status(workspace_id=principal.workspace.id)

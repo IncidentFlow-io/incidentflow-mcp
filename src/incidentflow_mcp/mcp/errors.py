@@ -73,6 +73,14 @@ def _code_for_http_status(status_code: int) -> ErrorCode:
     return ErrorCode.UPSTREAM_ERROR
 
 
+def _upstream_http_message(status_code: int, body: Any) -> str:
+    if isinstance(body, dict):
+        upstream = body.get("message") or body.get("detail")
+        if isinstance(upstream, str) and upstream.strip():
+            return f"Upstream request failed with HTTP {status_code}: {upstream.strip()[:300]}"
+    return f"Upstream request failed with HTTP {status_code}"
+
+
 def map_exception(exc: Exception) -> dict[str, Any]:
     """Map an exception to canonical error fields ``{code, message, retryable, details}``."""
 
@@ -110,7 +118,8 @@ def map_exception(exc: Exception) -> dict[str, Any]:
             details["upstream_response"] = body
         return {
             "code": code,
-            "message": str(exc),
+            # str(exc) embeds the internal upstream URL; never return it to clients.
+            "message": _upstream_http_message(status_code, body),
             "retryable": default_retryable(code),
             "details": details,
         }
@@ -186,6 +195,15 @@ def structured_guard_error(raw: str) -> dict[str, Any]:
     )
 
 
+def _canonical_code(code: ErrorCode | str) -> ErrorCode | None:
+    if isinstance(code, ErrorCode):
+        return code
+    try:
+        return ErrorCode(str(code))
+    except ValueError:
+        return None
+
+
 def structured_tool_exception(
     exc: Exception,
     *,
@@ -198,9 +216,18 @@ def structured_tool_exception(
 
     fields = map_exception(exc)
     if code is not None:
-        resolved = code if isinstance(code, ErrorCode) else ErrorCode(str(code))
-        fields["code"] = resolved
-        fields["retryable"] = default_retryable(resolved)
+        resolved = _canonical_code(code)
+        if resolved is None:
+            # A legacy integration-specific label (e.g. ``GRAFANA_HTTP_ERROR``) is not a
+            # canonical code: keep the code inferred from the exception (HTTP status,
+            # timeout, ...) and record the label instead of failing the error path.
+            details = fields.get("details")
+            details = dict(details) if isinstance(details, dict) else {}
+            details["integration_error"] = str(code)
+            fields["details"] = details
+        else:
+            fields["code"] = resolved
+            fields["retryable"] = default_retryable(resolved)
     return tool_error(
         fields["code"],
         fields["message"],
