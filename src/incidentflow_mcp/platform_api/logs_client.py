@@ -1,5 +1,6 @@
 """Delegated, read-only transport for the private Logs API v1."""
 
+import re
 from uuid import UUID
 
 import httpx
@@ -17,9 +18,15 @@ _STATUS_CODES = {
 
 
 class PlatformLogsError(Exception):
-    def __init__(self, status: int, retry_after_seconds: int | None = None):
+    def __init__(
+        self,
+        status: int,
+        retry_after_seconds: int | None = None,
+        reason: str | None = None,
+    ):
         self.code = _STATUS_CODES.get(status, "UPSTREAM_ERROR")
         self.retry_after_seconds = retry_after_seconds
+        self.reason = reason
         self.message = {
             "INVALID_ARGUMENT": "Invalid Logs request",
             "UNAUTHENTICATED": "Logs authentication required",
@@ -28,7 +35,32 @@ class PlatformLogsError(Exception):
             "RATE_LIMITED": "Logs rate limit exceeded",
             "UPSTREAM_ERROR": "Logs service unavailable",
         }[self.code]
+        if reason:
+            self.message = f"{self.message}: {reason}"
         super().__init__(self.message)
+
+
+_REASON_STATUSES = frozenset({400, 403, 404, 422})
+_SAFE_REASON = re.compile(r"[A-Za-z0-9 ,.:;()'_-]{1,200}")
+
+
+def _policy_reason(response: httpx.Response) -> str | None:
+    """Return platform-api's short policy message for client errors, nothing else.
+
+    Only a plain sentence from the ``message`` field is kept (for example
+    "Log time range exceeds source lookback"); bodies, URLs, and headers are not.
+    """
+
+    if response.status_code not in _REASON_STATUSES:
+        return None
+    try:
+        body = response.json()
+    except ValueError:
+        return None
+    message = body.get("message") if isinstance(body, dict) else None
+    if not isinstance(message, str) or not _SAFE_REASON.fullmatch(message.strip()):
+        return None
+    return message.strip()
 
 
 def _retry_after(value: str | None) -> int | None:
@@ -68,7 +100,9 @@ class PlatformLogsClient:
             )
         if response.status_code != 200:
             raise PlatformLogsError(
-                response.status_code, _retry_after(response.headers.get("Retry-After"))
+                response.status_code,
+                _retry_after(response.headers.get("Retry-After")),
+                _policy_reason(response),
             )
         return response.json()
 
@@ -84,7 +118,18 @@ class PlatformLogsClient:
         return dict(await self.request("POST", f"/sources/{safe_id}/health"))
 
     async def query(self, payload: dict) -> dict:
+        _require_uuid(payload.get("source_id"))
         return dict(await self.request("POST", "/query", payload))
 
     async def context(self, payload: dict) -> dict:
+        _require_uuid(payload.get("source_id"))
         return dict(await self.request("POST", "/context", payload))
+
+
+def _require_uuid(value: object) -> None:
+    try:
+        UUID(str(value))
+    except ValueError:
+        raise PlatformLogsError(
+            422, reason="source_id must be a UUID from logs_list_sources"
+        ) from None

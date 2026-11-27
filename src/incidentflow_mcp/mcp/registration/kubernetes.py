@@ -34,6 +34,8 @@ _K8S_ALLOWED_ACTIONS = {
 _NO_CONNECTED_CLUSTER_MESSAGE = commands._NO_CONNECTED_CLUSTER_MESSAGE
 _UNAUTHORIZED_CLUSTER_MESSAGE = commands._UNAUTHORIZED_CLUSTER_MESSAGE
 _MISSING_NAMESPACE_MESSAGE = commands._MISSING_NAMESPACE_MESSAGE
+# Published bound for every Kubernetes tool's agent command timeout (matches the registry).
+K8sTimeoutSeconds = Annotated[int, Field(ge=1, le=60)]
 _NO_UNHEALTHY_PODS_SUMMARY = (
     "No unhealthy pods detected at the time of the check. "
     "Recent events and application errors were not assessed."
@@ -198,7 +200,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_connection_health")
         if isinstance(guard, str):
@@ -224,7 +226,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_cluster_overview")
         if isinstance(guard, str):
@@ -278,7 +280,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_namespace_overview")
         if isinstance(guard, str):
@@ -330,7 +332,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_rbac_check")
         if isinstance(guard, str):
@@ -364,7 +366,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_agent_status")
         if isinstance(guard, str):
@@ -390,7 +392,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_namespaces")
         if isinstance(guard, str):
@@ -415,7 +417,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
         include_labels: bool = False,
         include_images: bool = True,
         include_node: bool = True,
@@ -486,7 +488,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
         include_labels: bool = False,
         include_images: bool = True,
         include_node: bool = True,
@@ -596,7 +598,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_get_pod_logs")
         if isinstance(guard, str):
@@ -674,7 +676,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_events")
         if isinstance(guard, str):
@@ -726,7 +728,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
         limit: Annotated[int, Field(ge=1, le=200)] = 50,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_deployments")
@@ -768,7 +770,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
         limit: Annotated[int, Field(ge=1, le=200)] = 50,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_list_services")
@@ -812,7 +814,7 @@ def register_kubernetes_tools(
         environment: str | None = None,
         cluster_name: str | None = None,
         cluster_id: str | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_get_rollout_status")
         if isinstance(guard, str):
@@ -851,7 +853,7 @@ def register_kubernetes_tools(
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         include_memory_context: bool = False,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_show_unhealthy_pods")
         if isinstance(guard, str):
@@ -942,7 +944,7 @@ def register_kubernetes_tools(
         include_memory_context: bool = True,
         include_raw_logs: bool = False,
         exclude_loggers: list[str] | None = None,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_analyze_workload")
         if isinstance(guard, str):
@@ -1187,7 +1189,7 @@ def register_kubernetes_tools(
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         include_memory_context: bool = False,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_describe_pod")
         if isinstance(guard, str):
@@ -1234,7 +1236,7 @@ def register_kubernetes_tools(
         cluster_name: str | None = None,
         cluster_id: str | None = None,
         include_memory_context: bool = True,
-        timeout_seconds: int = 30,
+        timeout_seconds: K8sTimeoutSeconds = 30,
     ) -> dict[str, Any]:
         guard = await resolve_tool_guard("k8s_debug_pod")
         if isinstance(guard, str):

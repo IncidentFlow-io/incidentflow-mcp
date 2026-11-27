@@ -209,6 +209,19 @@ def _trim_samples(
     return compact_series, truncated
 
 
+def _series_with_data_first(series: list[Any]) -> list[Any]:
+    """Stable order that keeps series with samples ahead of empty ones.
+
+    Trimming to ``max_series`` must not return only empty series while series
+    with data exist further down the upstream list.
+    """
+
+    def has_samples(item: Any) -> bool:
+        return isinstance(item, dict) and bool(item.get("samples"))
+
+    return sorted(series, key=lambda item: not has_samples(item))
+
+
 def _compact_query_payload(
     payload: dict[str, Any], *, max_series: int, max_points: int
 ) -> dict[str, Any]:
@@ -218,7 +231,9 @@ def _compact_query_payload(
         return compact
 
     total_series = len(series)
-    bounded_series, samples_truncated = _trim_samples(series[:max_series], max_points=max_points)
+    bounded_series, samples_truncated = _trim_samples(
+        _series_with_data_first(series)[:max_series], max_points=max_points
+    )
     compact["series"] = bounded_series
     compact["series_returned"] = len(bounded_series)
     compact["series_total"] = compact.get("series_total", total_series)
@@ -289,7 +304,7 @@ def _compact_analyze_payload(
         series = panel_copy.get("series")
         if isinstance(series, list):
             panel_copy["series"], series_truncated = _trim_samples(
-                series[:max_series], max_points=max_points
+                _series_with_data_first(series)[:max_series], max_points=max_points
             )
             panel_copy["series_returned"] = len(panel_copy["series"])
             panel_copy["series_total"] = len(series)

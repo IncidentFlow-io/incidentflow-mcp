@@ -1411,6 +1411,14 @@ _TOOL_SPECS: list[ToolSpec] = [
                         "pod issues are detected. Enabled by default for debug workflows."
                     ),
                 },
+                "include_evidence_details": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": (
+                        "Include the full describe, log, event, and rollout evidence instead "
+                        "of counts only."
+                    ),
+                },
             },
             required=["namespace", "pod"],
         ),

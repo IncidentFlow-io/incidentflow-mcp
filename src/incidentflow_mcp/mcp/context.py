@@ -55,16 +55,19 @@ class ToolRegistrationContext:
         workspace_id = str(auth_context.get("workspace_id") or "").strip()
         if not workspace_id:
             return _entitlement_error("ENTITLEMENTS_UNAVAILABLE", "Workspace context is required")
+        spec = self.specs[tool_name]
+        read_only = spec.annotations.get("readOnlyHint") is True
         try:
-            snapshot = await PlatformEntitlementsClient(self.settings).get(workspace_id)
+            # Reads may use the short-lived (<=60s) successful snapshot, as knowledge
+            # tools already do; writes always re-check entitlements upstream.
+            snapshot = await PlatformEntitlementsClient(self.settings).get(
+                workspace_id, allow_cached=read_only
+            )
         except EntitlementsUnavailable:
             return _entitlement_error(
                 "ENTITLEMENTS_UNAVAILABLE", "Workspace entitlements are temporarily unavailable"
             )
-        spec = self.specs[tool_name]
-        permitted = (
-            snapshot.readable if spec.annotations.get("readOnlyHint") is True else snapshot.writable
-        )
+        permitted = snapshot.readable if read_only else snapshot.writable
         if not permitted:
             return _entitlement_error(
                 "BILLING_REMEDIATION_REQUIRED",

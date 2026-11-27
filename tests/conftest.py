@@ -220,3 +220,13 @@ def valid_auth_headers() -> dict[str, str]:
 @pytest.fixture()
 def invalid_auth_headers() -> dict[str, str]:
     return {"Authorization": "Bearer wrong-token"}
+
+
+@pytest.fixture(autouse=True)
+def _reset_integration_status_cache():
+    """Integration status is cached per workspace for a few seconds; isolate tests."""
+    from incidentflow_mcp.integrations import IntegrationStatusService
+
+    IntegrationStatusService.clear_cache()
+    yield
+    IntegrationStatusService.clear_cache()

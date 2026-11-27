@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+
+from pydantic import Field
 
 from incidentflow_mcp.mcp.context import ToolRegistrationContext
 from incidentflow_mcp.mcp.entitlements import require_workspace_capability
@@ -94,8 +96,8 @@ def register_knowledge_tools(
         document_type: str | None = None,
         integration: str | None = None,
         component: str | None = None,
-        response_mode: str = "compact",
-        limit: int = 8,
+        response_mode: Literal["compact", "full"] = "compact",
+        limit: Annotated[int, Field(ge=1, le=20)] = 8,
     ) -> dict[str, Any]:
         try:
             payload = await public_knowledge_search(
@@ -167,8 +169,8 @@ def register_knowledge_tools(
         document_type: str | None = None,
         service: str | None = None,
         environment: str | None = None,
-        response_mode: str = "compact",
-        limit: int = 8,
+        response_mode: Literal["compact", "full"] = "compact",
+        limit: Annotated[int, Field(ge=1, le=20)] = 8,
     ) -> dict[str, Any]:
         denied = await require_workspace_capability(
             entitlements, workspace_id=_workspace(), write=False
