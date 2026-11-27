@@ -108,6 +108,19 @@
         {
           "additionalProperties": true,
           "properties": {
+            "analysis_window": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Requested and analyzed period, period of the returned points, whether anomaly detection used the full series, and how returned points were reduced."
+            },
             "dashboard_title": {
               "default": "",
               "type": "string"

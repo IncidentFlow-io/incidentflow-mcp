@@ -34,6 +34,10 @@ _K8S_ALLOWED_ACTIONS = {
 _NO_CONNECTED_CLUSTER_MESSAGE = commands._NO_CONNECTED_CLUSTER_MESSAGE
 _UNAUTHORIZED_CLUSTER_MESSAGE = commands._UNAUTHORIZED_CLUSTER_MESSAGE
 _MISSING_NAMESPACE_MESSAGE = commands._MISSING_NAMESPACE_MESSAGE
+_NO_UNHEALTHY_PODS_SUMMARY = (
+    "No unhealthy pods detected at the time of the check. "
+    "Recent events and application errors were not assessed."
+)
 
 _checked_at = commands._checked_at
 _command_ok = commands._command_ok
@@ -875,7 +879,10 @@ def register_kubernetes_tools(
             [f"⚠ {len(unhealthy)} unhealthy pod{'s' if len(unhealthy) != 1 else ''}"]
             + [f"  - {e['name']}: {e['reason']}" for e in unhealthy_entries[:5]]
             if unhealthy
-            else ["✓ No unhealthy pods"]
+            else [
+                "✓ No unhealthy pods detected at the time of the check",
+                "Not assessed: recent events and application errors",
+            ]
         )
         recommendations: list[str] = list(
             dict.fromkeys(e["recommendation"] for e in unhealthy_entries if e.get("recommendation"))
@@ -885,7 +892,7 @@ def register_kubernetes_tools(
             "summary": (
                 f"{len(unhealthy)} unhealthy pod{'s' if len(unhealthy) != 1 else ''}"
                 if unhealthy
-                else "All pods are healthy"
+                else _NO_UNHEALTHY_PODS_SUMMARY
             ),
             "findings": findings,
             "recommendations": recommendations,

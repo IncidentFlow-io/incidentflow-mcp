@@ -11,6 +11,7 @@ tools are unit-testable with a fake and stay decoupled from the httpx client.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -147,6 +148,13 @@ class AnalyzeOutput(BaseModel):
     time_range: str = ""
     panels: list[PanelAnalysis] = Field(default_factory=list)
     summary_hints: list[str] = Field(default_factory=list)
+    analysis_window: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Requested and analyzed period, period of the returned points, whether anomaly "
+            "detection used the full series, and how returned points were reduced."
+        ),
+    )
 
 
 class PanelViewDataPoint(BaseModel):
@@ -304,6 +312,84 @@ def _compact_analyze_payload(
     return compact
 
 
+def _sample_span(payload: Any) -> dict[str, Any]:
+    """First/last sample timestamp and point count over every panel series."""
+
+    first: float | None = None
+    last: float | None = None
+    points = 0
+    panels = payload.get("panels") if isinstance(payload, dict) else None
+    for panel in panels if isinstance(panels, list) else []:
+        series = panel.get("series") if isinstance(panel, dict) else None
+        for item in series if isinstance(series, list) else []:
+            samples = item.get("samples") if isinstance(item, dict) else None
+            for sample in samples if isinstance(samples, list) else []:
+                stamp = sample.get("timestamp") if isinstance(sample, dict) else None
+                if not isinstance(stamp, (int, float)):
+                    continue
+                points += 1
+                first = stamp if first is None else min(first, stamp)
+                last = stamp if last is None else max(last, stamp)
+
+    def iso(value: float | None) -> str | None:
+        if value is None:
+            return None
+        return datetime.fromtimestamp(value, tz=UTC).isoformat().replace("+00:00", "Z")
+
+    return {"start": iso(first), "end": iso(last), "points": points}
+
+
+def _analysis_window(
+    upstream: Any,
+    returned: dict[str, Any],
+    *,
+    start: str,
+    end: str,
+    step: str | None,
+    response_mode: ResponseMode,
+    panel_limit: int,
+    max_series: int,
+    max_points: int,
+) -> dict[str, Any]:
+    """Say which period was analyzed and how the returned points were reduced.
+
+    platform-api runs each panel query over the full requested range and flags
+    anomalies on every series and sample it got back; MCP trims only the
+    returned copy afterwards. Anomalies can therefore mention series or points
+    that are not in the returned ``series``.
+    """
+
+    reduced = response_mode == "compact" and bool(returned.get("truncated"))
+    return {
+        "requested_range": {"start": start, "end": end},
+        "step": step,
+        "step_source": "requested" if step else "platform_default",
+        "analyzed_range": {
+            "expression": upstream.get("time_range") if isinstance(upstream, dict) else None,
+            **_sample_span(upstream),
+        },
+        "returned_range": _sample_span(returned),
+        "anomaly_detection": "full_series",
+        "anomaly_detection_note": (
+            "Anomalies were computed on every series and every sample returned by each "
+            "panel query, before any trimming; they may refer to series or points that "
+            "are not included in the returned series."
+        ),
+        "point_reduction": (
+            {
+                "applied": True,
+                "panels": f"first {panel_limit}",
+                "series": f"first {max_series} per panel",
+                "samples": (
+                    f"latest {max_points} per series (older samples dropped, no downsampling)"
+                ),
+            }
+            if reduced
+            else {"applied": False}
+        ),
+    }
+
+
 def _analyze_summary_hints(panels: list[dict[str, Any]]) -> list[str]:
     if not panels:
         return ["no Prometheus panels found on this dashboard"]
@@ -449,10 +535,24 @@ async def analyze_dashboard_health(
     max_series: int = 20,
     max_points: int = 120,
 ) -> AnalyzeOutput:
-    payload = await client.analyze(dashboard_uid=dashboard_uid, start=start, end=end, step=step)
+    upstream = await client.analyze(dashboard_uid=dashboard_uid, start=start, end=end, step=step)
+    payload = upstream
     if response_mode == "compact":
         payload = _compact_analyze_payload(
-            payload, panel_limit=panel_limit, max_series=max_series, max_points=max_points
+            upstream, panel_limit=panel_limit, max_series=max_series, max_points=max_points
+        )
+    if isinstance(payload, dict):
+        payload = dict(payload)
+        payload["analysis_window"] = _analysis_window(
+            upstream,
+            payload,
+            start=start,
+            end=end,
+            step=step,
+            response_mode=response_mode,
+            panel_limit=panel_limit,
+            max_series=max_series,
+            max_points=max_points,
         )
     return AnalyzeOutput.model_validate(payload)
 

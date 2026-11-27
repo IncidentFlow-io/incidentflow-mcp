@@ -17,8 +17,9 @@ _STATUS_CODES = {
 
 
 class PlatformLogsError(Exception):
-    def __init__(self, status: int):
+    def __init__(self, status: int, retry_after_seconds: int | None = None):
         self.code = _STATUS_CODES.get(status, "UPSTREAM_ERROR")
+        self.retry_after_seconds = retry_after_seconds
         self.message = {
             "INVALID_ARGUMENT": "Invalid Logs request",
             "UNAUTHENTICATED": "Logs authentication required",
@@ -28,6 +29,14 @@ class PlatformLogsError(Exception):
             "UPSTREAM_ERROR": "Logs service unavailable",
         }[self.code]
         super().__init__(self.message)
+
+
+def _retry_after(value: str | None) -> int | None:
+    try:
+        seconds = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None
 
 
 class PlatformLogsClient:
@@ -58,7 +67,9 @@ class PlatformLogsClient:
                 method, self.url + path, headers=self.headers, json=payload
             )
         if response.status_code != 200:
-            raise PlatformLogsError(response.status_code)
+            raise PlatformLogsError(
+                response.status_code, _retry_after(response.headers.get("Retry-After"))
+            )
         return response.json()
 
     async def list_sources(self) -> list[dict]:

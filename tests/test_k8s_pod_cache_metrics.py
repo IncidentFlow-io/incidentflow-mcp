@@ -100,3 +100,23 @@ async def test_unhealthy_tool_requests_health_index_and_preserves_live_errors(mo
     assert [pod["name"] for pod in result["data"]["unhealthy_pods"]] == ["waiting"]
     assert result["data"]["completed_count"] == 1
     assert await registered["k8s_show_unhealthy_pods"](namespace="shop") == unavailable
+
+
+@pytest.mark.asyncio
+async def test_unhealthy_tool_without_findings_does_not_claim_all_healthy(monkeypatch):
+    registered = _registered_tools()
+
+    async def send(**kwargs):
+        return json.dumps(
+            {"status": "succeeded", "data": {"pods": [{"name": "ok", "phase": "Running"}]}}
+        )
+
+    monkeypatch.setattr(kubernetes, "_send_k8s_agent_command", send)
+    result = await registered["k8s_show_unhealthy_pods"](namespace="shop")
+    assert result["data"]["count"] == 0
+    assert "All pods are healthy" not in json.dumps(result)
+    assert result["summary"] == (
+        "No unhealthy pods detected at the time of the check. "
+        "Recent events and application errors were not assessed."
+    )
+    assert any("Not assessed" in finding for finding in result["findings"])

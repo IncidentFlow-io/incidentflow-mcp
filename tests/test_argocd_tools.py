@@ -246,3 +246,82 @@ async def test_resources_compact_mode_trims_resource_tree() -> None:
     assert payload["total"] == 4
     assert [resource["name"] for resource in payload["resources"]] == ["resource-0", "resource-1"]
     assert "Resource tree trimmed to 2 resources." in payload["warnings"]
+
+
+def _operation_payload() -> dict[str, Any]:
+    resources = [
+        {
+            "group": "",
+            "kind": "ConfigMap",
+            "namespace": "shop",
+            "name": f"cm-{idx}",
+            "status": "Synced",
+            "message": "configured " * 40,
+        }
+        for idx in range(40)
+    ]
+    resources += [
+        {
+            "group": "apps",
+            "kind": "Deployment",
+            "namespace": "shop",
+            "name": f"bad-{idx}",
+            "status": "SyncFailed",
+            "message": "x" * 1000,
+        }
+        for idx in range(3)
+    ]
+    return _base_payload(
+        ok=True,
+        application_name="checkout",
+        operation={
+            "phase": "Failed",
+            "message": "one or more objects failed to apply",
+            "started_at": "2026-11-11T18:41:39Z",
+            "finished_at": "2026-11-11T18:42:26Z",
+            "sync_revision": "abc123",
+            "resource_results": resources,
+        },
+    )
+
+
+async def test_last_operation_compact_is_default_and_keeps_only_problem_resources() -> None:
+    client = FakeClient(get_last_operation=_operation_payload())
+
+    result = (
+        await argocd_get_last_operation(client, name="checkout", resource_limit=2)
+    ).model_dump()
+    operation = result["operation"]
+
+    assert result["response_mode"] == "compact"
+    assert "resource_results" not in operation
+    assert operation["phase"] == "Failed"
+    assert operation["sync_revision"] == "abc123"
+    assert operation["started_at"] and operation["finished_at"]
+    assert operation["resource_summary"] == {
+        "total": 43,
+        "by_status": {"Synced": 40, "SyncFailed": 3},
+        "problem_count": 3,
+    }
+    assert [item["name"] for item in operation["resource_errors"]] == ["bad-0", "bad-1"]
+    assert len(operation["resource_errors"][0]["message"]) <= 301
+    assert operation["resource_errors_truncated"] is True
+    assert result["truncated"] is True
+    assert any("resource_limit" in warning for warning in result["warnings"])
+
+
+async def test_last_operation_full_mode_returns_every_resource_result() -> None:
+    client = FakeClient(get_last_operation=_operation_payload())
+
+    result = (
+        await argocd_get_last_operation(client, name="checkout", response_mode="full")
+    ).model_dump()
+
+    assert len(result["operation"]["resource_results"]) == 43
+    assert "resource_summary" not in result["operation"]
+
+
+async def test_last_operation_compact_without_operation_is_unchanged() -> None:
+    client = FakeClient()
+    result = (await argocd_get_last_operation(client, name="checkout")).model_dump()
+    assert result["operation"] is None

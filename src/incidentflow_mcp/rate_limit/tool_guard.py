@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import time
@@ -13,7 +14,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from incidentflow_mcp.observability.tool_events import record_tool_rejection
+from incidentflow_mcp.observability.tool_events import GUARD_ERROR_SOURCE, record_tool_rejection
 from incidentflow_mcp.rate_limit.bucket_keys import BucketKeyResolver
 from incidentflow_mcp.rate_limit.identity import ResolvedIdentity
 from incidentflow_mcp.rate_limit.metrics import (
@@ -24,12 +25,9 @@ from incidentflow_mcp.rate_limit.metrics import (
 )
 from incidentflow_mcp.rate_limit.policy import PolicyResolver, RateLimitPolicy
 from incidentflow_mcp.rate_limit.redis_store import RedisRateLimitStore
+from incidentflow_mcp.tools.contracts import ErrorCode, error_envelope
 
 logger = logging.getLogger(__name__)
-
-_MCP_ERROR_RATE_LIMIT = -32029
-_MCP_ERROR_TIMEOUT = -32030
-_MCP_ERROR_CONCURRENCY = -32031
 
 
 @dataclass(frozen=True)
@@ -80,10 +78,13 @@ class ToolInvocationGuard:
                 tool_call.tool_name,
                 tool_key,
             )
-            return _mcp_error(
-                request_id=tool_call.request_id,
-                code=_MCP_ERROR_RATE_LIMIT,
+            return tool_guard_error_response(
+                tool_call=tool_call,
+                code=ErrorCode.RATE_LIMITED,
+                reason="rate_limited",
+                limit_scope="tool",
                 message="Rate limit exceeded for tool invocation",
+                retry_after_seconds=_retry_after_seconds(tool_result.reset_after_ms),
             )
 
         if self._policy_resolver.is_expensive_tool(tool_call.tool_name):
@@ -106,10 +107,13 @@ class ToolInvocationGuard:
                     tool_call.tool_name,
                     tool_key,
                 )
-                return _mcp_error(
-                    request_id=tool_call.request_id,
-                    code=_MCP_ERROR_RATE_LIMIT,
+                return tool_guard_error_response(
+                    tool_call=tool_call,
+                    code=ErrorCode.RATE_LIMITED,
+                    reason="rate_limited",
+                    limit_scope="tool_expensive",
                     message="Rate limit exceeded for tool invocation",
+                    retry_after_seconds=_retry_after_seconds(expensive_result.reset_after_ms),
                 )
 
         timeout_seconds = self._policy_resolver.resolve_tool_timeout_seconds(
@@ -142,10 +146,13 @@ class ToolInvocationGuard:
                 concurrency_key,
                 policy.concurrency_limit,
             )
-            return _mcp_error(
-                request_id=tool_call.request_id,
-                code=_MCP_ERROR_CONCURRENCY,
+            return tool_guard_error_response(
+                tool_call=tool_call,
+                code=ErrorCode.RATE_LIMITED,
+                reason="concurrency_limit",
+                limit_scope="concurrency",
                 message="Too many concurrent tool invocations",
+                retry_after_seconds=1,
             )
 
         try:
@@ -165,10 +172,13 @@ class ToolInvocationGuard:
                 concurrency_key,
                 timeout_seconds,
             )
-            return _mcp_error(
-                request_id=tool_call.request_id,
-                code=_MCP_ERROR_TIMEOUT,
+            return tool_guard_error_response(
+                tool_call=tool_call,
+                code=ErrorCode.TIMEOUT,
+                reason="timeout",
+                limit_scope="timeout",
                 message="Tool execution timed out",
+                retry_after_seconds=None,
             )
         finally:
             await self._store.release_concurrency(
@@ -207,12 +217,55 @@ def build_transport_rate_limit_headers(
     }
 
 
-def _mcp_error(*, request_id: object | None, code: int, message: str) -> JSONResponse:
+def _retry_after_seconds(reset_after_ms: int) -> int:
+    return max(1, math.ceil(reset_after_ms / 1000))
+
+
+def tool_guard_error_response(
+    *,
+    tool_call: MCPToolCall,
+    code: ErrorCode,
+    reason: str,
+    limit_scope: str,
+    message: str,
+    retry_after_seconds: int | None,
+    headers: dict[str, str] | None = None,
+) -> JSONResponse:
+    """Return a guard rejection as a normal ``tools/call`` error result.
+
+    The client gets the same envelope as any other tool error
+    (``structuredContent.error.code`` = RATE_LIMITED/TIMEOUT, ``retryable`` and
+    ``details.retry_after_seconds``) instead of a JSON-RPC protocol error or a
+    bare HTTP 429. ``Retry-After`` is also set as a header.
+    """
+
+    details: dict[str, Any] = {
+        "source": GUARD_ERROR_SOURCE,
+        "reason": reason,
+        "limit_scope": limit_scope,
+    }
+    if retry_after_seconds is not None:
+        details["retry_after_seconds"] = retry_after_seconds
+    envelope = error_envelope(
+        tool_name=tool_call.tool_name,
+        code=code,
+        message=message,
+        retryable=True,
+        details=details,
+    )
+    response_headers = dict(headers or {})
+    if retry_after_seconds is not None:
+        response_headers["Retry-After"] = str(retry_after_seconds)
     return JSONResponse(
         status_code=200,
+        headers=response_headers,
         content={
             "jsonrpc": "2.0",
-            "id": request_id,
-            "error": {"code": code, "message": message},
+            "id": tool_call.request_id,
+            "result": {
+                "content": [{"type": "text", "text": json.dumps(envelope, indent=2)}],
+                "structuredContent": envelope,
+                "isError": True,
+            },
         },
     )

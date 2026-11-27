@@ -401,6 +401,40 @@ class TestAnalyze:
             "0 failed to query",
             "0 with anomalies flagged",
         ]
+        window = payload["analysis_window"]
+        assert window["requested_range"] == {"start": "now-6h", "end": "now"}
+        assert window["step"] is None and window["step_source"] == "platform_default"
+        # Analysis covered every upstream sample; only the returned copy was cut.
+        assert window["analyzed_range"]["points"] == 3
+        assert window["analyzed_range"]["start"] == "1970-01-01T00:00:01Z"
+        assert window["analyzed_range"]["end"] == "1970-01-01T00:00:02Z"
+        assert window["returned_range"] == {
+            "start": "1970-01-01T00:00:02Z",
+            "end": "1970-01-01T00:00:02Z",
+            "points": 1,
+        }
+        assert window["anomaly_detection"] == "full_series"
+        assert window["point_reduction"]["applied"] is True
+        assert "latest 1 per series" in window["point_reduction"]["samples"]
+
+    async def test_analyze_window_without_reduction(self) -> None:
+        client = FakeClient(
+            analyze={
+                "dashboard_uid": "dns",
+                "time_range": "now-1h..now",
+                "panels": [
+                    {"series": [{"metric": {}, "samples": [{"timestamp": 60.0, "value": 1.0}]}]}
+                ],
+            }
+        )
+        out = await analyze_dashboard_health(
+            client, dashboard_uid="dns", start="now-1h", step="30s", response_mode="full"
+        )
+        window = out.model_dump()["analysis_window"]
+        assert window["analyzed_range"]["expression"] == "now-1h..now"
+        assert window["step"] == "30s" and window["step_source"] == "requested"
+        assert window["analyzed_range"] == {**window["returned_range"], "expression": "now-1h..now"}
+        assert window["point_reduction"] == {"applied": False}
 
 
 class TestPanelView:

@@ -25,9 +25,21 @@ from incidentflow_mcp.tools.memory_tools import MemoryAPIError
 TokenWorkspaceResolver = Callable[[], str | None]
 
 
-def _normalize_search_response(payload: Any, *, query: str, scope: str) -> dict[str, Any]:
+# Upstream per-scope lists that duplicate the canonical ``results`` list.
+_LEGACY_RESULT_KEYS = ("publicResults", "workspaceResults")
+
+
+def _normalize_search_response(
+    payload: Any, *, query: str, scope: str, response_mode: str = "compact"
+) -> dict[str, Any]:
     """Adapter (review #9): surface a normalized {query, scope, results, total}
-    view over the platform-api search payload while keeping upstream fields."""
+    view over the platform-api search payload while keeping upstream fields.
+
+    ``results`` is the single canonical list. The upstream ``publicResults`` /
+    ``workspaceResults`` lists hold the same objects, so they are dropped by
+    default and kept only in ``response_mode="full"`` for older clients, flagged
+    in ``deprecated_fields``.
+    """
     if not isinstance(payload, dict):
         return {"query": query, "scope": scope, "results": [], "total": 0}
     results = (
@@ -43,6 +55,13 @@ def _normalize_search_response(payload: Any, *, query: str, scope: str) -> dict[
     normalized["results"] = results if isinstance(results, list) else []
     if not isinstance(normalized.get("total"), int):
         normalized["total"] = len(normalized["results"])
+    legacy = [key for key in _LEGACY_RESULT_KEYS if key in normalized]
+    if response_mode == "full":
+        if legacy:
+            normalized["deprecated_fields"] = legacy
+    else:
+        for key in legacy:
+            normalized.pop(key)
     return normalized
 
 
@@ -88,7 +107,9 @@ def register_knowledge_tools(
                 response_mode=response_mode,
                 limit=limit,
             )
-            return _normalize_search_response(payload, query=query, scope="public")
+            return _normalize_search_response(
+                payload, query=query, scope="public", response_mode=response_mode
+            )
         except KnowledgeSearchAPIError as exc:
             return structured_tool_exception(exc, code=ErrorCode.UPSTREAM_ERROR)
 
@@ -165,7 +186,9 @@ def register_knowledge_tools(
                 response_mode=response_mode,
                 limit=limit,
             )
-            return _normalize_search_response(payload, query=query, scope="workspace")
+            return _normalize_search_response(
+                payload, query=query, scope="workspace", response_mode=response_mode
+            )
         except (KnowledgeSearchAPIError, ValueError) as exc:
             return structured_tool_exception(
                 exc,

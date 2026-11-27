@@ -60,10 +60,7 @@ _READ_ONLY_LOCAL_JUSTIFICATION = (
 )
 
 _K8S_READ_ONLY_JUSTIFICATION = (
-    "Read-only observability tool: it reads Kubernetes resource status and metadata from "
-    "the cluster API and returns it as structured data. It does not exec into containers, "
-    "run shell commands, restart, scale, patch, delete, update resources, or escalate "
-    "privileges."
+    "Read-only: reads Kubernetes status and metadata through the IncidentFlow agent."
 )
 
 _SLACK_READ_ONLY_JUSTIFICATION = (
@@ -312,7 +309,8 @@ _TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Returns a structured, documentation-backed guide for connecting, configuring, "
             "verifying, upgrading, troubleshooting, or removing an IncidentFlow integration "
-            "(Kubernetes, Slack, Grafana, or Argo CD). Provides ordered steps, requirements, "
+            "(Kubernetes, Slack, Grafana, or Argo CD) when integration and goal are known; "
+            "for a free-text question use guide_me. Provides ordered steps, requirements, "
             "verification checks, and doc sources. Read-only: it never accepts, returns, or "
             "stores real secrets — commands are templates and required secrets are listed as "
             "sensitive_inputs to be supplied by the user in the IncidentFlow application."
@@ -387,9 +385,11 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="guide_me",
         title="Guide Me Through an Integration",
         description=(
-            "Routes a natural-language integration setup, connection, verification, upgrade, "
-            "or troubleshooting question to the deterministic integration guide. Installation "
-            "questions use curated guidance first; public documentation search is supplementary."
+            "Entry point for a free-text integration question (e.g. 'how do I connect my "
+            "cluster?') when the integration or goal is not yet clear. Routes it to the "
+            "matching integration_guide; installation questions use curated guidance first, "
+            "public documentation search is supplementary. When integration and goal are "
+            "already known, call integration_guide directly."
         ),
         input_schema={
             "type": "object",
@@ -849,9 +849,11 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="slack_alert_thread_get",
         title="Read Slack Alert Thread",
         description=(
-            "Reads a Slack alert message thread by channel_id and message_ts/thread_ts and "
-            "returns parsed engineer replies, commands, links, hypotheses, decisions, and "
-            f"possible resolution signals. {_SLACK_READ_ONLY_JUSTIFICATION}"
+            "Raw, parsed contents of one Slack alert thread by channel_id and "
+            "message_ts/thread_ts: engineer replies, commands, links, hypotheses, decisions, "
+            "and possible resolution signals. Use when you need the individual messages; "
+            "for a condensed SRE summary of the same thread use incident_thread_summary. "
+            f"{_SLACK_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -902,9 +904,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="incident_thread_summary",
         title="Summarize Incident Thread",
         description=(
-            "Given Slack alert context, reads the related Slack thread and produces an "
-            "SRE-focused human-context summary without executing suggested commands or "
-            f"changing Slack data. {_SLACK_READ_ONLY_JUSTIFICATION}"
+            "Condensed SRE summary of the Slack thread for an alert: what people observed, "
+            "tried, and decided. Use for a quick human-context overview; for the individual "
+            "parsed messages use slack_alert_thread_get. Suggested commands are reported, "
+            f"never executed. {_SLACK_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
             "type": "object",
@@ -1064,9 +1067,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="k8s_get_pod",
         title="Inspect Pod Status",
         description=(
-            "Returns health status for a specific pod — container readiness, restart "
-            "count, node assignment, and phase. Use when you know the pod name and need "
-            "a quick health check. For full investigation use k8s_describe_pod. "
+            "Quick status of one known pod: phase, container readiness, restart count, and "
+            "node. No events, logs, or diagnosis. For why a pod is unhealthy use "
+            "k8s_describe_pod; for describe + logs + events + rollout in one call use "
+            "k8s_debug_pod; for a whole Deployment use k8s_analyze_workload. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(
@@ -1107,9 +1111,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="k8s_get_pod_logs",
         title="Read Application Logs",
         description=(
-            "Streams recent log lines from a running application container for incident "
-            "debugging — equivalent to kubectl logs. Logs are filtered and redacted before "
-            "return. No shell access, no exec, no writes. "
+            "Recent log lines of one known pod/container, read directly from Kubernetes "
+            "(like kubectl logs), filtered and redacted. Use when you already know the pod. "
+            "To search logs across services, time ranges, or text filters use logs_query "
+            "against a configured log source (see logs_list_sources). "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema={
@@ -1290,10 +1295,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="k8s_analyze_workload",
         title="Analyze Kubernetes Workload",
         description=(
-            "Inspects a Kubernetes workload rollout, related Pods, unhealthy status, and "
-            "redacted recent logs through the IncidentFlow Kubernetes Agent. This tool is "
-            "read-only and does not restart, scale, patch, delete, or update Kubernetes "
-            f"resources. {_K8S_READ_ONLY_JUSTIFICATION}"
+            "Workload-level analysis of one Deployment: rollout state, its Pods, unhealthy "
+            "status, and redacted recent logs. Use when the "
+            "problem is a service or rollout rather than a single pod; for one pod use "
+            f"k8s_describe_pod or k8s_debug_pod. {_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(
             {
@@ -1340,13 +1345,14 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="k8s_describe_pod",
         title="Describe Pod",
         description=(
-            "Returns a structured pod investigation report — the primary tool for "
-            "understanding why a specific pod is unhealthy. Sections: pod identity "
-            "(name, namespace, workload, node, age), status (phase, ready, restart count), "
-            "containers (per-container readiness and image), relevant events (warnings "
-            "first), and automatic diagnosis of CrashLoopBackOff, ImagePullBackOff, "
-            "readiness/liveness failures, OOMKilled, FailedScheduling, and high restarts. "
-            "Prefer this over k8s_get_pod when investigating a specific pod. "
+            "Structured diagnosis of why one pod is unhealthy, without logs. Sections: "
+            "pod identity (name, namespace, workload, node, age), status (phase, ready, "
+            "restart count), containers (per-container readiness and image), relevant "
+            "events (warnings first), and automatic diagnosis of CrashLoopBackOff, "
+            "ImagePullBackOff, readiness/liveness failures, OOMKilled, FailedScheduling, "
+            "and high restarts. "
+            "Prefer this over k8s_get_pod when investigating a pod; use k8s_debug_pod when "
+            "logs and owner rollout status are also needed. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(
@@ -1379,12 +1385,11 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="k8s_debug_pod",
         title="Debug Pod",
         description=(
-            "Runs a full automated investigation on a specific pod: describes pod state, "
-            "reads recent logs, surfaces relevant Kubernetes events, and checks the "
-            "owner deployment rollout status. Returns a single consolidated investigation "
-            "report with health findings and actionable recommendations. Equivalent to an "
-            "SRE running kubectl describe + logs + events + rollout status manually. "
-            "Use when you need to understand why a pod is unhealthy or behaving unexpectedly. "
+            "Heaviest single-pod check: combines k8s_describe_pod, recent logs, relevant "
+            "events, and the owner Deployment rollout status into one report with findings "
+            "and recommendations (like kubectl describe + logs + events + rollout status). "
+            "Use when describe alone does not explain the problem; for a quick status use "
+            "k8s_get_pod. "
             f"{_K8S_READ_ONLY_JUSTIFICATION}"
         ),
         input_schema=_k8s_schema(
@@ -1928,14 +1933,27 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="argocd_get_last_operation",
         title="Get Argo CD Last Operation",
         description=(
-            "Returns the latest Argo CD operation state for one application, including "
-            "phase, timing, message, sync revision, and resource result summaries."
+            "Returns the latest Argo CD operation state for one application. Default "
+            "response_mode=compact returns phase, timing, message, sync revision, "
+            "per-status resource counts, and up to resource_limit resources that did not "
+            "sync; response_mode=full returns every resource result."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Argo CD application name."},
                 "integration_id": {"type": "string", "description": "Optional integration id."},
+                "response_mode": {
+                    "type": "string",
+                    "enum": ["compact", "full"],
+                    "default": "compact",
+                },
+                "resource_limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 10,
+                },
             },
             "required": ["name"],
         },
@@ -2065,8 +2083,11 @@ _TOOL_SPECS.extend(
             name="investigation_continue",
             title="Continue Investigation",
             description=(
-                "Queues a scope-preserving deterministic investigation pass. Reason is audit "
-                "context only and cannot select checks."
+                "Queues another investigation pass over the saved scope that collects new "
+                "evidence and may update the investigation's assessment. Use when the current "
+                "assessment is incomplete. To only see the current state without changing "
+                "the assessment (e.g. has it recovered?) use investigation_recheck. Reason "
+                "is audit context only and cannot select checks."
             ),
             input_schema={
                 "type": "object",
@@ -2084,7 +2105,9 @@ _TOOL_SPECS.extend(
             title="Recheck Investigation",
             description=(
                 "Queues a fresh read-only Kubernetes snapshot for the saved investigation scope "
-                "without closing it."
+                "without changing its assessment or closing it. Use to check whether the "
+                "situation changed or recovered; to gather more evidence and refine the "
+                "assessment use investigation_continue."
             ),
             input_schema={
                 "type": "object",
@@ -2186,7 +2209,9 @@ _TOOL_SPECS.extend(
             title="List Logs Sources",
             description=(
                 "Read-only list of configured log sources in the active workspace. "
-                "Returns no credentials."
+                "Call this first, before logs_query or logs_get_context, to get the "
+                "source_id and the source limits (max_lines, max_bytes, "
+                "max_lookback_seconds). Returns no credentials."
             ),
             input_schema={"type": "object", "properties": {}, "required": []},
             annotations=_read_only_annotations(),
@@ -2208,7 +2233,13 @@ _TOOL_SPECS.extend(
             name="logs_query",
             title="Query Logs",
             description=(
-                "Read-only bounded and redacted log query for a configured workspace source."
+                "Read-only bounded and redacted log query for a configured workspace "
+                "source (get source_id from logs_list_sources). Searches across services "
+                "by scope and filters; for one known pod's container output use "
+                "k8s_get_pod_logs. Results are single-shot with no pagination: when "
+                "truncated is true, truncation.reason says whether the line limit or the "
+                "byte budget was hit, and you should narrow time_range, scope, or "
+                "filters instead of requesting a next page."
             ),
             input_schema={
                 "type": "object",

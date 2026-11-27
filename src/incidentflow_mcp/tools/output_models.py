@@ -586,10 +586,17 @@ class LogsHealthOutput(BaseModel):
     last_successful_test_at: datetime | None = None
 
 
+class LogsTruncation(BaseModel):
+    reason: Literal["line_limit", "byte_limit", "result_limit"]
+    returned: int
+    detail: str
+    hint: str
+
+
 class LogsQueryOutput(BaseModel):
     entries: list[dict[str, Any]]
-    next_cursor: str | None = None
     truncated: bool
+    truncation: LogsTruncation | None = None
     applied_limits: dict[str, int]
     warnings: list[str] = Field(default_factory=list)
 
