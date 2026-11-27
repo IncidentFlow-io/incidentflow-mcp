@@ -451,3 +451,31 @@ async def test_grafana_panel_view_publishes_apps_sdk_metadata() -> None:
 
     assert panel_tool.meta["openai/outputTemplate"] == "ui://incidentflow/grafana-panel.html"
     assert panel_tool.meta["ui"]["resourceUri"] == "ui://incidentflow/grafana-panel.html"
+
+
+@pytest.mark.asyncio
+async def test_grafana_panel_view_description_guides_chart_requests() -> None:
+    mcp = create_mcp_server()
+    tools = {tool.name: tool for tool in await mcp.list_tools()}
+    description = tools["grafana_get_panel_view"].description or ""
+
+    # Chart-in-chat intents must route here, including without known ids.
+    for phrase in ("graph", "chart", "Grafana UI", "inside the chat"):
+        assert phrase in description
+    # Discovery workflow, in order, when dashboard_uid / panel_id are unknown.
+    list_pos = description.index("grafana_list_dashboards")
+    get_pos = description.index("grafana_get_dashboard")
+    assert list_pos < get_pos
+    # Real limits enforced by platform-api.
+    assert "allow-listed" in description
+    assert "one panel per call" in description
+    assert "several calls" in description
+    assert "whole dashboard cannot be rendered" in description
+
+    params = tools["grafana_get_panel_view"].inputSchema["properties"]
+    assert "grafana_list_dashboards" in params["dashboard_uid"]["description"]
+    assert "grafana_get_dashboard" in params["panel_id"]["description"]
+    assert tools["grafana_get_panel_view"].inputSchema["required"] == [
+        "dashboard_uid",
+        "panel_id",
+    ]

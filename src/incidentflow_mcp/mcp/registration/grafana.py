@@ -177,8 +177,24 @@ def register_grafana_tools(
 
     @ctx.mcp.tool(**ctx.metadata("grafana_get_panel_view"))
     async def grafana_get_panel_view(
-        dashboard_uid: str,
-        panel_id: int,
+        dashboard_uid: Annotated[
+            str,
+            Field(
+                description=(
+                    "Grafana dashboard UID, URL slug, or exact allow-listed title. "
+                    "Find it with grafana_list_dashboards when unknown."
+                )
+            ),
+        ],
+        panel_id: Annotated[
+            int,
+            Field(
+                description=(
+                    "Grafana panel id of one timeseries panel. Find it with "
+                    "grafana_get_dashboard when unknown."
+                )
+            ),
+        ],
         start: str = "now-1h",
         end: str = "now",
         variables: dict[str, str | list[str]] | None = None,
