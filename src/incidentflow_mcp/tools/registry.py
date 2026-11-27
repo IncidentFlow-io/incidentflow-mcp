@@ -1443,8 +1443,10 @@ _TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Use this when you need to discover which Grafana dashboards are approved for "
             "the current workspace before reading panels or running dashboard analysis. "
-            "Returns allow-listed dashboard uid, title, folder, and tags. Read-only; access "
-            "is mediated by platform-api workspace policy."
+            "Returns allow-listed dashboard uid, title, folder, and tags. Also the first "
+            "step before grafana_get_panel_view when the user wants a chart in the chat "
+            "but no dashboard uid is known. Read-only; access is mediated by platform-api "
+            "workspace policy."
         ),
         input_schema={
             "type": "object",
@@ -1473,8 +1475,9 @@ _TOOL_SPECS: list[ToolSpec] = [
         description=(
             "Use this when you already have an allow-listed Grafana dashboard uid and need "
             "its dashboard metadata, panels, and datasource references. Defaults to "
-            "response_mode=compact to keep panel payloads bounded. Read-only; the dashboard "
-            "must be approved for the workspace in platform-api."
+            "response_mode=compact to keep panel payloads bounded. Use it to find the "
+            "panel id for grafana_get_panel_view. Read-only; the dashboard must be "
+            "approved for the workspace in platform-api."
         ),
         input_schema={
             "type": "object",
@@ -1705,19 +1708,41 @@ _TOOL_SPECS: list[ToolSpec] = [
         name="grafana_get_panel_view",
         title="Get Grafana Panel View",
         description=(
-            "Use this when the user asks to view one specific allow-listed Grafana "
-            "timeseries panel in ChatGPT. Loads the panel, runs guarded Prometheus range "
-            "queries through platform-api, normalizes the result for an interactive chart, "
-            "and returns a GrafanaPanelView structuredContent payload."
+            "Use this whenever the user wants to SEE a graph, chart, metric over time, or "
+            "Grafana UI inside the chat, e.g. 'show the Grafana panel here', 'display the "
+            "K3s API request graph', 'show Platform API errors on a chart', 'покажи график "
+            "в чате', 'покажи Grafana UI'. Renders one allow-listed Grafana timeseries "
+            "panel as an interactive chart (GrafanaPanelView structuredContent) instead of "
+            "describing numbers in text. "
+            "If dashboard_uid or panel_id is unknown, do not ask first: call "
+            "grafana_list_dashboards to find the matching dashboard, then "
+            "grafana_get_dashboard to pick the timeseries panel whose title matches the "
+            "request, then call this tool. If several panels fit equally well, pick the "
+            "best match from context or ask the user. "
+            "Limits: only dashboards allow-listed for the workspace; exactly one panel per "
+            "call (timeseries or stat panels with Prometheus queries, up to 20 series); "
+            "for several panels make several calls; a whole dashboard cannot be rendered. "
+            "Queries run read-only through platform-api with workspace policy and "
+            "query guards."
         ),
         input_schema={
             "type": "object",
             "properties": {
                 "dashboard_uid": {
                     "type": "string",
-                    "description": "Grafana dashboard UID, URL slug, or exact allow-listed title.",
+                    "description": (
+                        "Grafana dashboard UID, URL slug, or exact allow-listed title. "
+                        "Find it with grafana_list_dashboards when unknown."
+                    ),
                 },
-                "panel_id": {"type": "integer", "minimum": 1, "description": "Grafana panel id."},
+                "panel_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": (
+                        "Grafana panel id of one timeseries panel. Find it with "
+                        "grafana_get_dashboard when unknown."
+                    ),
+                },
                 "start": {
                     "type": "string",
                     "default": "now-1h",
