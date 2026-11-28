@@ -61,18 +61,21 @@ def create_app() -> FastAPI:
         environment=settings.runtime_environment(),
     )
 
-    if (
-        settings.environment == "production"
-        and settings.incidentflow_pat is None
-        and not settings.oauth_validation_enabled()
-        and not settings.managed_token_introspection_enabled()
-        and not settings.allow_unprotected_in_production
-    ):
-        raise RuntimeError(
-            "Auth must be configured in production. "
-            "Set INCIDENTFLOW_PAT or PLATFORM_API_BASE_URL. "
-            "To bypass temporarily, set ALLOW_UNPROTECTED_IN_PRODUCTION=true."
-        )
+    if settings.environment == "production" or settings.runtime_environment() == "production":
+        # Production accepts only real, scoped credentials. No bypass flag exists.
+        if settings.incidentflow_pat is not None:
+            raise RuntimeError(
+                "INCIDENTFLOW_PAT is a local-development master token (no scopes, no "
+                "workspace) and is not allowed in production. Use OAuth or API keys."
+            )
+        if (
+            not settings.oauth_validation_enabled()
+            and not settings.managed_token_introspection_enabled()
+        ):
+            raise RuntimeError(
+                "Auth must be configured in production: OAuth validation and/or "
+                "platform-api token introspection (PLATFORM_API_BASE_URL)."
+            )
 
     if settings.runtime_environment() == "production" and settings.shared_dev_kubernetes_enabled:
         raise RuntimeError(

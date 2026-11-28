@@ -201,6 +201,11 @@ mcp_auth_failures_total = Counter(
     "Total MCP authentication failures by normalized reason.",
     ("reason",),
 )
+mcp_scope_decisions_total = Counter(
+    "mcp_scope_decisions_total",
+    "MCP permission decisions by required scope, decision, and auth method.",
+    ("required_scope", "decision", "auth_method"),
+)
 mcp_auth_success_total = Counter(
     "mcp_auth_success_total",
     "Total MCP authentication successes by safe client identifier and auth method.",

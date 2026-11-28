@@ -12,7 +12,7 @@ def test_protected_resource_metadata_contains_scopes(auth_client: TestClient) ->
     body = response.json()
     assert body["resource"].endswith("/mcp")
     assert "authorization_servers" in body
-    assert body["scopes_supported"] == ["mcp:read", "mcp:tools:run"]
+    assert body["scopes_supported"] == ["mcp:read", "mcp:tools:run", "mcp:tools:write"]
 
 
 def test_protected_resource_metadata_alias(auth_client: TestClient) -> None:
@@ -91,7 +91,7 @@ def test_local_oauth_authorization_server_metadata_bridge(monkeypatch) -> None:
     assert metadata_body["jwks_uri"] == "http://localhost:8000/.well-known/jwks.json"
     assert metadata_body["authorization_response_iss_parameter_supported"] is True
     assert metadata_body["code_challenge_methods_supported"] == ["S256"]
-    assert metadata_body["scopes_supported"] == ["mcp:read", "mcp:tools:run"]
+    assert metadata_body["scopes_supported"] == ["mcp:read", "mcp:tools:run", "mcp:tools:write"]
 
     openid = client.get("/.well-known/openid-configuration")
     assert openid.status_code == 200
@@ -147,7 +147,7 @@ def test_public_discovery_ignores_proxy_headers(
         == {
             "resource": resource,
             "authorization_servers": [issuer],
-            "scopes_supported": ["mcp:read", "mcp:tools:run"],
+            "scopes_supported": ["mcp:read", "mcp:tools:run", "mcp:tools:write"],
         }
     )
     as_metadata = client.get("/.well-known/oauth-authorization-server", headers=headers).json()

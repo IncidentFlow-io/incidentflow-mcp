@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import ipaddress
 import logging
+import time
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from fastapi import Request
@@ -16,10 +19,20 @@ from starlette.responses import Response
 from incidentflow_mcp.auth.context import clear_current_auth_context, set_current_auth_context
 from incidentflow_mcp.auth.oauth import validate_oauth_access_token
 from incidentflow_mcp.auth.repository import get_token_repository
+from incidentflow_mcp.auth.scopes import (
+    ScopeRequirement,
+    challenge_scope,
+    decide,
+    requirement_for_payload,
+)
 from incidentflow_mcp.auth.tokens import parse_token_id, verify_token
 from incidentflow_mcp.config import get_settings
 from incidentflow_mcp.logging_config import compact_log_fields
-from incidentflow_mcp.observability.metrics import mcp_auth_failures_total, mcp_auth_success_total
+from incidentflow_mcp.observability.metrics import (
+    mcp_auth_failures_total,
+    mcp_auth_success_total,
+    mcp_scope_decisions_total,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +164,8 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
             "Tokens must be sent in the Authorization header, not as query parameters."
         )
 
+    requirement = await _mcp_scope_requirement(request)
+
     auth_header = request.headers.get("Authorization", "")
     if not auth_header:
         if request.url.path == "/metrics" and _is_metrics_request_allowed_without_auth(request):
@@ -160,7 +175,10 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
             return None
         _record_auth_failure("missing_header")
         _log_auth_failure(request, reason="missing_header")
-        return _unauthorized("Missing or malformed Authorization: Bearer <token>.")
+        return _unauthorized(
+            "Missing or malformed Authorization: Bearer <token>.",
+            required_scope=_challenge(request, requirement),
+        )
 
     if not auth_header.lower().startswith("bearer "):
         _record_auth_failure("malformed_header")
@@ -173,7 +191,9 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
         _log_auth_failure(request, reason="empty_bearer")
         return _unauthorized("Empty Bearer token.")
 
-    required_scope = _required_scope_for_request(request)
+    # /mcp: validators only authenticate and report granted scopes; the MCP
+    # permission model decides afterwards. Other paths keep a fixed URL scope.
+    required_scope = None if requirement is not None else _required_scope_for_request(request)
 
     oauth_check = await _attempt_oauth_validation(
         request=request,
@@ -182,7 +202,7 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
     )
     if oauth_check is not None:
         if oauth_check.status_code == 200:
-            return None
+            return _authorize_scopes(request, requirement)
         return oauth_check
 
     pat_check = await introspect_managed_pat(
@@ -192,21 +212,21 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
     )
     if pat_check is not None:
         if pat_check.status_code == 200:
-            return None
+            return _authorize_scopes(request, requirement)
         if pat_check.status_code != 404:
             return pat_check
 
     local_check = validate_local_pat(request=request, token=token, required_scope=required_scope)
     if local_check is not None:
         if local_check.status_code == 200:
-            return None
+            return _authorize_scopes(request, requirement)
         if local_check.status_code != 404:
             return local_check
 
     static_check = validate_static_pat(request=request, token=token)
     if static_check is not None:
         if static_check.status_code == 200:
-            return None
+            return _authorize_scopes(request, requirement)
         return static_check
 
     if not _any_auth_configured():
@@ -215,7 +235,51 @@ async def _verify_bearer(request: Request) -> JSONResponse | None:
 
     _record_auth_failure("invalid_token")
     _log_auth_failure(request, reason="invalid_token")
-    return _unauthorized("Invalid token.", required_scope=required_scope)
+    return _unauthorized("Invalid token.", required_scope=_challenge(request, requirement))
+
+
+async def _mcp_scope_requirement(request: Request) -> ScopeRequirement | None:
+    """Scope the MCP request needs, from its JSON-RPC method; None for non-MCP paths."""
+
+    if request.url.path != "/mcp":
+        return None
+    if request.method.upper() != "POST":
+        return requirement_for_payload({"method": f"{request.method.upper()} stream"})
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = None
+    return requirement_for_payload(payload)
+
+
+def _challenge(request: Request, requirement: ScopeRequirement | None) -> str | None:
+    if requirement is not None:
+        return challenge_scope(requirement)
+    return _required_scope_for_request(request)
+
+
+def _authorize_scopes(
+    request: Request, requirement: ScopeRequirement | None
+) -> JSONResponse | None:
+    """Apply the MCP permission model to an authenticated request."""
+
+    if requirement is None:
+        return None
+    context = getattr(request.state, "auth_context", None) or {}
+    granted = context.get("scopes")
+    auth_method = str(context.get("auth_method") or "unknown")
+    decision = decide(granted, requirement)
+    mcp_scope_decisions_total.labels(
+        required_scope=requirement.scope, decision=decision, auth_method=auth_method
+    ).inc()
+    if decision == "allow":
+        return None
+    _record_auth_failure("insufficient_scope")
+    _log_auth_failure(request, reason="insufficient_scope")
+    return _insufficient_scope(
+        f"Insufficient token scope: {requirement.scope} is required for {requirement.target}",
+        scope=challenge_scope(requirement),
+    )
 
 
 async def _attempt_oauth_validation(
@@ -269,13 +333,14 @@ async def _attempt_oauth_validation(
             user_id=(str(claims.get("user_id")) if claims.get("user_id") else None),
             email=(str(claims.get("email")) if claims.get("email") else None),
             plan=None,
+            scopes=_claim_scopes(claims),
         )
         return JSONResponse(status_code=200, content={})
 
     if result.code == "insufficient_scope":
         _record_auth_failure("insufficient_scope")
         _log_auth_failure(request, reason="insufficient_scope")
-        return _unauthorized("Insufficient token scope", required_scope=required_scope)
+        return _insufficient_scope("Insufficient token scope", scope=required_scope)
 
     # This looks like OAuth but failed validation; do not downcast to PAT.
     if result.code == "oauth_invalid":
@@ -286,6 +351,30 @@ async def _attempt_oauth_validation(
 
     # not_oauth -> continue with PAT fallback.
     return None
+
+
+# Exchanged Platform tokens, keyed by a hash of the MCP access token. A token is
+# reused only until shortly before the expiry Platform reported, so caching never
+# extends its validity; the MCP token itself is still validated on every request.
+_EXCHANGE_CACHE_MAX_ENTRIES = 1024
+_EXCHANGE_EXPIRY_MARGIN_SECONDS = 30.0
+_EXCHANGE_DEFAULT_TTL_SECONDS = 60.0
+_exchange_cache: dict[str, tuple[float, str]] = {}
+
+
+def clear_token_exchange_cache() -> None:
+    _exchange_cache.clear()
+
+
+def _exchange_cache_key(source_token: str, scope: str) -> str:
+    return hashlib.sha256(f"{scope}|{source_token}".encode()).hexdigest()
+
+
+def _exchange_ttl_seconds(payload: dict[str, Any]) -> float:
+    expires_in = payload.get("expires_in")
+    if isinstance(expires_in, (int, float)) and expires_in > 0:
+        return float(expires_in) - _EXCHANGE_EXPIRY_MARGIN_SECONDS
+    return _EXCHANGE_DEFAULT_TTL_SECONDS
 
 
 async def _platform_bearer_token(source_token: str) -> str | None:
@@ -300,10 +389,13 @@ async def _platform_bearer_token(source_token: str) -> str | None:
         logger.error("auth: token exchange enabled without Platform URL or internal credential")
         return None
 
-    url = (
-        f"{settings.platform_api_base_url.rstrip('/')}"
-        f"{settings.platform_api_token_exchange_path}"
-    )
+    cache_key = _exchange_cache_key(source_token, settings.platform_api_token_exchange_scope)
+    now = time.monotonic()
+    cached = _exchange_cache.get(cache_key)
+    if cached is not None and cached[0] > now:
+        return cached[1]
+
+    url = f"{settings.platform_api_base_url.rstrip('/')}{settings.platform_api_token_exchange_path}"
     try:
         async with httpx.AsyncClient(timeout=settings.platform_api_timeout_seconds) as client:
             response = await client.post(
@@ -319,11 +411,72 @@ async def _platform_bearer_token(source_token: str) -> str | None:
                 },
             )
         response.raise_for_status()
-        access_token = response.json().get("access_token")
-        return str(access_token) if isinstance(access_token, str) and access_token else None
+        payload = response.json()
+        access_token = payload.get("access_token") if isinstance(payload, dict) else None
+        if not isinstance(access_token, str) or not access_token:
+            return None
+        ttl = _exchange_ttl_seconds(payload)
+        if ttl > 0:
+            if len(_exchange_cache) >= _EXCHANGE_CACHE_MAX_ENTRIES:
+                _exchange_cache.clear()
+            _exchange_cache[cache_key] = (now + ttl, access_token)
+        return access_token
     except (httpx.HTTPError, ValueError):
         logger.warning("auth: MCP to Platform token exchange failed")
         return None
+
+
+# Successful API-key introspections, keyed by a hash of the key. Every MCP request
+# is authenticated; this removes the Platform round-trip (and its last-used write)
+# from back-to-back calls. A revoked or expired key stops working within the TTL.
+_INTROSPECTION_CACHE_TTL_SECONDS = 30.0
+_INTROSPECTION_CACHE_MAX_ENTRIES = 2048
+_introspection_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def clear_introspection_cache() -> None:
+    _introspection_cache.clear()
+
+
+def _introspection_cache_key(token: str, required_scope: str | None) -> str:
+    return hashlib.sha256(f"{required_scope or ''}|{token}".encode()).hexdigest()
+
+
+def _introspection_cache_get(token: str, required_scope: str | None) -> dict[str, Any] | None:
+    entry = _introspection_cache.get(_introspection_cache_key(token, required_scope))
+    if entry is None or entry[0] <= time.monotonic():
+        return None
+    return dict(entry[1])
+
+
+def _seconds_until(value: Any) -> float | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        moment = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return (moment - datetime.now(UTC)).total_seconds()
+
+
+def _introspection_cache_put(token: str, required_scope: str | None, data: Any) -> None:
+    if not isinstance(data, dict):
+        return
+    ttl = _INTROSPECTION_CACHE_TTL_SECONDS
+    # Never serve a cached result past the key's own expiry.
+    remaining = _seconds_until(data.get("expires_at"))
+    if remaining is not None:
+        ttl = min(ttl, remaining)
+    if ttl <= 0:
+        return
+    if len(_introspection_cache) >= _INTROSPECTION_CACHE_MAX_ENTRIES:
+        _introspection_cache.clear()
+    _introspection_cache[_introspection_cache_key(token, required_scope)] = (
+        time.monotonic() + ttl,
+        dict(data),
+    )
 
 
 async def introspect_managed_pat(
@@ -335,6 +488,10 @@ async def introspect_managed_pat(
     settings = get_settings()
     if not settings.managed_token_introspection_enabled():
         return JSONResponse(status_code=404, content={})
+
+    cached = _introspection_cache_get(token, required_scope)
+    if cached is not None:
+        return await _accept_introspected_token(request, token, cached)
 
     url = f"{settings.platform_api_base_url.rstrip('/')}{settings.platform_api_introspect_path}"
     payload = {"required_scope": required_scope}
@@ -352,37 +509,51 @@ async def introspect_managed_pat(
 
     if response.status_code == 200:
         data = response.json()
-        _record_auth_success(client_id=data.get("credential_id"), auth_method="api_token")
-        _set_auth_context(
-            request,
-            authenticated=True,
-            auth_method="api_token",
-            bearer_token=token,
-            client_id=data.get("credential_id"),
-            workspace_id=data.get("workspace_id"),
-            workspace_name=data.get("workspace_name"),
-            workspace_slug=data.get("workspace_slug"),
-            workspace_role=data.get("workspace_role"),
-            user_id=data.get("user_id"),
-            email=data.get("email"),
-            plan=None,
-        )
-        return JSONResponse(status_code=200, content={})
+        _introspection_cache_put(token, required_scope, data)
+        return await _accept_introspected_token(request, token, data)
 
     if response.status_code == 403:
         _record_auth_failure("insufficient_scope")
         _log_auth_failure(request, reason="insufficient_scope")
-        return _unauthorized("Insufficient token scope", required_scope=required_scope)
+        return _insufficient_scope("Insufficient token scope", scope=required_scope)
 
     if response.status_code == 401:
         return JSONResponse(status_code=404, content={})
 
     logger.warning(
-        "auth: unexpected introspection status=%s body=%s",
+        "auth: platform-api introspection returned unexpected status %s: %s",
         response.status_code,
         response.text,
     )
     return _service_unavailable("Token verification service error")
+
+
+async def _accept_introspected_token(
+    request: Request, token: str, data: dict[str, Any]
+) -> JSONResponse:
+    # API keys never reach Platform APIs as raw keys when exchange is on: Platform
+    # mints a short-lived JWT for them. Older Platform builds reject the exchange
+    # for API keys, so fall back to the key itself (previous behavior).
+    downstream_token = await _platform_bearer_token(token) or token
+    _record_auth_success(client_id=data.get("credential_id"), auth_method="api_token")
+    raw_scopes = data.get("scopes")
+    scopes = [str(item) for item in raw_scopes] if isinstance(raw_scopes, list) else []
+    _set_auth_context(
+        request,
+        authenticated=True,
+        auth_method="api_token",
+        bearer_token=downstream_token,
+        scopes=scopes,
+        client_id=data.get("credential_id"),
+        workspace_id=data.get("workspace_id"),
+        workspace_name=data.get("workspace_name"),
+        workspace_slug=data.get("workspace_slug"),
+        workspace_role=data.get("workspace_role"),
+        user_id=data.get("user_id"),
+        email=data.get("email"),
+        plan=None,
+    )
+    return JSONResponse(status_code=200, content={})
 
 
 def validate_local_pat(
@@ -418,14 +589,10 @@ def validate_local_pat(
         _log_auth_failure(request, reason="invalid_token")
         return _unauthorized("Invalid token.", required_scope=required_scope)
 
-    if (
-        required_scope is not None
-        and required_scope not in record.scopes
-        and get_settings().scopes_enforced()
-    ):
+    if required_scope is not None and required_scope not in record.scopes:
         _record_auth_failure("insufficient_scope")
         _log_auth_failure(request, reason="insufficient_scope")
-        return _unauthorized("Insufficient token scope", required_scope=required_scope)
+        return _insufficient_scope("Insufficient token scope", scope=required_scope)
 
     repo.update_last_used(token_id, now)
     _record_auth_success(client_id=token_id, auth_method="api_token")
@@ -434,6 +601,7 @@ def validate_local_pat(
         authenticated=True,
         auth_method="api_token",
         bearer_token=token,
+        scopes=list(record.scopes),
         client_id=token_id,
         workspace_id=record.workspace_id,
         user_id=request.headers.get("x-user-id"),
@@ -496,6 +664,36 @@ def _unauthorized(detail: str, *, required_scope: str | None = None) -> JSONResp
         content={"detail": detail},
         headers={"WWW-Authenticate": _www_authenticate_value(required_scope)},
     )
+
+
+def _insufficient_scope(detail: str, *, scope: str | None) -> JSONResponse:
+    """RFC 6750 §3.1: a valid token without the needed scope is 403, not 401.
+
+    401 would make MCP clients treat the token as invalid and restart sign-in;
+    403 with ``error="insufficient_scope"`` lets them request the missing scope.
+    """
+
+    settings = get_settings()
+    challenge = (
+        f'Bearer error="insufficient_scope", '
+        f'resource_metadata="{settings.mcp_resource_metadata_url}"'
+    )
+    if scope:
+        challenge += f', scope="{scope}"'
+    return JSONResponse(
+        status_code=403,
+        content={"detail": detail, "error": "insufficient_scope", "required_scope": scope},
+        headers={"WWW-Authenticate": challenge},
+    )
+
+
+def _claim_scopes(claims: dict[str, Any]) -> list[str]:
+    raw = claims.get("scope", claims.get("scp", ""))
+    if isinstance(raw, str):
+        return [item for item in raw.split() if item]
+    if isinstance(raw, list):
+        return [str(item) for item in raw]
+    return []
 
 
 def _service_unavailable(detail: str) -> JSONResponse:
@@ -568,7 +766,9 @@ def _set_auth_context(
     user_id: str | None = None,
     email: str | None = None,
     plan: str | None = None,
+    scopes: list[str] | None = None,
 ) -> None:
+    """``scopes=None`` marks an unscoped credential (legacy static PAT)."""
     context = {
         "authenticated": authenticated,
         "auth_method": auth_method,
@@ -581,6 +781,7 @@ def _set_auth_context(
         "user_id": user_id,
         "email": email,
         "plan": plan,
+        "scopes": scopes,
     }
     request.state.auth_context = context
     set_current_auth_context(context)

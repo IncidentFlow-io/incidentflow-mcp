@@ -95,7 +95,7 @@ flowchart TD
     P -->|no| L4["auth_mode = unprotected (warning)"]
 ```
 
-**Prod guard (`app.py:62-73`):** in `production`, if none of {static PAT, OAuth, managed introspection} is set and `ALLOW_UNPROTECTED_IN_PRODUCTION` is not true, the app **fails** at startup. Outside production, no auth means **UNPROTECTED** with a warning log (dev mode).
+**Prod guard (`app.py`):** in `production` the app **fails** at startup when the static `INCIDENTFLOW_PAT` is set, or when neither OAuth validation nor managed introspection is configured. There is no bypass flag. Outside production, no auth means **UNPROTECTED** with a warning log (local dev only).
 
 ---
 
@@ -303,7 +303,7 @@ The required scope is derived from the path prefix (`auth/middleware.py:_SCOPE_P
 | `/mcp/resources` | `mcp:read` |
 | `/mcp` | `mcp:read` |
 
-**Enforcement (`config.py:scopes_enforced`)**: defaults to `True` only in `production`, otherwise `False`. So in dev the scope check for local PAT is "soft" (for OAuth and managed introspection the scope logic always applies: OAuth checks the `scope` claim, introspection returns 403). On insufficient scope: `401/403` with `WWW-Authenticate: Bearer resource_metadata="...", scope="<required>"`.
+**Enforcement:** always on, in every environment and for every credential (OAuth, API keys, local PATs). For `/mcp` the required scope comes from the JSON-RPC method and tool (see `docs/permissions.md`). On insufficient scope: `403` with `WWW-Authenticate: Bearer error="insufficient_scope", resource_metadata="...", scope="<required>"`.
 
 ---
 
@@ -423,11 +423,9 @@ flowchart LR
 | `platform_api_internal_api_key` | `PLATFORM_API_INTERNAL_TOKEN` / `PLATFORM_API_INTERNAL_API_KEY` | `None` | scheme-B key |
 | `incidentflow_pat` | `INCIDENTFLOW_PAT` | `None` | static dev PAT |
 | `auth_mode` | `AUTH_MODE` | `dual` | OAuth + PAT fallback |
-| `enforce_scopes` / `scopes_enforced()` | `ENFORCE_SCOPES` | `None` becomes True in prod | scope enforcement |
 | `platform_api_timeout_seconds` | — | `5.0` | timeout for JWKS/introspect/proxy |
 | `metrics_trusted_cidrs` | `METRICS_TRUSTED_CIDRS` | `127/8,::1,10/8,172.16/12,192.168/16` | `/metrics` access without auth |
 | `openai_domain_verification_path/_token` | — | `None` | OpenAI Apps domain verification |
-| `allow_unprotected_in_production` | `ALLOW_UNPROTECTED_IN_PRODUCTION` | `False` | bypass the prod guard |
 
 For OAuth-enabled deployments, configure `OAUTH_EXPECTED_ISSUER`, `OAUTH_JWKS_URL`, `MCP_CANONICAL_RESOURCE`, and `MCP_RESOURCE_METADATA_URL` together. The issuer must be a public HTTPS origin; the resource must equal `{issuer}/mcp`, and the metadata URL must equal `{issuer}/.well-known/oauth-protected-resource`. HTTP is accepted only for a local loopback issuer (`localhost`, `127.0.0.1`, `::1`). Invalid combinations fail MCP startup. Discovery ignores client-supplied `X-Forwarded-Proto` and `X-Forwarded-Host`. If `MCP_CANONICAL_RESOURCE` is explicitly configured while JWT validation is disabled, Protected Resource metadata still publishes that canonical resource and derives its public issuer from the same origin. With neither configured, isolated local development uses the request origin.
 
@@ -442,11 +440,10 @@ The existing Helm values in `infrastructure/helm/incidentflow-mcp/values-dev.yam
 
 | # | Observation | Where | Note |
 |---|---|---|---|
-| N-1 | **Dev fail-open**: with no auth configured outside production, `/mcp` is open (warning log). In prod it is closed by the guard `app.py:62-73`. | `middleware.py:158,212` | intentional for local dev; in prod only via `ALLOW_UNPROTECTED_IN_PRODUCTION` |
+| N-1 | **Dev fail-open**: with no auth configured outside production, `/mcp` is open (warning log). In prod the startup guard refuses to run. | `middleware.py`, `app.py` | intentional for local dev; no production bypass |
 | N-2 | **Local PAT trusts `X-*` headers** for `user_id/email/workspace_name/role/plan`. | `middleware.py:396-408` | dev path; for managed/OAuth the identity comes from the AS |
 | N-3 | **JWKS falls back to the first key** if the `kid` does not match (`key is None and keys`). The signature must still verify — not a bypass, but worth being aware of. | `oauth.py:93-96` | confirm intent for a multi-key JWKS |
 | N-4 | **`_PUBLIC_PATHS` and the routes are kept in sync by hand** — a new route without updating the set defaults to authenticated (fail-closed, which is fine); the reverse is not. | `middleware.py:26-47` | coupling, document it |
-| N-5 | **Scope is not enforced outside production** for local PAT (`scopes_enforced` becomes False). | `config.py:174-178` | dev-friendly by design |
 | N-6 | **Scheme B (`X-Internal-Api-Key`) bypasses per-user authorization** — workspace isolation for grafana/slack/argocd/knowledge relies on the context MCP passes. | `platform_api/*` | verify platform-api validates `workspace_id` on `/internal/*` |
 | N-7 | **Static PAT is a single shared secret** with no scope/expiry/revoke. | `middleware.py:412` | local dev only; constant-time comparison is fine |
 

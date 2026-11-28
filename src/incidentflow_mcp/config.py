@@ -67,12 +67,6 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("INCIDENTFLOW_ENV"),
         description="IncidentFlow runtime lane. Overrides ENVIRONMENT for user-facing status.",
     )
-    allow_unprotected_in_production: bool = Field(
-        default=False,
-        description=(
-            "Allow startup in production without auth providers. Default false (fail-closed)."
-        ),
-    )
 
     # -----------------------------------------------------------------------
     # Auth
@@ -176,24 +170,6 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SHARED_DEV_KUBERNETES_CLUSTER_NAME"),
         description="Display name for the shared development Kubernetes cluster.",
     )
-
-    # When True, tokens must carry all required scopes for the endpoint they
-    # access; requests missing a scope get 403.  Defaults to True in
-    # production, False in all other environments (dev-friendly mode).
-    enforce_scopes: bool | None = Field(
-        default=None,
-        description=(
-            "Enforce token scopes on every request. "
-            "Defaults to True when ENVIRONMENT=production, False otherwise. "
-            "Override explicitly with ENFORCE_SCOPES=true|false."
-        ),
-    )
-
-    def scopes_enforced(self) -> bool:
-        """Return the effective scope-enforcement flag."""
-        if self.enforce_scopes is not None:
-            return self.enforce_scopes
-        return self.environment == "production"
 
     def runtime_environment(self) -> str:
         """Canonical lane from INCIDENTFLOW_ENV / ENVIRONMENT (ignores build metadata)."""
