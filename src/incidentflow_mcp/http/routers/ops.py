@@ -13,6 +13,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
+from incidentflow_mcp.auth.scopes import MCP_SCOPES
 from incidentflow_mcp.config import Settings
 from incidentflow_mcp.http.install_script import render_install_script
 from incidentflow_mcp.observability.metrics import METRICS_CONTENT_TYPE, render_prometheus_metrics
@@ -64,11 +65,7 @@ def _oauth_metadata(settings: Settings, request: Request, *, openid: bool = Fals
     # Public identity is configured explicitly. Proxy headers and the internal
     # ASGI scheme must not change the issuer advertised to OAuth clients.
     auth_base = _public_oauth_issuer(settings, request)
-    scopes_supported = (
-        ["openid", "email", "profile", "mcp:read", "mcp:tools:run"]
-        if openid
-        else ["mcp:read", "mcp:tools:run"]
-    )
+    scopes_supported = ["openid", "email", "profile", *MCP_SCOPES] if openid else list(MCP_SCOPES)
     payload = {
         "issuer": auth_base,
         "authorization_response_iss_parameter_supported": True,
@@ -115,7 +112,7 @@ def _protected_resource_metadata(settings: Settings, request: Request) -> dict:
         or "mcp_canonical_resource" in settings.model_fields_set
         else f"{issuer}/mcp",
         "authorization_servers": [issuer],
-        "scopes_supported": ["mcp:read", "mcp:tools:run"],
+        "scopes_supported": list(MCP_SCOPES),
     }
 
 

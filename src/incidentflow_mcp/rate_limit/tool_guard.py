@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -155,9 +156,19 @@ class ToolInvocationGuard:
                 retry_after_seconds=1,
             )
 
-        try:
-            return await asyncio.wait_for(call_next(request), timeout=timeout_seconds)
-        except TimeoutError:
+        released = False
+
+        async def release() -> None:
+            nonlocal released
+            if released:
+                return
+            released = True
+            await self._store.release_concurrency(
+                scope=concurrency_scope,
+                identity_key=concurrency_key,
+            )
+
+        def record_timeout() -> None:
             mcp_tool_timeouts_total.inc()
             record_tool_rejection(
                 reason="timeout",
@@ -172,19 +183,81 @@ class ToolInvocationGuard:
                 concurrency_key,
                 timeout_seconds,
             )
-            return tool_guard_error_response(
-                tool_call=tool_call,
-                code=ErrorCode.TIMEOUT,
-                reason="timeout",
-                limit_scope="timeout",
-                message="Tool execution timed out",
-                retry_after_seconds=None,
-            )
-        finally:
-            await self._store.release_concurrency(
-                scope=concurrency_scope,
-                identity_key=concurrency_key,
-            )
+
+        deadline = time.monotonic() + timeout_seconds
+        try:
+            response = await asyncio.wait_for(call_next(request), timeout=timeout_seconds)
+        except TimeoutError:
+            await release()
+            record_timeout()
+            return _timeout_response(tool_call)
+        except BaseException:
+            await release()
+            raise
+
+        # MCP Streamable HTTP answers tools/call with an SSE stream: ``call_next``
+        # returns as soon as headers are sent, while the tool is still running.
+        # Keep the concurrency slot and the deadline until the body is finished.
+        body_iterator = getattr(response, "body_iterator", None)
+        if body_iterator is None:
+            await release()
+            return response
+        response.body_iterator = _guarded_body(  # type: ignore[attr-defined]
+            body_iterator,
+            deadline=deadline,
+            release=release,
+            on_timeout=record_timeout,
+            timeout_event=(
+                _timeout_sse_event(tool_call)
+                if response.headers.get("content-type", "").startswith("text/event-stream")
+                else None
+            ),
+        )
+        return response
+
+
+async def _guarded_body(
+    body: AsyncIterator[Any],
+    *,
+    deadline: float,
+    release: Callable[[], Awaitable[None]],
+    on_timeout: Callable[[], None],
+    timeout_event: bytes | None,
+) -> AsyncIterator[Any]:
+    """Relay a response body, enforcing the tool deadline and releasing the slot at the end.
+
+    The slot is released exactly once: when the stream ends, when the client
+    disconnects (generator closed), or on error. If the deadline passes before a
+    JSON-RPC response was relayed, an SSE stream gets a TIMEOUT tool envelope.
+    """
+
+    iterator = body.__aiter__()
+    answered = False
+    try:
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            try:
+                chunk = await asyncio.wait_for(iterator.__anext__(), timeout=remaining)
+            except StopAsyncIteration:
+                return
+            raw = chunk if isinstance(chunk, bytes) else str(chunk).encode()
+            if b'"jsonrpc"' in raw and (b'"result"' in raw or b'"error"' in raw):
+                answered = True
+            yield chunk
+    except TimeoutError:
+        on_timeout()
+        if timeout_event is not None and not answered:
+            yield timeout_event
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if close is not None:
+            try:
+                await close()
+            except Exception:  # pragma: no cover - best effort cleanup
+                logger.debug("tool guard: closing response body failed", exc_info=True)
+        await release()
 
 
 def parse_tool_call_payload(payload: Any) -> MCPToolCall | None:
@@ -239,6 +312,34 @@ def tool_guard_error_response(
     bare HTTP 429. ``Retry-After`` is also set as a header.
     """
 
+    response_headers = dict(headers or {})
+    if retry_after_seconds is not None:
+        response_headers["Retry-After"] = str(retry_after_seconds)
+    return JSONResponse(
+        status_code=200,
+        headers=response_headers,
+        content=_guard_error_message(
+            tool_call=tool_call,
+            code=code,
+            reason=reason,
+            limit_scope=limit_scope,
+            message=message,
+            retry_after_seconds=retry_after_seconds,
+        ),
+    )
+
+
+def _guard_error_message(
+    *,
+    tool_call: MCPToolCall,
+    code: ErrorCode,
+    reason: str,
+    limit_scope: str,
+    message: str,
+    retry_after_seconds: int | None,
+) -> dict[str, Any]:
+    """JSON-RPC ``tools/call`` result carrying a guard error envelope."""
+
     details: dict[str, Any] = {
         "source": GUARD_ERROR_SOURCE,
         "reason": reason,
@@ -253,19 +354,30 @@ def tool_guard_error_response(
         retryable=True,
         details=details,
     )
-    response_headers = dict(headers or {})
-    if retry_after_seconds is not None:
-        response_headers["Retry-After"] = str(retry_after_seconds)
-    return JSONResponse(
-        status_code=200,
-        headers=response_headers,
-        content={
-            "jsonrpc": "2.0",
-            "id": tool_call.request_id,
-            "result": {
-                "content": [{"type": "text", "text": json.dumps(envelope, indent=2)}],
-                "structuredContent": envelope,
-                "isError": True,
-            },
+    return {
+        "jsonrpc": "2.0",
+        "id": tool_call.request_id,
+        "result": {
+            "content": [{"type": "text", "text": json.dumps(envelope, indent=2)}],
+            "structuredContent": envelope,
+            "isError": True,
         },
-    )
+    }
+
+
+_TIMEOUT_FIELDS: dict[str, Any] = {
+    "code": ErrorCode.TIMEOUT,
+    "reason": "timeout",
+    "limit_scope": "timeout",
+    "message": "Tool execution timed out",
+    "retry_after_seconds": None,
+}
+
+
+def _timeout_response(tool_call: MCPToolCall) -> JSONResponse:
+    return tool_guard_error_response(tool_call=tool_call, **_TIMEOUT_FIELDS)
+
+
+def _timeout_sse_event(tool_call: MCPToolCall) -> bytes:
+    payload = _guard_error_message(tool_call=tool_call, **_TIMEOUT_FIELDS)
+    return b"event: message\ndata: " + json.dumps(payload).encode() + b"\n\n"

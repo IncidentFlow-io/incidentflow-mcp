@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
+import copy
+import hashlib
+import time
+from typing import Any, ClassVar
 
 import httpx
 
@@ -11,13 +14,36 @@ from incidentflow_mcp.observability.tracing import get_tracer, inject_trace_head
 class PlatformAPIAgentCommandsClient:
     """Thin HTTP client for sending read-only Kubernetes agent commands through platform-api."""
 
+    # Every Kubernetes tool resolves its cluster from this list before dispatching.
+    # A short per-caller TTL removes that platform round-trip (a full security
+    # context resolution upstream) from back-to-back calls; the command dispatch
+    # still checks that the agent is online.
+    CLUSTERS_CACHE_TTL_SECONDS: ClassVar[float] = 10.0
+    _clusters_cache: ClassVar[dict[str, tuple[float, list[dict[str, Any]]]]] = {}
+
     def __init__(self, settings: Settings) -> None:
         if not settings.platform_api_base_url:
             raise ValueError("PLATFORM_API_BASE_URL is required for Kubernetes agent tools")
         self._base_url = settings.platform_api_base_url.rstrip("/")
         self._timeout = settings.platform_api_timeout_seconds
 
+    @classmethod
+    def clear_cache(cls) -> None:
+        cls._clusters_cache.clear()
+
     async def list_clusters(self, *, bearer_token: str) -> list[dict[str, Any]]:
+        key = hashlib.sha256(f"{self._base_url}|{bearer_token}".encode()).hexdigest()
+        now = time.monotonic()
+        cached = self._clusters_cache.get(key)
+        if cached is not None and cached[0] > now:
+            return copy.deepcopy(cached[1])
+        clusters = await self._fetch_clusters(bearer_token=bearer_token)
+        if len(self._clusters_cache) >= 1024:
+            self._clusters_cache.clear()
+        self._clusters_cache[key] = (now + self.CLUSTERS_CACHE_TTL_SECONDS, copy.deepcopy(clusters))
+        return clusters
+
+    async def _fetch_clusters(self, *, bearer_token: str) -> list[dict[str, Any]]:
         tracer = get_tracer()
         with tracer.start_as_current_span("platform_api.agent_lookup") as span:
             span.set_attribute("http.method", "GET")

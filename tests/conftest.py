@@ -230,3 +230,23 @@ def _reset_integration_status_cache():
     IntegrationStatusService.clear_cache()
     yield
     IntegrationStatusService.clear_cache()
+
+
+@pytest.fixture(autouse=True)
+def _reset_platform_call_caches():
+    """Cluster list and token-exchange results are cached briefly; isolate tests."""
+    from incidentflow_mcp.auth.middleware import (
+        clear_introspection_cache,
+        clear_token_exchange_cache,
+    )
+    from incidentflow_mcp.platform_api.agent_commands_client import (
+        PlatformAPIAgentCommandsClient,
+    )
+
+    PlatformAPIAgentCommandsClient.clear_cache()
+    clear_token_exchange_cache()
+    clear_introspection_cache()
+    yield
+    PlatformAPIAgentCommandsClient.clear_cache()
+    clear_token_exchange_cache()
+    clear_introspection_cache()
